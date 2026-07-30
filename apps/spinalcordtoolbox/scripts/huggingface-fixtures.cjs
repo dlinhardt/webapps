@@ -7,6 +7,9 @@ const fixtures = require('./batch-parity-fixtures.cjs');
 
 const DEFAULT_HF_DATASET_REPO = 'sbollmann/sct-webapp-data';
 const DEFAULT_HF_REVISION = 'main';
+const DEFAULT_MAX_DOWNLOAD_RETRIES = 3;
+const DEFAULT_RETRY_BASE_DELAY_MS = 250;
+const MAX_DOWNLOAD_REDIRECTS = 5;
 const SCT_TESTING_DATA_RAW_BASE = 'https://raw.githubusercontent.com/spinalcordtoolbox/sct_testing_data/master';
 const SCT_TESTING_DATA_FIXTURE_MAP = Object.freeze({
   'test_data/batch_t2_deepseg_lesion_sci_t2/input.nii.gz': 't2/t2_fake_lesion.nii.gz',
@@ -60,16 +63,35 @@ async function ensureSctBatchFixtures(rootDir, options = {}) {
 
 function downloadHfFile(repoId, revision, relativePath, destination) {
   const url = `https://huggingface.co/datasets/${repoId}/resolve/${encodeURIComponent(revision)}/${relativePath}`;
-  return download(url, destination, 0);
+  return download(url, destination);
 }
 
 function downloadSctTestingDataFile(relativePath, destination) {
   const url = `${SCT_TESTING_DATA_RAW_BASE}/${relativePath}`;
-  return download(url, destination, 0);
+  return download(url, destination);
 }
 
-function download(url, destination, redirectCount) {
-  if (redirectCount > 5) {
+function download(url, destination, options = {}) {
+  const settings = {
+    maxRetries: options.maxRetries ?? DEFAULT_MAX_DOWNLOAD_RETRIES,
+    retryBaseDelayMs: options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS
+  };
+  return downloadAttempt(url, destination, 0, 0, settings);
+}
+
+function isRetryableStatus(statusCode) {
+  return statusCode === 429 || statusCode >= 500;
+}
+
+function retryDownload(url, destination, redirectCount, retryCount, settings, resolve, reject) {
+  const delayMs = settings.retryBaseDelayMs * (2 ** retryCount);
+  setTimeout(() => {
+    downloadAttempt(url, destination, redirectCount, retryCount + 1, settings).then(resolve, reject);
+  }, delayMs);
+}
+
+function downloadAttempt(url, destination, redirectCount, retryCount, settings) {
+  if (redirectCount > MAX_DOWNLOAD_REDIRECTS) {
     return Promise.reject(new Error(`Too many redirects while downloading ${url}`));
   }
   return new Promise((resolve, reject) => {
@@ -78,11 +100,15 @@ function download(url, destination, redirectCount) {
       if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
         response.resume();
         const nextUrl = new URL(response.headers.location, url).toString();
-        download(nextUrl, destination, redirectCount + 1).then(resolve, reject);
+        downloadAttempt(nextUrl, destination, redirectCount + 1, retryCount, settings).then(resolve, reject);
         return;
       }
       if (statusCode !== 200) {
         response.resume();
+        if (isRetryableStatus(statusCode) && retryCount < settings.maxRetries) {
+          retryDownload(url, destination, redirectCount, retryCount, settings, resolve, reject);
+          return;
+        }
         reject(new Error(`Failed to download ${url}: HTTP ${statusCode}`));
         return;
       }
@@ -106,7 +132,13 @@ function download(url, destination, redirectCount) {
         reject(error);
       });
     });
-    request.on('error', reject);
+    request.on('error', error => {
+      if (retryCount < settings.maxRetries) {
+        retryDownload(url, destination, redirectCount, retryCount, settings, resolve, reject);
+        return;
+      }
+      reject(error);
+    });
   });
 }
 
@@ -114,6 +146,7 @@ module.exports = {
   DEFAULT_HF_DATASET_REPO,
   DEFAULT_HF_REVISION,
   SCT_TESTING_DATA_FIXTURE_MAP,
+  download,
   ensureSctBatchFixtures,
   hasSctBatchFixtures,
   missingSctFixturePaths,
