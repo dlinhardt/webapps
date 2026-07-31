@@ -58,7 +58,7 @@ await mkdir(fixtureDir, { recursive: true });
 
 for (const file of FILES) {
   const target = join(fixtureDir, file.name);
-  if (await exists(target) && !process.env.SURFMARK_FIXTURE_FORCE) {
+  if (await exists(target) && !process.env.SURFANNOTATE_FIXTURE_FORCE) {
     console.log(`have ${file.name}`);
     continue;
   }

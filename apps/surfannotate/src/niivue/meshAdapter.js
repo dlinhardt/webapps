@@ -134,7 +134,7 @@ export function attachLabelLayer(mesh, values, entries) {
 
   mesh.layers.push({
     ...NVMeshLayerDefaults,
-    name: 'surfmark-roi',
+    name: 'surfannotate-roi',
     values,
     nFrame4D: 1,
     frame4D: 0,

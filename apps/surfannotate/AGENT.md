@@ -1,4 +1,4 @@
-# SurfMark — agent notes
+# SurfAnnotate — agent notes
 
 ## Architecture
 
@@ -16,7 +16,7 @@ src/
     meshAdapter.js          Loading, picking, layers, overlays
     colormaps.js            Colour maps NiiVue does not ship
   io/                       File writers/readers, pure and unit-tested
-    freesurferLabel.js, gifti.js, points.js
+    freesurferLabel.js, gifti.js, points.js, naming.js
 ```
 
 The split matters: `surface/` and `io/` run under plain `node --test` with no browser,
@@ -36,6 +36,11 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 - **Flood fill must only ever walk the 1-ring graph.** Augmenting it (unfolded 2-ring
   edges, k-ring neighbourhoods) adds edges that cross faces, so the fill hops the
   barrier and swallows the hemisphere. Validate the chain before filling.
+- **Exports are named `<hemisphere>.<roi>`, never after the source surface.** See
+  `io/naming.js`. An ROI drawn on `lh.sphere.reg` is valid on any surface sharing that
+  vertex indexing, so `lh.sphere.reg.surf.V1.label` would misrepresent it.
+  `writeGiftiShape` in `io/gifti.js` is currently unused — the `.shape.gii` button was
+  removed — but is kept and tested because it is a general format writer.
 - **Never trust a fill that covers more than 40% of the surface** — that is a gap in
   the boundary, not a large ROI. Refuse and tell the user.
 
@@ -67,9 +72,9 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 
 | Command | Covers |
 | --- | --- |
-| `pnpm --filter surfmark test` | `surface/` and `io/` — adjacency, A*, chain validation, fill (including escape and figure-eight cases), hatching, vertex lookup vs brute force, ROI session contract, every file writer |
-| `pnpm --filter surfmark test:e2e` | Real Chromium with SwiftShader: shell mount, WebGL2, surface load and index, picking, draw→close→fill→export, drag-and-drop, click-vs-drag, overlay window, marker lifecycle, colour map and range, ROI naming |
-| `pnpm --filter surfmark lint` | `node --check` over every JS file |
+| `pnpm --filter surfannotate test` | `surface/` and `io/` — adjacency, A*, chain validation, fill (including escape and figure-eight cases), hatching, vertex lookup vs brute force, ROI session contract, every file writer |
+| `pnpm --filter surfannotate test:e2e` | Real Chromium with SwiftShader: shell mount, WebGL2, surface load and index, picking, draw→close→fill→export, drag-and-drop, click-vs-drag, overlay window, marker lifecycle, colour map and range, ROI naming |
+| `pnpm --filter surfannotate lint` | `node --check` over every JS file |
 
 **When adding an e2e test, verify it fails without the fix.** Two drag-and-drop tests
 here passed against broken code — one dispatched events on the wrong element, and the

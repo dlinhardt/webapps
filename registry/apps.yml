@@ -209,9 +209,9 @@ apps:
       toolchains: [node]
       shared_runtime: true
       release: true
-  - id: surfmark
-    path: surfmark
-    title: SurfMark
+  - id: surfannotate
+    path: surfannotate
+    title: SurfAnnotate
     description: Cortical surface viewer with manual ROI delineation and vertex selection.
     legacy_domain: null
     runtime: vite-webgpu

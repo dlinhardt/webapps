@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 // The composite site serves each app from its own path; standalone builds and
 // `vite preview` use the same relative default the other Vite apps here use.
 export default defineConfig({
-  base: process.env.WEBAPPS_BASE_PATH || '/surfmark/',
+  base: process.env.WEBAPPS_BASE_PATH || '/surfannotate/',
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 2048 // NiiVue is a single large chunk by design

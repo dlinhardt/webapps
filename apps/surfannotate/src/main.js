@@ -17,8 +17,9 @@ import {
 } from './niivue/meshAdapter.js';
 
 import { writeFreeSurferLabel } from './io/freesurferLabel.js';
-import { writeGiftiLabel, writeGiftiShape, maskToLabelArray, maskToFloatArray } from './io/gifti.js';
+import { writeGiftiLabel, maskToLabelArray } from './io/gifti.js';
 import { writePointsJson, hashTriangles } from './io/points.js';
+import { exportStem as buildExportStem } from './io/naming.js';
 
 // Label keys painted into the ROI layer.
 const LABEL_NONE = 0;
@@ -63,7 +64,6 @@ const ui = {
   roiName: el('roiName'),
   exportLabel: el('exportLabel'),
   exportGifti: el('exportGifti'),
-  exportShape: el('exportShape'),
   exportPoints: el('exportPoints'),
   statusText: el('statusText'),
   vertexReadout: el('vertexReadout'),
@@ -77,7 +77,7 @@ mountImagingWorkspace({
   controls: el('controls'),
   viewer: el('viewer'),
   status: el('status'),
-  title: 'SurfMark',
+  title: 'SurfAnnotate',
   subtitle: 'Surface ROIs and vertex selection',
   mark: 'S' // a 30x30 badge — one glyph, not a tagline
 });
@@ -266,8 +266,7 @@ async function init() {
   ui.roiName.addEventListener('input', showExportName);
 
   ui.exportLabel.addEventListener('click', exportFreeSurferLabel);
-  ui.exportGifti.addEventListener('click', () => exportGifti('label'));
-  ui.exportShape.addEventListener('click', () => exportGifti('shape'));
+  ui.exportGifti.addEventListener('click', exportGiftiLabel);
   ui.exportPoints.addEventListener('click', exportPoints);
 
   document.addEventListener('keydown', (event) => {
@@ -355,7 +354,7 @@ async function loadSurface(file) {
   } catch (error) {
     // Surface it in the UI *and* the console — a parse failure deep inside
     // NiiVue is otherwise silent and looks like "nothing happened".
-    console.error('surfmark: failed to load surface', error);
+    console.error('surfannotate: failed to load surface', error);
     setStatus(
       `Could not read ${file.name} as a surface mesh: ${error.message}. ` +
       'Supported: FreeSurfer (lh.pial, lh.white, lh.inflated), GIfTI .surf.gii, ' +
@@ -390,7 +389,7 @@ async function addOverlay(file) {
     );
     repaint();
   } catch (error) {
-    console.error('surfmark: failed to load overlay', error);
+    console.error('surfannotate: failed to load overlay', error);
     setStatus(`Could not load overlay ${file.name}: ${error.message}`);
   }
 }
@@ -398,7 +397,7 @@ async function addOverlay(file) {
 /** Keep the ROI layer above any overlay so the boundary stays visible. */
 function reattachRoiLayer() {
   const mesh = state.mesh;
-  const existing = mesh.layers.findIndex((layer) => layer.name === 'surfmark-roi');
+  const existing = mesh.layers.findIndex((layer) => layer.name === 'surfannotate-roi');
   if (existing >= 0) mesh.layers.splice(existing, 1);
   state.layerIndex = attachLabelLayer(mesh, state.labelValues, currentLabelTable());
 }
@@ -576,7 +575,7 @@ function paintLabels() {
   }
   for (const point of session.points) markVertexAndRing(point.vertex, LABEL_POINT);
 
-  const roiLayer = state.mesh.layers.find((layer) => layer.name === 'surfmark-roi');
+  const roiLayer = state.mesh.layers.find((layer) => layer.name === 'surfannotate-roi');
   if (roiLayer) roiLayer.colormapLabel = makeLabelLut(currentLabelTable());
 
   commitLayer(state.nv, state.mesh);
@@ -611,7 +610,6 @@ function syncControls() {
   const exportable = hasRegion || session.chain.length > 0;
   ui.exportLabel.disabled = !exportable;
   ui.exportGifti.disabled = !exportable;
-  ui.exportShape.disabled = !exportable;
   ui.exportPoints.disabled = !hasPoints;
 
   ui.pointList.innerHTML = '';
@@ -643,19 +641,16 @@ function roiName() {
   return ui.roiName.value.trim() || 'roi';
 }
 
-/** Make a name safe to hand to a download attribute across platforms. */
-function fileSafe(value) {
-  return value
-    .replace(/[\\/:*?"<>|]+/g, '-')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[-.]+|[-.]+$/g, '')
-    .slice(0, 64) || 'roi';
-}
-
-/** `<surface>.<roi>` — identifies both what was drawn and what it was drawn on. */
+/**
+ * `lh.V1` — the hemisphere, not the source surface. An ROI drawn on
+ * lh.sphere.reg applies to lh.white and lh.pial too, so carrying the whole
+ * source filename into the name would be misleading as well as unwieldy.
+ */
 function exportStem() {
-  return `${fileSafe(baseName())}.${fileSafe(roiName())}`;
+  return buildExportStem(roiName(), {
+    anatomicalStructure: state.mesh?.anatomicalStructurePrimary || '',
+    filename: state.sourceName || ''
+  });
 }
 
 function exportFreeSurferLabel() {
@@ -669,16 +664,13 @@ function exportFreeSurferLabel() {
   setStatus(`Exported ${indices.length.toLocaleString()} vertices as ${filename}.`);
 }
 
-async function exportGifti(kind) {
-  const mask = maskFromSession();
+async function exportGiftiLabel() {
   const name = roiName();
-  const filename = `${exportStem()}.${kind === 'label' ? 'label' : 'shape'}.gii`;
-  const xml = kind === 'label'
-    ? await writeGiftiLabel(maskToLabelArray(mask, LABEL_REGION), [
-      { key: LABEL_NONE, name: '???', rgba: [0, 0, 0, 0] },
-      { key: LABEL_REGION, name, rgba: [0.9, 0.2, 0.2, 1] }
-    ], { arrayName: name })
-    : await writeGiftiShape(maskToFloatArray(mask), { arrayName: name });
+  const filename = `${exportStem()}.label.gii`;
+  const xml = await writeGiftiLabel(maskToLabelArray(maskFromSession(), LABEL_REGION), [
+    { key: LABEL_NONE, name: '???', rgba: [0, 0, 0, 0] },
+    { key: LABEL_REGION, name, rgba: [0.9, 0.2, 0.2, 1] }
+  ], { arrayName: name });
 
   download(filename, xml, 'application/xml');
   setStatus(`Exported ${filename}.`);
@@ -707,12 +699,11 @@ init().catch((error) => setStatus(`Startup failed: ${error.message}`));
 // Exposed for the e2e smoke test, which drives the pipeline without a mouse.
 // The serialisers are re-exported here because the production build bundles the
 // modules, so the test cannot import them by path.
-window.__surfmark = state;
-window.__surfmarkIo = {
-  writeFreeSurferLabel, writeGiftiLabel, writeGiftiShape,
-  maskToLabelArray, maskToFloatArray, writePointsJson
+window.__surfannotate = state;
+window.__surfannotateIo = {
+  writeFreeSurferLabel, writeGiftiLabel, maskToLabelArray, writePointsJson
 };
 // The same actions the buttons invoke, so a test can drive the real code path
 // (including the repaint and control-state sync) without synthesising a click
 // that has to land on a specific vertex in the 3D view.
-window.__surfmarkUi = { repaint, runFill, setMode, loadSurface, addOverlay };
+window.__surfannotateUi = { repaint, runFill, setMode, loadSurface, addOverlay };

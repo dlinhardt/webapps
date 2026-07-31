@@ -21,7 +21,7 @@ export default defineConfig({
   workers: 1,
   reporter: process.env.CI ? 'line' : 'list',
   use: {
-    baseURL: `http://${HOST}:${PORT}/surfmark/`,
+    baseURL: `http://${HOST}:${PORT}/surfannotate/`,
     viewport: { width: 1280, height: 800 }
   },
   projects: [
@@ -44,7 +44,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `pnpm build && pnpm preview --port ${PORT} --strictPort --host ${HOST}`,
-    url: `http://${HOST}:${PORT}/surfmark/`,
+    url: `http://${HOST}:${PORT}/surfannotate/`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000
   }

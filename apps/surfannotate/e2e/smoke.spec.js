@@ -33,13 +33,13 @@ test('the shell mounts with the shared workspace and a link back to the catalog'
 
 test('the empty canvas shows no phantom loading text', async ({ page }) => {
   // NiiVue paints "loading ..." over an empty canvas unless the option is cleared.
-  expect(await page.evaluate(() => window.__surfmark.nv.opts.loadingText)).toBe('');
+  expect(await page.evaluate(() => window.__surfannotate.nv.opts.loadingText)).toBe('');
 });
 
 test('WebGL2 is available and NiiVue attaches', async ({ page }) => {
   const info = await page.evaluate(() => {
     const gl = document.getElementById('gl').getContext('webgl2');
-    return { hasContext: Boolean(gl), attached: Boolean(window.__surfmark?.nv) };
+    return { hasContext: Boolean(gl), attached: Boolean(window.__surfannotate?.nv) };
   });
   expect(info.hasContext).toBe(true);
   expect(info.attached).toBe(true);
@@ -49,7 +49,7 @@ test('a FreeSurfer surface loads and is indexed', async ({ page }) => {
   await loadSurface(page);
 
   const geometry = await page.evaluate(() => {
-    const s = window.__surfmark;
+    const s = window.__surfannotate;
     return {
       vertices: s.geometry.vertexCount,
       triangles: s.geometry.triangles.length / 3,
@@ -74,7 +74,7 @@ test('clicking the rendered surface resolves to a vertex', async ({ page }) => {
 
   // Drive NiiVue's depth picker the way the app does, at the centre of the canvas.
   const hit = await page.evaluate(() => {
-    const s = window.__surfmark;
+    const s = window.__surfannotate;
     const canvas = document.getElementById('gl');
     const rect = canvas.getBoundingClientRect();
     const dpr = s.nv.uiData?.dpr || 1;
@@ -99,7 +99,7 @@ test('draw, close and fill a closed ROI, then export it', async ({ page }) => {
   await loadSurface(page);
 
   const result = await page.evaluate(async () => {
-    const s = window.__surfmark;
+    const s = window.__surfannotate;
     const { graph, session } = s;
 
     // Walk a ring of vertices roughly 12 edges apart to stand in for clicks.
@@ -148,7 +148,7 @@ test('draw, close and fill a closed ROI, then export it', async ({ page }) => {
 
   // The boundary chain must stay walkable along mesh edges, or the fill leaks.
   const contiguous = await page.evaluate(() => {
-    const { graph, session } = window.__surfmark;
+    const { graph, session } = window.__surfannotate;
     for (let i = 0; i < session.chain.length - 1; i++) {
       const a = session.chain[i], b = session.chain[i + 1];
       let ok = false;
@@ -163,8 +163,8 @@ test('draw, close and fill a closed ROI, then export it', async ({ page }) => {
 
   // Exported .label must carry the documented header and one line per vertex.
   const label = await page.evaluate(() => {
-    const { session, geometry } = window.__surfmark;
-    return window.__surfmarkIo.writeFreeSurferLabel(
+    const { session, geometry } = window.__surfannotate;
+    return window.__surfannotateIo.writeFreeSurferLabel(
       session.regionIndices(), geometry.positions, { name: 'e2e', subject: 'lh' }
     );
   });
@@ -176,10 +176,10 @@ test('draw, close and fill a closed ROI, then export it', async ({ page }) => {
 
   // And the GIfTI export must be well-formed XML with the label table first.
   const gifti = await page.evaluate(async () => {
-    const { session, geometry } = window.__surfmark;
+    const { session, geometry } = window.__surfannotate;
     const mask = session.filled || new Uint8Array(geometry.vertexCount);
-    return window.__surfmarkIo.writeGiftiLabel(
-      window.__surfmarkIo.maskToLabelArray(mask, 2),
+    return window.__surfannotateIo.writeGiftiLabel(
+      window.__surfannotateIo.maskToLabelArray(mask, 2),
       [{ key: 0, name: '???', rgba: [0, 0, 0, 0] },
         { key: 2, name: 'roi', rgba: [0.9, 0.2, 0.2, 1] }]
     );
@@ -192,8 +192,8 @@ test('a gap in the boundary is refused rather than flooding the surface', async 
   await loadSurface(page);
 
   const outcome = await page.evaluate(() => {
-    const { graph, session, geometry } = window.__surfmark;
-    const { fillClosedRegion } = window.__surfmarkFill || {};
+    const { graph, session, geometry } = window.__surfannotate;
+    const { fillClosedRegion } = window.__surfannotateFill || {};
     session.clearRoi();
 
     // Build a closed ring, then punch a hole in it.
@@ -216,7 +216,7 @@ test('a gap in the boundary is refused rather than flooding the surface', async 
   if (outcome.ok) {
     const count = await page.evaluate(() => {
       let n = 0;
-      const f = window.__surfmark.session.filled;
+      const f = window.__surfannotate.session.filled;
       for (let i = 0; i < f.length; i++) if (f[i]) n++;
       return n;
     });
@@ -230,13 +230,13 @@ test('landmark selection toggles and exports', async ({ page }) => {
   await loadSurface(page);
 
   const result = await page.evaluate(() => {
-    const { session, geometry } = window.__surfmark;
+    const { session, geometry } = window.__surfannotate;
     session.setMode('points');
     session.togglePoint(1000, 'V1');
     session.togglePoint(2000, 'MT');
     session.togglePoint(1000); // toggling the same vertex removes it
 
-    const json = window.__surfmarkIo.writePointsJson(session.points, geometry.positions, {
+    const json = window.__surfannotateIo.writePointsJson(session.points, geometry.positions, {
       numVertices: geometry.vertexCount,
       numTriangles: geometry.triangles.length / 3
     });
@@ -251,7 +251,7 @@ test('landmark selection toggles and exports', async ({ page }) => {
 
 test('dragging to rotate does not place a landmark', async ({ page }) => {
   await loadSurface(page);
-  await page.evaluate(() => window.__surfmarkUi.setMode('points'));
+  await page.evaluate(() => window.__surfannotateUi.setMode('points'));
 
   const box = await page.locator('#gl').boundingBox();
   const cx = box.x + box.width / 2;
@@ -262,14 +262,14 @@ test('dragging to rotate does not place a landmark', async ({ page }) => {
   await page.mouse.down();
   for (let i = 1; i <= 10; i++) await page.mouse.move(cx + i * 8, cy + i * 3);
   await page.mouse.up();
-  expect(await page.evaluate(() => window.__surfmark.session.points.length)).toBe(0);
+  expect(await page.evaluate(() => window.__surfannotate.session.points.length)).toBe(0);
 
   // A press that stays put is a click.
   await page.mouse.move(cx, cy);
   await page.mouse.down();
   await page.mouse.up();
   await expect
-    .poll(() => page.evaluate(() => window.__surfmark.session.points.length))
+    .poll(() => page.evaluate(() => window.__surfannotate.session.points.length))
     .toBe(1);
 });
 
@@ -281,7 +281,7 @@ test('a curvature overlay loads with a usable display window', async ({ page }) 
   });
 
   const layer = await page.evaluate(() => {
-    const overlay = window.__surfmark.overlayLayer;
+    const overlay = window.__surfannotate.overlayLayer;
     return {
       values: overlay.values.length,
       calMin: overlay.cal_min,
@@ -303,10 +303,10 @@ test('border markers hide once filled and return after undo', async ({ page }) =
   await loadSurface(page);
 
   const countMarkers = () => page.evaluate(() =>
-    Array.from(window.__surfmark.labelValues).filter((v) => v === 4).length);
+    Array.from(window.__surfannotate.labelValues).filter((v) => v === 4).length);
 
   await page.evaluate(() => {
-    const { graph, session } = window.__surfmark;
+    const { graph, session } = window.__surfannotate;
     const step = (from) => {
       let frontier = [from];
       const seen = new Uint8Array(graph.V);
@@ -326,22 +326,22 @@ test('border markers hide once filled and return after undo', async ({ page }) =
     let v = 60000;
     for (let i = 0; i < 8; i++) { session.addClick(v); v = step(v); }
     session.closePath();
-    window.__surfmarkUi.repaint();
+    window.__surfannotateUi.repaint();
   });
   expect(await countMarkers()).toBeGreaterThan(0);
 
   // The markers are painted with their 1-ring so they are visible, which makes
   // them wider than the ROI itself — misleading once a region exists.
-  await page.evaluate(() => window.__surfmarkUi.runFill(-1));
+  await page.evaluate(() => window.__surfannotateUi.runFill(-1));
   expect(await countMarkers()).toBe(0);
 
-  await page.evaluate(() => { window.__surfmark.session.undoClick(); window.__surfmarkUi.repaint(); });
+  await page.evaluate(() => { window.__surfannotate.session.undoClick(); window.__surfannotateUi.repaint(); });
   expect(await countMarkers()).toBeGreaterThan(0);
 });
 
 test('gist_rainbow is registered and the colour range is adjustable', async ({ page }) => {
   await loadSurface(page);
-  expect(await page.evaluate(() => window.__surfmark.nv.colormaps().includes('gist_rainbow')))
+  expect(await page.evaluate(() => window.__surfannotate.nv.colormaps().includes('gist_rainbow')))
     .toBe(true);
 
   await page.setInputFiles('#overlayInput', join(FIXTURES, 'lh.curv'));
@@ -357,7 +357,7 @@ test('gist_rainbow is registered and the colour range is adjustable', async ({ p
   await page.press('#overlayMax', 'Enter');
 
   expect(await page.evaluate(() => {
-    const layer = window.__surfmark.overlayLayer;
+    const layer = window.__surfannotate.overlayLayer;
     return { colormap: layer.colormap, min: layer.cal_min, max: layer.cal_max };
   })).toEqual({ colormap: 'gist_rainbow', min: 0.4, max: 0.6 });
 
@@ -400,7 +400,7 @@ test('a surface dropped on the viewer loads', async ({ page }) => {
   await expect(page.locator('#statusText')).toContainText('163,842 vertices', {
     timeout: 90_000
   });
-  expect(await page.evaluate(() => window.__surfmark.geometry.vertexCount)).toBe(163842);
+  expect(await page.evaluate(() => window.__surfannotate.geometry.vertexCount)).toBe(163842);
   expect(await page.locator('#dropHint').isVisible()).toBe(false);
   expect(errors).toEqual([]);
 });
@@ -411,7 +411,7 @@ test('the ROI name reaches the file name and the file contents', async ({ page }
   await page.dispatchEvent('#roiName', 'input');
 
   await page.evaluate(() => {
-    const { graph, session } = window.__surfmark;
+    const { graph, session } = window.__surfannotate;
     const step = (from) => {
       let frontier = [from];
       const seen = new Uint8Array(graph.V);
@@ -431,7 +431,7 @@ test('the ROI name reaches the file name and the file contents', async ({ page }
     let v = 60000;
     for (let i = 0; i < 8; i++) { session.addClick(v); v = step(v); }
     session.closePath();
-    window.__surfmarkUi.runFill(-1);
+    window.__surfannotateUi.runFill(-1);
   });
 
   const [download] = await Promise.all([
@@ -441,12 +441,22 @@ test('the ROI name reaches the file name and the file contents', async ({ page }
   // Characters illegal in file names are replaced, but the name the user typed
   // is preserved verbatim inside the file.
   expect(download.suggestedFilename()).toBe('lh.V1-left-hemi.label');
+  // Named for the hemisphere, not for lh.pial specifically — the ROI applies to
+  // any surface sharing that vertex indexing.
+  expect(download.suggestedFilename()).not.toContain('pial');
 
   const stream = await download.createReadStream();
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   const header = Buffer.concat(chunks).toString('utf8').split('\n')[0];
   expect(header).toBe('#!ascii label V1 / left*hemi , from subject lh vox2ras=TkReg');
+});
+
+test('the .shape.gii export is gone', async ({ page }) => {
+  await expect(page.locator('#exportShape')).toHaveCount(0);
+  await expect(page.locator('#exportLabel')).toHaveCount(1);
+  await expect(page.locator('#exportGifti')).toHaveCount(1);
+  await expect(page.locator('#exportPoints')).toHaveCount(1);
 });
 
 test('the surface renders visibly', async ({ page }) => {

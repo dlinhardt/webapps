@@ -36,7 +36,7 @@ export function registerExtraColormaps(nv) {
       nv.addColormap(key, cmap);
       registered.push(key);
     } catch (error) {
-      console.warn(`surfmark: could not register colormap "${key}"`, error);
+      console.warn(`surfannotate: could not register colormap "${key}"`, error);
     }
   }
   return registered;
