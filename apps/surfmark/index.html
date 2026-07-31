@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SurfMark — Neurodesk</title>
+    <meta name="description" content="Cortical surface viewer with manual ROI delineation and vertex selection. Runs entirely in your browser." />
+  </head>
+  <body>
+    <div id="app">
+      <div id="controls">
+        <section class="panel">
+          <h2>Surface</h2>
+          <label class="file-field">
+            <span>Surface mesh</span>
+            <!-- Deliberately unfiltered: FreeSurfer surfaces have irregular
+                 names (lh.pial, lh.white, lh.pial.T1, surf.gii.gz), and an
+                 accept list greys out exactly the files people want. The
+                 loader validates instead. -->
+            <input type="file" id="surfaceInput" />
+          </label>
+          <p class="hint">FreeSurfer (lh.pial, lh.white, lh.inflated), GIfTI .surf.gii, .mz3 and more.</p>
+
+          <label class="file-field">
+            <span>Overlay <small>(optional)</small></span>
+            <input type="file" id="overlayInput" disabled />
+          </label>
+          <p class="hint">Curvature, thickness, .annot, .label.gii, .shape.gii, CIFTI .dscalar.nii.</p>
+
+          <div class="row">
+            <label for="overlayColormap">Colour map</label>
+            <select id="overlayColormap" disabled>
+              <option value="gray">gray</option>
+              <option value="bone">bone</option>
+              <option value="viridis">viridis</option>
+              <option value="plasma">plasma</option>
+              <option value="warm">warm</option>
+              <option value="cool">cool</option>
+              <option value="hot">hot</option>
+              <option value="jet">jet</option>
+              <option value="gist_rainbow">gist_rainbow</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="overlayOpacity">Overlay opacity</label>
+            <input type="range" id="overlayOpacity" min="0" max="1" step="0.05" value="1" disabled />
+          </div>
+          <div class="row range-row">
+            <label for="overlayMin">Range</label>
+            <input type="number" id="overlayMin" step="any" disabled aria-label="Colour range minimum" />
+            <span class="range-sep">to</span>
+            <input type="number" id="overlayMax" step="any" disabled aria-label="Colour range maximum" />
+            <button type="button" id="overlayRangeReset" class="mini" disabled
+                    title="Back to the 2nd-98th percentile of the data">Auto</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Tool</h2>
+          <div class="segmented" role="radiogroup" aria-label="Drawing tool">
+            <button type="button" id="modeRoi" class="active" role="radio" aria-checked="true">Closed ROI</button>
+            <button type="button" id="modePoints" role="radio" aria-checked="false">Points</button>
+          </div>
+
+          <div id="roiControls">
+            <p class="hint">
+              Click to place border points around the region. Nothing is traced
+              until you close the ROI, so you can rotate freely while placing them.
+            </p>
+            <p class="hint note">
+              Points are joined <strong>in the order you place them</strong>, not by
+              which are nearest each other. Work consistently around the border in
+              one direction; the last point is joined back to the first.
+            </p>
+            <div class="button-row">
+              <button type="button" id="undoPoint" disabled>Undo point</button>
+              <button type="button" id="closePath" disabled>Close ROI</button>
+            </div>
+            <div class="button-row">
+              <button type="button" id="fillRegion" class="primary" disabled>Fill region</button>
+              <button type="button" id="clearRoi" disabled>Clear</button>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="includeBoundary" />
+              <span>Include boundary vertices</span>
+            </label>
+            <div class="row">
+              <label for="fillStyle">Fill style</label>
+              <select id="fillStyle">
+                <option value="solid">Solid</option>
+                <option value="hatched">Hatched</option>
+                <option value="outline">Outline only</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="roiOpacity">ROI opacity</label>
+              <input type="range" id="roiOpacity" min="0.05" max="1" step="0.05" value="0.55" />
+              <span class="readout" id="roiOpacityValue">0.55</span>
+            </div>
+            <p class="hint" id="fillHint">
+              The interior is detected automatically. If both sides are large you will be asked
+              to click inside the region you want.
+            </p>
+          </div>
+
+          <div id="pointControls" hidden>
+            <p class="hint">Click to place a landmark. Click an existing one to remove it.</p>
+            <div class="button-row">
+              <button type="button" id="undoPointSelection" disabled>Undo</button>
+              <button type="button" id="clearPoints" disabled>Clear all</button>
+            </div>
+            <ol id="pointList" class="point-list"></ol>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Export</h2>
+          <label class="file-field">
+            <span>ROI name</span>
+            <input type="text" id="roiName" value="roi" maxlength="64"
+                   placeholder="e.g. V1, lh-motor" autocomplete="off" spellcheck="false" />
+          </label>
+          <p class="hint" id="exportNameHint">Used in the file name and inside the file.</p>
+          <div class="button-row">
+            <button type="button" id="exportLabel" disabled>FreeSurfer .label</button>
+            <button type="button" id="exportGifti" disabled>GIfTI .label.gii</button>
+          </div>
+          <div class="button-row">
+            <button type="button" id="exportShape" disabled>GIfTI .shape.gii</button>
+            <button type="button" id="exportPoints" disabled>Points JSON</button>
+          </div>
+          <p class="hint" id="exportHint">Coordinates are written in the loaded surface's space.</p>
+        </section>
+      </div>
+
+      <div id="viewer">
+        <canvas id="gl"></canvas>
+        <div id="dropHint" class="drop-hint">
+          <strong>Drop a surface here</strong>
+          <span>or use the file picker. Nothing is uploaded — everything runs in this browser.</span>
+        </div>
+      </div>
+
+      <div id="status">
+        <span id="statusText">Load a surface to begin.</span>
+        <span id="vertexReadout" class="readout"></span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

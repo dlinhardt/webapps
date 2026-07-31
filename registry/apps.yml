@@ -209,3 +209,20 @@ apps:
       toolchains: [node]
       shared_runtime: true
       release: true
+  - id: surfmark
+    path: surfmark
+    title: SurfMark
+    description: Cortical surface viewer with manual ROI delineation and vertex selection.
+    legacy_domain: null
+    runtime: vite-webgpu
+    model_manifest: null
+    asset_manifest_schema: null
+    source: neurodesk/webapps@local
+    license: MIT
+    maintainers: [felenitaribeiro]
+    support_status: experimental
+    shell: imaging-workspace
+    ci:
+      toolchains: [node]
+      shared_runtime: false
+      release: false
