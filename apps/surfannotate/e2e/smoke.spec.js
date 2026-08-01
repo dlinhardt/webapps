@@ -1159,3 +1159,98 @@ test('an area keeps its colour when it is edited', async ({ page }) => {
   expect(after).toEqual([0, 1, 2]);
   expect(new Set(after).size).toBe(3, 'and no two areas share a colour');
 });
+
+test('the area name is entered where the area is made', async ({ page }) => {
+  await loadFlat(page);
+  // The field used to live in the Export panel, below the Save button that uses it.
+  const areasPanel = page.locator('section.panel', { hasText: 'Areas' }).first();
+  await expect(areasPanel.locator('#roiName')).toHaveCount(1);
+  await expect(areasPanel.locator('#saveRoi')).toHaveCount(1);
+
+  await page.fill('#roiName', 'hV4');
+  await saveStrip(page, 3, 'hV4');
+  await expect(roiRows(page).first()).toContainText('hV4');
+  await expect(page.locator('#exportNameHint')).toContainText('lh.hV4');
+});
+
+test('an exported .label can be dropped back in as an overlay', async ({ page }) => {
+  // NiiVue has no reader for a FreeSurfer .label: the extension falls through
+  // to its curvature parser, which cannot read ASCII, so the drop did nothing.
+  await loadFlat(page);
+  await saveStrip(page, 2, 'V1');
+
+  const download = page.waitForEvent('download');
+  await page.locator('#exportLabel').click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('lh.V1.label');
+  const stream = await file.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString('utf8');
+
+  await page.evaluate(async (payload) => {
+    const dropped = new File([payload], 'lh.V1.label', { type: 'text/plain' });
+    const transfer = new DataTransfer();
+    transfer.items.add(dropped);
+    const canvas = document.getElementById('gl');
+    const box = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transfer,
+      clientX: box.left + box.width / 2, clientY: box.top + box.height / 2
+    }));
+  }, text);
+
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.V1.label loaded', {
+    timeout: 60_000
+  });
+  await expect(overlayRows(page)).toHaveCount(1);
+  await expect(surfaceRows(page)).toHaveCount(1, 'not mistaken for a second surface');
+
+  const layer = await page.evaluate(() => {
+    const overlay = window.__surfannotateUi.activeOverlay();
+    const values = overlay.layer.values;
+    let marked = 0;
+    for (let v = 0; v < values.length; v++) if (values[v] > 0) marked++;
+    return {
+      length: values.length,
+      marked,
+      calMin: overlay.layer.cal_min,
+      calMax: overlay.layer.cal_max,
+      transparentBelow: overlay.layer.isTransparentBelowCalMin
+    };
+  });
+  expect(layer.length).toBe(1681, 'expanded to one value per vertex');
+  expect(layer.marked).toBe(82, 'the same 82 vertices that were exported');
+  // The window must sit above zero, or a mask renders as a flat surface.
+  expect(layer.calMin).toBeGreaterThan(0);
+  expect(layer.calMax).toBe(1);
+  expect(layer.transparentBelow).toBe(true);
+
+  // And it behaves like any other overlay from here on.
+  await page.selectOption('#overlayColormap', 'hot');
+  expect(await page.evaluate(() =>
+    window.__surfannotateUi.activeOverlay().layer.colormap)).toBe('hot');
+  await overlayRows(page).first().locator('input[type=checkbox]').uncheck();
+  expect(await page.evaluate(() =>
+    window.__surfannotateUi.activeOverlay().layer.opacity)).toBe(0);
+});
+
+test('a .label from a different surface is refused with a reason', async ({ page }) => {
+  await loadFlat(page);
+  const wrong = '#!ascii label V1 , from subject lh vox2ras=TkReg\n1\n' +
+    '90000  1.0 2.0 3.0 0.0\n';
+  await page.evaluate(async (payload) => {
+    const dropped = new File([payload], 'other.label', { type: 'text/plain' });
+    const transfer = new DataTransfer();
+    transfer.items.add(dropped);
+    const canvas = document.getElementById('gl');
+    const box = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transfer,
+      clientX: box.left + box.width / 2, clientY: box.top + box.height / 2
+    }));
+  }, wrong);
+
+  await expect(page.locator('#statusText')).toContainText('different mesh', { timeout: 30_000 });
+  await expect(overlayRows(page)).toHaveCount(0);
+});

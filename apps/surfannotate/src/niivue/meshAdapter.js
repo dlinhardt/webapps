@@ -295,3 +295,77 @@ export function setOverlayDisplay(nv, mesh, layer, { colormap, opacity } = {}) {
   if (opacity !== undefined) layer.opacity = Number(opacity);
   commitLayer(nv, mesh);
 }
+
+/**
+ * Attach a per-vertex array we parsed ourselves as an overlay layer.
+ *
+ * NiiVue's readLayer has no case for a FreeSurfer `.label` — the extension falls
+ * through to its curvature reader, which cannot parse ASCII and leaves the drop
+ * looking like nothing happened. A `.label` is a sparse vertex list rather than
+ * a dense array anyway, so it has to be expanded before it can be shown; once it
+ * is, the layer is built from NiiVue's own defaults so the renderer sees exactly
+ * what it would have from readLayer.
+ *
+ * @param {import('@niivue/niivue').Niivue} nv
+ * @param {object} mesh
+ * @param {Float32Array} values one per vertex
+ * @param {object} [options]
+ * @param {number} [options.opacity]
+ * @param {string} [options.colormap]
+ * @returns {object} the layer
+ */
+export function attachValueLayer(nv, mesh, values, options = {}) {
+  const vertexCount = mesh.pts.length / 3;
+  if (values.length !== vertexCount) {
+    throw new Error(
+      `overlay has ${values.length} values but the surface has ${vertexCount} vertices`
+    );
+  }
+
+  let low = Infinity;
+  let high = -Infinity;
+  let smallestAbove = Infinity;
+  for (let v = 0; v < values.length; v++) {
+    const value = values[v];
+    if (value < low) low = value;
+    if (value > high) high = value;
+    if (value > 0 && value < smallestAbove) smallestAbove = value;
+  }
+  if (!Number.isFinite(low)) { low = 0; high = 1; }
+
+  const layer = {
+    ...NVMeshLayerDefaults,
+    name: options.name || 'overlay',
+    values,
+    global_min: low,
+    global_max: high,
+    // A mask is mostly zeros, so a window over the full range would render the
+    // whole surface in the colour map's low end and the region would not stand
+    // out. Window from just under the smallest marked value instead, and let
+    // everything below it fall through to the surface.
+    cal_min: Number.isFinite(smallestAbove) ? smallestAbove * 0.5 : low,
+    cal_max: high > low ? high : low + 1,
+    cal_minNeg: NaN,
+    cal_maxNeg: NaN,
+    isTransparentBelowCalMin: true,
+    isAdditiveBlend: false,
+    // MUST be 1. The defaults leave it 0, and NiiVue computes the frame as
+    // min(max(frame4D, 0), nFrame4D - 1) = -1, so it reads values[j - nvtx],
+    // gets undefined, and every colour lookup lands on NaN and writes black
+    // over the whole surface.
+    nFrame4D: 1,
+    frame4D: 0,
+    colorbarVisible: true,
+    colormapInvert: false,
+    colormapType: 0,
+    colormapLabel: null,
+    colormap: options.colormap || 'warm',
+    colormapNegative: 'winter',
+    useNegativeCmap: false,
+    opacity: options.opacity ?? 1.0
+  };
+
+  mesh.layers.push(layer);
+  commitLayer(nv, mesh);
+  return layer;
+}

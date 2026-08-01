@@ -133,6 +133,11 @@
 
         <section class="panel">
           <h2>Areas</h2>
+          <label class="file-field">
+            <span>Area name</span>
+            <input type="text" id="roiName" value="roi" maxlength="64"
+                   placeholder="e.g. V1, lh-motor" autocomplete="off" spellcheck="false" />
+          </label>
           <div class="button-row">
             <button type="button" id="saveRoi" disabled>Save filled region</button>
           </div>
@@ -151,11 +156,6 @@
 
         <section class="panel">
           <h2>Export</h2>
-          <label class="file-field">
-            <span>ROI name</span>
-            <input type="text" id="roiName" value="roi" maxlength="64"
-                   placeholder="e.g. V1, lh-motor" autocomplete="off" spellcheck="false" />
-          </label>
           <p class="hint" id="exportNameHint">Used in the file name and inside the file.</p>
           <div class="button-row">
             <button type="button" id="exportLabel" disabled>FreeSurfer .label</button>

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { gunzipSync } from 'node:zlib';
 
 import {
-  writeFreeSurferLabel, readFreeSurferLabel, sanitizeHeaderField
+  writeFreeSurferLabel, readFreeSurferLabel, sanitizeHeaderField, labelToValues
 } from '../src/io/freesurferLabel.js';
 import {
   writeGiftiLabel, writeGiftiShape, maskToLabelArray, maskToFloatArray

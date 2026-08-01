@@ -22,7 +22,8 @@ const SURFACE_EXT = /\.(mz3|obj|stl|ply|vtk|off|srf|byu|dfs|ico|tri|nv|wrl|x3d|a
 
 /** Extensions that are only ever per-vertex data. */
 const OVERLAY_EXT = new RegExp(
-  '\\.(curv|thickness|sulc|area|annot|mgz|mgh|nii|nii\\.gz|dscalar\\.nii|dlabel\\.nii)$', 'i'
+  '\\.(curv|thickness|sulc|area|annot|label|mgz|mgh|nii|nii\\.gz|dscalar\\.nii|dlabel\\.nii)$',
+  'i'
 );
 
 /** GIfTI sub-types, which are conventional but reliable in practice. */
@@ -81,6 +82,12 @@ function sniff(bytes) {
     }
     if (/NIFTI_INTENT_(SHAPE|LABEL|TIME_SERIES|NONE|ZSCORE|TTEST)/.test(text)) return OVERLAY;
     return UNKNOWN;
+  }
+
+  // A FreeSurfer .label is ASCII with a fixed first line.
+  if (bytes[0] === 0x23) { // '#'
+    const head = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, 64));
+    if (head.startsWith('#!ascii label')) return OVERLAY;
   }
 
   // FreeSurfer binaries lead with a 3-byte magic number.

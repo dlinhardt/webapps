@@ -122,6 +122,13 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   three times the vertex count.
 - Avoid the `Uint8Array` packed-RGBA layer path — it renders nothing in 0.69.0. Use
   `Float32Array` values plus `colormapLabel`.
+- **A hand-built mesh layer must set `nFrame4D: 1`.** `NVMeshLayerDefaults` leaves it 0,
+  and NiiVue computes the frame as `min(max(frame4D, 0), nFrame4D - 1)` — which is -1, so
+  it reads `values[j - vertexCount]`, gets `undefined`, and every colour lookup lands on
+  NaN. The whole surface renders black, not the layer.
+- **`readLayer` has no case for a FreeSurfer `.label`.** The extension falls through to
+  its curvature reader, which cannot parse ASCII and returns a layer with zero values.
+  `io/freesurferLabel.labelToValues` expands it and `attachValueLayer` builds the layer.
 - `mesh.updateMesh(gl)` costs ~24 ms on a 163k-vertex mesh because it regenerates
   normals for unchanged geometry. Fine per interaction, too slow per frame.
 

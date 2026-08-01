@@ -19,10 +19,10 @@ import { FILL_ERRORS, maskToIndices } from './surface/fill.js';
 import { hatchMask, FILL_STYLES } from './surface/hatch.js';
 import {
   loadMeshFromFile, loadOverlay, getGeometry, pickWorldMm, resolveVertex,
-  attachLabelLayer, commitLayer, setOverlayDisplay, makeLabelLut
+  attachLabelLayer, commitLayer, setOverlayDisplay, makeLabelLut, attachValueLayer
 } from './niivue/meshAdapter.js';
 
-import { writeFreeSurferLabel } from './io/freesurferLabel.js';
+import { writeFreeSurferLabel, labelToValues } from './io/freesurferLabel.js';
 import { writeGiftiLabel, maskToLabelArray } from './io/gifti.js';
 import { writePointsJson, hashTriangles } from './io/points.js';
 import { exportStem as buildExportStem } from './io/naming.js';
@@ -884,10 +884,18 @@ async function addOverlay(file) {
   if (!entry) return;
   setStatus(`Loading overlay ${file.name}…`);
   try {
-    const layer = await loadOverlay(state.nv, entry.mesh, file, {
+    const display = {
       opacity: Number(ui.overlayOpacity.value),
       colormap: ui.overlayColormap.value
-    });
+    };
+    // NiiVue cannot read a FreeSurfer .label, so we expand it ourselves. It is
+    // also sparse — a list of the vertices in the region — where every format
+    // NiiVue does read is one value per vertex.
+    const layer = await isFreeSurferLabel(file)
+      ? attachValueLayer(state.nv, entry.mesh,
+        labelToValues(await file.text(), entry.geometry.vertexCount).values,
+        { ...display, name: file.name })
+      : await loadOverlay(state.nv, entry.mesh, file, display);
     // readLayer appends, so the ROI layer is no longer last. Re-attach it on top.
     reattachRoiLayer();
 
@@ -913,6 +921,17 @@ async function addOverlay(file) {
   } catch (error) {
     console.error('surfannotate: failed to load overlay', error);
     setStatus(`Could not load overlay ${file.name}: ${error.message}`);
+  }
+}
+
+/** True for a FreeSurfer .label, by extension or by its fixed first line. */
+async function isFreeSurferLabel(file) {
+  if (/\.label$/i.test(file.name)) return true;
+  try {
+    const head = await file.slice(0, 32).text();
+    return head.startsWith('#!ascii label');
+  } catch {
+    return false;
   }
 }
 

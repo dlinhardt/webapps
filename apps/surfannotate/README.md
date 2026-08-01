@@ -44,7 +44,10 @@ path between two vertices genuinely runs differently over different geometry. Su
 with unrelated topology keep separate, independent ROIs.
 
 Dropped files are identified by their magic number and name rather than by drop order,
-so a surface and an overlay can be dropped in any sequence.
+so a surface and an overlay can be dropped in any sequence. A FreeSurfer `.label` is
+expanded here rather than by NiiVue, which has no reader for it: it is a sparse list of
+the vertices in a region, so it is scattered into one value per vertex and windowed
+above zero, which is what makes a mask show as a region rather than a flat surface.
 
 **Areas as a parcellation.** Save a filled region and it joins an ordered list of
 areas. Each area is resolved on the surface the areas above it have left, so no vertex
@@ -76,7 +79,7 @@ area instead of the region being drawn.
 
 | Format | Use |
 | --- | --- |
-| FreeSurfer `.label` | The universal FreeSurfer exchange format; opens in freeview. Also FreeSurfer's own control-point format, so it doubles as a landmark file. |
+| FreeSurfer `.label` | The universal FreeSurfer exchange format; opens in freeview. Also FreeSurfer's own control-point format, so it doubles as a landmark file. Can be dropped back in as an overlay. |
 | GIfTI `.label.gii` | Opens in Connectome Workbench, FSL, nibabel, NiiVue. Carries the ROI name and colour. |
 | Points JSON | Landmarks plus a mesh fingerprint, so a point set cannot be loaded onto the wrong surface. |
 

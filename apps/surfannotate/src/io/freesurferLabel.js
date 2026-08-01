@@ -96,3 +96,38 @@ export function readFreeSurferLabel(text) {
   }
   return { vertices, coords, stat, name };
 }
+
+/**
+ * Expand a .label into one value per vertex, for display as an overlay.
+ *
+ * A .label is a sparse list — only the vertices in the region appear — so it
+ * has to be scattered into a dense array before it can be shown. FreeSurfer's
+ * fifth column is a per-vertex statistic, which is what people put a p-value or
+ * an eccentricity in; when it is all zeros, as it is for a plain region, the
+ * label is shown as a binary mask instead of a field of zeros.
+ *
+ * @param {string} text
+ * @param {number} vertexCount vertices in the surface it is being shown on
+ * @returns {{values: Float32Array, count: number, name: string, hasStat: boolean}}
+ */
+export function labelToValues(text, vertexCount) {
+  const { vertices, stat, name } = readFreeSurferLabel(text);
+  const values = new Float32Array(vertexCount);
+
+  let hasStat = false;
+  for (let i = 0; i < stat.length; i++) {
+    if (stat[i] !== 0) { hasStat = true; break; }
+  }
+
+  for (let i = 0; i < vertices.length; i++) {
+    const vertex = vertices[i];
+    if (vertex < 0 || vertex >= vertexCount) {
+      throw new Error(
+        `.label refers to vertex ${vertex}, but the surface has ${vertexCount} — ` +
+        'it belongs to a different mesh'
+      );
+    }
+    values[vertex] = hasStat ? stat[i] : 1;
+  }
+  return { values, count: vertices.length, name, hasStat };
+}
