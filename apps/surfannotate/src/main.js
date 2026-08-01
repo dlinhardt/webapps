@@ -287,7 +287,17 @@ function reopenRoi(id) {
 
   state.rois.splice(state.rois.indexOf(roi), 1);
   if (state.selectedRoiId === id) state.selectedRoiId = null;
-  if (roi.asEdge) applyExclusion();
+
+  // Neighbours have to stand down too. An ROI's border points routinely lie
+  // *inside* the ROI drawn next to it: the fill excludes the border row by
+  // default, so the row V1 was clicked along is claimed by V2 when V2 is drawn
+  // against V1's rim. While V2 is cut out of the graph those vertices are
+  // isolated and V1's border cannot be retraced through them.
+  const blocking = state.rois.filter((other) => other.asEdge
+    && other.topologyKey === roi.topologyKey
+    && blocksBorderOf(other, roi));
+  for (const other of blocking) other.asEdge = false;
+  applyExclusion();
 
   const session = state.session;
   session.clearRoi();
@@ -308,11 +318,27 @@ function reopenRoi(id) {
   renderLayerLists();
   showExportName();
   repaint();
+  const released = blocking.length
+    ? ` ${blocking.map((other) => other.name).join(', ')} released as an edge, because ` +
+      `${blocking.length > 1 ? 'they cover' : 'it covers'} part of this border.`
+    : '';
   setStatus(filled.ok
-    ? `Reopened ${roi.name} — ${session.clicks.length} border points restored. ` +
-      'Adjust it and save again.'
+    ? `Reopened ${roi.name} — ${session.clicks.length} border points restored.${released}` +
+      ' Adjust it and save again.'
     : `Reopened ${roi.name} — ${session.clicks.length} border points restored, but the ` +
-      'border could not be retraced on the surface as it is now. Close it again.');
+      `border could not be retraced on the surface as it is now.${released} Close it again.`);
+}
+
+/**
+ * True when `other` covers any of `roi`'s border, so cutting it out would make
+ * that border unwalkable. Both the click points and the traced chain count: a
+ * click landing inside `other` cannot be reached at all, and a chain running
+ * through it would have to be rerouted into a different border.
+ */
+function blocksBorderOf(other, roi) {
+  for (const vertex of roi.clicks) if (other.mask[vertex]) return true;
+  for (const vertex of roi.chain) if (other.mask[vertex]) return true;
+  return false;
 }
 
 /** A vertex inside the saved region and off its new border, to seed a refill. */

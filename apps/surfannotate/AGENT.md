@@ -52,7 +52,11 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   parameter to the algorithms: the graph is the barrier.
 - **Reopening a completed ROI is un-saving it.** It must leave the list *before* the
   session is restored: an ROI cannot be an edge for its own border, and while it is cut
-  out of the graph its own clicks are isolated and unreachable. The border is recomputed
+  out of the graph its own clicks are isolated and unreachable. **Neighbours have to
+  stand down too**: an ROI's border points routinely lie *inside* the ROI drawn next to
+  it, because the fill excludes the border row by default, so the row V1 was clicked
+  along is claimed by V2 when V2 is drawn against V1's rim. `blocksBorderOf` finds those
+  and unticks them, visibly rather than silently. The border is recomputed
   from the clicks, not restored from the saved chain, for the same reason the clicks are
   authoritative everywhere else.
 - **The clicked vertices are the only authoritative ROI state.** The traced chain and

@@ -62,7 +62,10 @@ the pencil reopens it: the ROI leaves the list, its border points go back on the
 and the border is retraced the way it was closed, so it can be adjusted and saved again.
 Reopening recomputes the border from the points rather than restoring the saved trace,
 because the points are the authoritative state and the surface may have changed since —
-another ROI may have become an edge, and the border should respect it.
+another ROI may have become an edge, and the border should respect it. Any neighbour
+whose region covers part of the border is unticked as an edge first, and named in the
+status line: adjacent areas share a boundary, and the vertices one was drawn along
+usually belong to the other.
 
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 

@@ -1121,3 +1121,83 @@ test('reopening a loop ROI refills the side that was saved', async ({ page }) =>
   expect(after.closure).toBe('loop');
   expect(after.filled).toBe(before, 'the same side, not the complement');
 });
+
+test('reopening an ROI releases neighbours whose region covers its border', async ({ page }) => {
+  // An ROI's border points routinely end up INSIDE the ROI drawn next to it:
+  // the fill excludes the border row by default, so the row V1 was clicked
+  // along is claimed by V2 when V2 is drawn against V1's rim. With V2 cut out
+  // of the graph those vertices are isolated and V1 cannot be retraced.
+  await loadFlat(page);
+
+  await drawStrip(page, 2);
+  await page.fill('#roiName', 'V1');
+  await page.locator('#saveRoi').click();
+  await roiRows(page).nth(0).locator('.layer-flag input').check();
+
+  await drawStrip(page, 6);
+  await page.fill('#roiName', 'V2');
+  await page.locator('#saveRoi').click();
+  await roiRows(page).nth(1).locator('.layer-flag input').check();
+
+  // V1's border sits on row 2, and V2 owns row 2.
+  const overlap = await page.evaluate(() => {
+    const [v1, v2] = window.__surfannotateUi.savedRois();
+    return {
+      v1Clicks: v1.clicks,
+      claimedByV2: v1.clicks.filter((v) => v2.mask[v]).length
+    };
+  });
+  expect(overlap.v1Clicks).toEqual([2 * 41 + 1, 2 * 41 + 39]);
+  expect(overlap.claimedByV2).toBe(2, 'V1 border points are inside V2');
+
+  await roiRows(page).nth(0).locator('.layer-edit').click();
+
+  await expect(page.locator('#statusText')).toContainText('V2 released as an edge');
+  const after = await page.evaluate(() => {
+    const s = window.__surfannotate;
+    return {
+      closed: s.session.closed,
+      gaps: s.session.gaps.length,
+      filled: s.session.filled ? s.session.filled.reduce((n, v) => n + v, 0) : null,
+      excluded: s.excluded,
+      v2Edge: window.__surfannotateUi.savedRois()[0].asEdge
+    };
+  });
+  expect(after.closed).toBe(true, 'the border retraced');
+  expect(after.gaps).toBe(0);
+  expect(after.filled).toBe(82, 'and the region came back as it was');
+  expect(after.excluded).toBe(null);
+  expect(after.v2Edge).toBe(false, 'V2 is visibly unticked, not silently ignored');
+});
+
+test('reopening leaves neighbours that do not touch its border alone', async ({ page }) => {
+  await loadFlat(page);
+
+  // Two areas far apart, so neither covers the other's border.
+  await drawStrip(page, 2);
+  await page.fill('#roiName', 'near');
+  await page.locator('#saveRoi').click();
+
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41, at = (i, j) => j * n + i;
+    for (const v of [at(10, 20), at(30, 20), at(30, 34), at(10, 34)]) session.addClick(v);
+    session.closePath();
+    session.fill({ seed: at(20, 27) });
+    window.__surfannotateUi.repaint();
+  });
+  await page.fill('#roiName', 'far');
+  await page.locator('#saveRoi').click();
+  await roiRows(page).nth(1).locator('.layer-flag input').check();
+
+  await roiRows(page).nth(0).locator('.layer-edit').click();
+  await expect(page.locator('#statusText')).not.toContainText('released as an edge');
+  const after = await page.evaluate(() => ({
+    farStillEdge: window.__surfannotateUi.savedRois()[0].asEdge,
+    stillExcluded: window.__surfannotate.excluded !== null,
+    closed: window.__surfannotate.session.closed
+  }));
+  expect(after.farStillEdge).toBe(true, 'an unrelated edge ROI keeps its tick');
+  expect(after.stillExcluded).toBe(true);
+  expect(after.closed).toBe(true);
+});
