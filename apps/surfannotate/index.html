@@ -26,12 +26,12 @@
             <h2>Delineate areas on a cortical surface, and export them.</h2>
             <p class="start-intro">
               Load a FreeSurfer or GIfTI surface — folded, inflated, spherical, or an
-              unfolded flat patch — and mark regions by clicking along their border.
+              unfolded flat — and mark regions by clicking along their border.
               The points are joined by the shortest path across the mesh, so the border
               follows the surface rather than a straight line through it. Areas are drawn
               in sequence and partition the surface: each one's border becomes the edge
               the next is closed against, so neighbouring areas share a boundary exactly
-              instead of leaving a sliver between them.
+              instead of having overlapping vertices.
             </p>
             <div class="start-actions">
               <button class="start-primary" id="enterAppButton" type="button">
@@ -48,7 +48,7 @@
             <h3>Reads</h3>
             <ul>
               <li>FreeSurfer surfaces: <code>lh.pial</code>, <code>lh.white</code>,
-                <code>lh.inflated</code>, flat patches</li>
+                <code>lh.inflated</code>, flat surfaces</li>
               <li>GIfTI <code>.surf.gii</code>, <code>.mz3</code>, and more</li>
               <li>Overlays: curvature, thickness, <code>.annot</code>,
                 <code>.label</code>, <code>.label.gii</code>, CIFTI <code>.dscalar.nii</code></li>
@@ -78,8 +78,8 @@
               <div class="start-step-number">2</div>
               <h4>Click the border</h4>
               <p>
-                Nothing is traced while you click, so you can rotate freely. Close the
-                border and fill it. On a cut surface the edge of the patch closes it for
+                Nothing is traced while you click, hold and hover around the surface, so you can rotate freely. Close the
+                border and fill it. On a cut surface the edge of the flat surface closes it for
                 you — two points can be enough.
               </p>
             </article>
@@ -191,7 +191,7 @@
               <button type="button" id="closeOnEdge" disabled>Close on surface edge</button>
             </div>
             <p class="hint" id="edgeHint" hidden>
-              Draw only the part of the border crossing the patch: both ends are extended
+              Draw only the part of the border crossing the flat surface: both ends are extended
               to the nearest edge, which closes the region. Two points are enough.
             </p>
             <div class="button-row">
@@ -246,7 +246,7 @@
           <p class="hint" id="roiListHint">
             Areas partition the surface: each is drawn on what the areas above it have
             left, so no vertex belongs to two. Its border then works like the edge of a
-            flat patch — the next area can be closed against it, on folded surfaces too.
+            flat surface — the next area can be closed against it, on folded surfaces too.
             <br />Editing one re-derives the areas below it, so moving a shared boundary
             moves both sides.
             <br /><strong>&#9650;&#9660;</strong> reorder — later areas give way to
