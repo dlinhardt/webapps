@@ -75,6 +75,9 @@ area instead of the region being drawn.
 
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 
+A **Cite** button in both headers opens the citations — NiiVue for the rendering and
+mesh parsing. Add entries to the `#citationsDialog` section in `index.html`.
+
 The app opens on a short start page — what it reads and writes, and how it works — with
 a **Start annotating** button. It is a section over the app rather than a second
 document, so there is still one bundle and one path in the composite site.

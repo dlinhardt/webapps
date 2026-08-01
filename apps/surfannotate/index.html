@@ -20,7 +20,10 @@
           <strong>SurfAnnotate</strong>
           <span>Surface ROIs and vertex selection</span>
         </div>
-        <a href="../" class="start-link" title="More Neurodesk web apps">More Apps</a>
+        <div class="start-links">
+          <button type="button" class="start-link" data-cite-open title="How to cite">Cite</button>
+          <a href="../" class="start-link" title="More Neurodesk web apps">More Apps</a>
+        </div>
       </header>
 
       <main class="start-main">
@@ -287,5 +290,26 @@
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>
+    <dialog id="citationsDialog" class="cite-dialog" aria-labelledby="citeHeading">
+      <div class="cite-header">
+        <h3 id="citeHeading">Citations</h3>
+        <button type="button" class="cite-close" id="closeCitations" aria-label="Close">&times;</button>
+      </div>
+      <div class="cite-body">
+        <p class="cite-intro">
+          SurfAnnotate delineates regions in your browser; the rendering and mesh
+          parsing are NiiVue's. Please cite it if the figures or labels reach a paper.
+        </p>
+        <section class="cite-section">
+          <h4>Visualization</h4>
+          <div class="cite-item">
+            <strong>NiiVue</strong>
+            <p>NiiVue Contributors. NiiVue: a WebGL2 medical image viewer.</p>
+            <a href="https://github.com/niivue/niivue" target="_blank"
+               rel="noopener noreferrer">https://github.com/niivue/niivue</a>
+          </div>
+        </section>
+      </div>
+    </dialog>
   </body>
 </html>

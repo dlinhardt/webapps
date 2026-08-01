@@ -1332,3 +1332,33 @@ test('every declared icon is actually served', async ({ page }) => {
     expect(measured.height, `${link.href} height`).toBe(declared);
   }
 });
+
+test('the Cite button opens the citations, from the app and from the start page', async ({ page }) => {
+  const dialog = page.locator('#citationsDialog');
+  await expect(dialog).toBeHidden();
+
+  // The shell builds its navigation with only the catalog link, so the app's
+  // Cite button is appended after mounting; check it actually landed there.
+  const inHeader = page.locator('.nd-imaging-navigation [data-cite-open]');
+  await expect(inHeader).toHaveCount(1);
+  await inHeader.click();
+  await expect(dialog).toBeVisible();
+
+  await expect(dialog).toContainText('NiiVue Contributors. NiiVue: a WebGL2 medical image viewer.');
+  const link = dialog.locator('a[href="https://github.com/niivue/niivue"]');
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveAttribute('rel', /noopener/);
+
+  await page.locator('#closeCitations').click();
+  await expect(dialog).toBeHidden();
+
+  // And again from the start page, which is a separate header.
+  await page.reload();
+  await expect(page.locator('#startPage')).toBeVisible();
+  await page.locator('#startPage [data-cite-open]').click();
+  // showModal() puts the dialog in the top layer, so it is above the start page.
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(page.locator('#startPage')).toBeVisible('escape closed the dialog, not the page');
+});

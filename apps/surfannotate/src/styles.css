@@ -612,3 +612,113 @@ button.mini:disabled {
 .nd-imaging-mark {
   display: none;
 }
+
+/* -- citations ----------------------------------------------------------- */
+
+.start-links {
+  display: flex;
+  align-items: center;
+  gap: var(--nd-space-md, 1rem);
+}
+
+button.start-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.cite-dialog {
+  width: min(640px, calc(100vw - 2rem));
+  max-height: min(80vh, 640px);
+  padding: 0;
+  color: var(--nd-color-text, #e8edf4);
+  background: var(--nd-color-surface, #1a2332);
+  border: 1px solid var(--nd-color-border, #2d3f5a);
+  border-radius: var(--nd-radius-md, 8px);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.cite-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.cite-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nd-space-md, 1rem);
+  padding: var(--nd-space-md, 1rem);
+  border-bottom: 1px solid var(--nd-color-border, #2d3f5a);
+}
+
+.cite-header h3 { margin: 0; font-size: 0.95rem; }
+
+.cite-close {
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--nd-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.cite-close:hover { opacity: 1; background: rgba(127, 127, 160, 0.2); }
+
+.cite-body {
+  padding: var(--nd-space-md, 1rem);
+  overflow-y: auto;
+}
+
+.cite-intro {
+  margin: 0 0 var(--nd-space-md, 1rem);
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.cite-section + .cite-section { margin-top: var(--nd-space-lg, 1.5rem); }
+
+.cite-section h4 {
+  margin: 0 0 var(--nd-space-sm, 0.5rem);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nd-color-text-dim, #5c6b7f);
+}
+
+.cite-item {
+  padding: var(--nd-space-sm, 0.5rem) var(--nd-space-md, 1rem);
+  background: var(--nd-color-bg, #0f1419);
+  border: 1px solid var(--nd-color-border, #2d3f5a);
+  border-radius: var(--nd-radius-sm, 4px);
+}
+
+.cite-item + .cite-item { margin-top: var(--nd-space-sm, 0.5rem); }
+.cite-item strong { font-size: 0.88rem; }
+
+.cite-item p {
+  margin: 0.3rem 0;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.cite-item a {
+  font-size: 0.8rem;
+  color: var(--nd-color-primary, #3b82f6);
+  overflow-wrap: anywhere;
+}
+
+/* The shell's .nd-header-link rule sets colour but not type, so a <button>
+   keeps the user agent's smaller default and sits oddly beside the anchor. */
+.nd-imaging-navigation button.nd-header-link {
+  font: inherit;
+  padding: 0;
+}

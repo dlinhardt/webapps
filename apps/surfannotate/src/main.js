@@ -705,7 +705,41 @@ async function init() {
   });
 
   bindStartPage();
+  bindCitations();
   setStatus('Load a surface to begin.');
+}
+
+/**
+ * Wire the Cite button, and add a second one to the app's own header.
+ *
+ * The shared shell builds its navigation with only the catalog link and takes no
+ * list of extra items, so the button is appended after mounting rather than
+ * passed in — the alternative is a change to the component and every app with it.
+ */
+function bindCitations() {
+  const dialog = el('citationsDialog');
+  if (!dialog) return;
+
+  const navigation = document.querySelector('.nd-imaging-navigation');
+  if (navigation) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'nd-header-link';
+    button.title = 'How to cite';
+    button.textContent = 'Cite';
+    button.setAttribute('data-cite-open', '');
+    navigation.prepend(button);
+  }
+
+  for (const trigger of document.querySelectorAll('[data-cite-open]')) {
+    trigger.addEventListener('click', () => dialog.showModal());
+  }
+  el('closeCitations')?.addEventListener('click', () => dialog.close());
+  // A modal dialog fills the viewport with its backdrop, so a click that lands
+  // on the dialog element itself is a click outside the panel.
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
 }
 
 /**
