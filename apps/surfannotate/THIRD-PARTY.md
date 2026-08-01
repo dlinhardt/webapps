@@ -40,7 +40,16 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 The shared imaging-workspace shell. See `packages/components/LICENSE` in this
 repository.
 
-## Icon
+## Icon — no third-party terms
 
-`icon/surfannotate.svg` and the favicons rendered from it are original artwork
-contributed to this app, and are covered by `LICENSE` above.
+`icon/surfannotate.svg`, and the favicons rendered from it, were drawn in Inkscape by
+Fernanda L. Ribeiro working from source images generated with ChatGPT. It is covered by
+`LICENSE` above; nothing further attaches.
+
+OpenAI's terms assign to the user whatever rights OpenAI may hold in generated output
+and ask for no attribution, so there is no third-party licence to satisfy — unlike a
+stock-library asset, where the library's terms would survive whoever assembled the
+file. Recorded here anyway because provenance is what this file is for, and because
+purely machine-generated material may not attract copyright in every jurisdiction: the
+protectable part is the drawing work rather than the generated inputs. That affects
+what could be enforced, not what anyone may do with it — the MIT grant is unaffected.
