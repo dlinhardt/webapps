@@ -74,3 +74,59 @@ export function exportStem(roiName, meshInfo = {}) {
   const hemisphere = hemispherePrefix(meshInfo);
   return hemisphere ? `${hemisphere}.${roi}` : roi;
 }
+
+/** What kind of surface a file holds, as far as its name admits. */
+export const ANATOMICAL = 'anatomical';
+export const INFLATED = 'inflated';
+export const SPHERE = 'sphere';
+export const FLAT = 'flat';
+export const UNKNOWN_KIND = 'unknown';
+
+const KIND_PATTERNS = [
+  [FLAT, /(^|[._-])(flat|patch)([._-]|$)/i],
+  [SPHERE, /(^|[._-])sphere([._-]|$)/i],
+  [INFLATED, /(^|[._-])inflated([._-]|$)/i],
+  [ANATOMICAL, /(^|[._-])(pial|white|smoothwm|orig|midthickness|graymid|mid)([._-]|$)/i]
+];
+
+/**
+ * Whether a surface's vertex coordinates mean anything anatomically.
+ *
+ * A `.label` records x/y/z as well as the vertex index, and those coordinates
+ * are only meaningful if they came from a surface that sits in the subject's
+ * anatomy. Draw on `lh.inflated`, `lh.sphere` or a flat patch and the numbers
+ * describe the inflated, spherical or flattened shape instead — wrong by tens of
+ * millimetres, with nothing in the file to say so. freeview sidesteps this by
+ * substituting the white surface when the displayed one is inflated; this app
+ * does not, so it has to tell the user instead.
+ *
+ * Order matters: `lh.sphere.reg` is spherical, and `lh.white.flat.patch` is
+ * flat, so the more specific patterns are tested first.
+ *
+ * @param {string} filename
+ * @returns {'anatomical'|'inflated'|'sphere'|'flat'|'unknown'}
+ */
+export function surfaceKind(filename) {
+  const name = String(filename || '');
+  for (const [kind, pattern] of KIND_PATTERNS) {
+    if (pattern.test(name)) return kind;
+  }
+  return UNKNOWN_KIND;
+}
+
+/**
+ * True when a surface's coordinates can be trusted in a label file.
+ *
+ * `unknown` counts as trustworthy: an unrecognised name is more often a
+ * differently-named anatomical surface than a flattened one, and warning about
+ * every file nobody named conventionally would train the warning away.
+ * A geometrically flat surface is caught regardless of what it is called.
+ *
+ * @param {string} filename
+ * @param {boolean} [isPlanar] set when the geometry has no thickness
+ */
+export function hasAnatomicalCoordinates(filename, isPlanar = false) {
+  if (isPlanar) return false;
+  const kind = surfaceKind(filename);
+  return kind === ANATOMICAL || kind === UNKNOWN_KIND;
+}

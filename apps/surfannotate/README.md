@@ -94,10 +94,13 @@ Coordinates are written in tkreg (surface) RAS, as the `.label` header declares.
 NiiVue adds the volume centre on load so meshes align with volumes, and the export
 takes it back off — otherwise `mri_label2vol` and `mri_label2label --regmethod
 coords` would be silently wrong while anything keyed on the vertex index looked
-fine. One caveat: the coordinates come from the surface you drew on, so drawing on
-an inflated or flattened surface writes inflated or flattened positions. Draw on an
-anatomical surface if the coordinates matter; the vertex indices are correct either
-way.
+fine. **The coordinates come from the surface you drew on.** freeview sidesteps this by
+substituting the white surface when the displayed one is inflated; this app does not,
+so it tells you instead: the export panel names the surface the coordinates will come
+from, and warns when that surface is inflated, spherical or flat — naming a loaded
+anatomical surface of the same vertex indexing to switch to, if there is one. The
+vertex indices are correct whatever you draw on, and they are all freeview and
+`mris_anatomical_stats` read.
 
 Files are named `<hemisphere>.<roi>`, e.g. `lh.V1.label` — not after the specific
 surface they were drawn on. An ROI traced on `lh.sphere.reg` applies equally to

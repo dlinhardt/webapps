@@ -724,3 +724,13 @@ button.start-link {
   font: inherit;
   padding: 0;
 }
+
+/* The export hint turns into a warning when the surface being drawn on is not
+   anatomical, so its coordinates do not mean what the label header says. */
+.hint.warn {
+  padding: 0.4rem 0.5rem;
+  border-left: 2px solid var(--nd-color-warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 0 var(--nd-radius-sm, 4px) var(--nd-radius-sm, 4px) 0;
+  opacity: 0.95;
+}

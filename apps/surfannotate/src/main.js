@@ -25,7 +25,9 @@ import {
 import { writeFreeSurferLabel, labelToValues } from './io/freesurferLabel.js';
 import { writeGiftiLabel, maskToLabelArray } from './io/gifti.js';
 import { writePointsJson, hashTriangles } from './io/points.js';
-import { exportStem as buildExportStem } from './io/naming.js';
+import {
+  exportStem as buildExportStem, hasAnatomicalCoordinates, surfaceKind
+} from './io/naming.js';
 import { classifyFile, SNIFF_BYTES, SURFACE, OVERLAY, UNKNOWN } from './io/classify.js';
 
 // Label keys painted into the ROI layer.
@@ -107,6 +109,7 @@ const ui = {
   exportLabel: el('exportLabel'),
   exportGifti: el('exportGifti'),
   exportPoints: el('exportPoints'),
+  exportHint: el('exportHint'),
   statusText: el('statusText'),
   vertexReadout: el('vertexReadout'),
   dropHint: el('dropHint'),
@@ -865,6 +868,9 @@ async function loadSurface(file) {
       openEdge: openCount > 0 ? openBoundary : null,
       // What the loader added to every vertex, so exports can take it back off.
       translation: mesh.surfannotateTranslation || [0, 0, 0],
+      // A label records coordinates as well as vertex indices, and they only
+      // mean anything if this surface sits in the subject's anatomy.
+      anatomical: hasAnatomicalCoordinates(file.name, isPlanar(geometry.positions)),
       labelValues: new Float32Array(geometry.vertexCount),
       layerIndex: -1,
       overlays: [],
@@ -959,6 +965,7 @@ function activateSurface(id, { announce = false } = {}) {
   ui.overlayInput.disabled = false;
   ui.overlayOpacity.disabled = false;
   showExportName();
+  showCoordinateSource();
   syncOverlayControls();
   commitLayer(state.nv, entry.mesh);
   recomputeParcellation();
@@ -1007,6 +1014,7 @@ function removeSurface(id) {
   ui.dropHint.hidden = false;
   ui.overlayInput.disabled = true;
   showExportName();
+  showCoordinateSource();
   syncOverlayControls();
   renderLayerLists();
   // repaint() cannot do this: it returns early without a session, so every
@@ -1295,6 +1303,63 @@ function showOverlayRange(layer) {
   ui.overlayMax.value = Number(layer.cal_max.toFixed(decimals));
   ui.overlayMin.step = String(Number((span / 100).toFixed(decimals)) || 'any');
   ui.overlayMax.step = ui.overlayMin.step;
+}
+
+/**
+ * True when the geometry has no thickness — a flattened patch, whatever it is
+ * called. Cheaper and more reliable than trusting the filename.
+ */
+function isPlanar(positions) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let v = 0; v < positions.length; v += 3) {
+    if (positions[v] < minX) minX = positions[v];
+    if (positions[v] > maxX) maxX = positions[v];
+    if (positions[v + 1] < minY) minY = positions[v + 1];
+    if (positions[v + 1] > maxY) maxY = positions[v + 1];
+    if (positions[v + 2] < minZ) minZ = positions[v + 2];
+    if (positions[v + 2] > maxZ) maxZ = positions[v + 2];
+  }
+  const spans = [maxX - minX, maxY - minY, maxZ - minZ];
+  const largest = Math.max(...spans);
+  return largest > 0 && spans.some((span) => span < largest * 1e-4);
+}
+
+/**
+ * Say where the exported coordinates come from, and warn when they are not
+ * anatomical.
+ *
+ * A label's vertex indices are right whatever surface it was drawn on, and that
+ * is all freeview and mris_anatomical_stats read. The x/y/z are only meaningful
+ * on a surface that sits in the subject's anatomy, and nothing in the file says
+ * which — so it has to be said here, before the file is written.
+ */
+function showCoordinateSource() {
+  const entry = activeSurface();
+  if (!entry) {
+    ui.exportHint.textContent = "Coordinates are written in the loaded surface's space.";
+    ui.exportHint.classList.remove('warn');
+    return;
+  }
+  if (entry.anatomical) {
+    ui.exportHint.textContent =
+      `Coordinates come from ${entry.name}, in tkreg (surface) RAS.`;
+    ui.exportHint.classList.remove('warn');
+    return;
+  }
+  // Same vertex indexing means the same ROI, so a loaded anatomical surface is
+  // one click away rather than a reload.
+  const better = state.surfaces.find((other) => other.anatomical
+    && other.topologyKey === entry.topologyKey);
+  const kind = surfaceKind(entry.name);
+  ui.exportHint.textContent =
+    `${entry.name} is ${kind === 'unknown' ? 'flattened' : kind}, so its x/y/z are not `
+    + 'anatomical. The vertex indices are still correct — which is all freeview and '
+    + 'mris_anatomical_stats read — but the coordinates are not. '
+    + (better
+      ? `Switch to ${better.name} before exporting if they matter.`
+      : 'Load lh.white or lh.pial and switch to it if they matter.');
+  ui.exportHint.classList.add('warn');
 }
 
 /** Live preview of the file name the export buttons will produce. */

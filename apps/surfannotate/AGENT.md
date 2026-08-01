@@ -101,9 +101,12 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   it. It mirrors NiiVue's quirks deliberately — `cras` is applied even when the
   footer says `valid = 0`, and GIfTI values are read only from CDATA — because a
   correction that does not match what was applied is worse than none.
-  **Still open:** drawing on `lh.inflated` or a flat patch writes *that* surface's
-  coordinates. freeview substitutes the white surface (`SurfaceLabel.cpp:408`);
-  we could too, since same-topology surfaces are already loaded together.
+  Drawing on `lh.inflated` or a flat patch still writes *that* surface's coordinates
+  — freeview substitutes the white surface (`SurfaceLabel.cpp:408`), this app warns
+  instead. `showCoordinateSource` names the surface in the export panel and flags a
+  non-anatomical one, using `naming.surfaceKind` plus a planarity check on the
+  geometry, which catches a flat patch whatever it is called. Substituting a
+  same-topology anatomical surface automatically is still open.
 - **Exports are named `<hemisphere>.<roi>`, never after the source surface.** See
   `io/naming.js`. An ROI drawn on `lh.sphere.reg` is valid on any surface sharing that
   vertex indexing, so `lh.sphere.reg.surf.V1.label` would misrepresent it.

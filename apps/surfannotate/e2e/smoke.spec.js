@@ -1507,3 +1507,48 @@ test('an exported .label carries tkreg coordinates, as its header claims', async
   expect(row[3]).toBeCloseTo(66.908, 2);
   expect(label.split('\n')[0]).toContain('vox2ras=TkReg');
 });
+
+test('the export panel says where the coordinates come from, and warns when they are not anatomical', async ({ page }) => {
+  // A label's vertex indices are right whatever surface it was drawn on, and
+  // that is all freeview reads. The x/y/z only mean something on a surface that
+  // sits in the subject's anatomy, and nothing in the file says which.
+  await loadSurface(page);
+  const hint = page.locator('#exportHint');
+  await expect(hint).toContainText('Coordinates come from lh.pial');
+  await expect(hint).toContainText('tkreg');
+  await expect(hint).not.toHaveClass(/warn/);
+
+  // A flat patch is detected from its geometry, not its name.
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+  await expect(hint).toHaveClass(/warn/);
+  await expect(hint).toContainText('not anatomical');
+  await expect(hint).toContainText('vertex indices are still correct');
+  // Nothing anatomical shares its topology, so it cannot offer one.
+  await expect(hint).toContainText('Load lh.white or lh.pial');
+
+  // Switching back to the anatomical surface clears the warning.
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  await expect(hint).not.toHaveClass(/warn/);
+  await expect(hint).toContainText('lh.pial');
+});
+
+test('the warning names a loaded anatomical surface of the same topology', async ({ page }) => {
+  // Same vertex indexing means the same ROI, so the fix is one click, not a
+  // reload — and the hint should say which surface to click.
+  await loadSurface(page);
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.pial'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+
+  // Rename the second copy so it reads as inflated rather than anatomical.
+  await page.evaluate(() => {
+    const s = window.__surfannotate;
+    const entry = s.surfaces[1];
+    entry.name = 'lh.inflated';
+    entry.anatomical = false;
+    window.__surfannotateUi.activateSurface(entry.id);
+  });
+  const hint = page.locator('#exportHint');
+  await expect(hint).toHaveClass(/warn/);
+  await expect(hint).toContainText('Switch to lh.pial before exporting');
+});
