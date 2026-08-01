@@ -256,3 +256,28 @@ test('a name containing the CDATA terminator still yields valid XML', () => {
     assert.ok(xml.replace(/]]]]><!\[CDATA\[>/g, ']]>').includes('a]]>b'));
   });
 });
+
+test('the .label writer undoes the loader translation, so TkReg means TkReg', () => {
+  // NiiVue adds the volume centre on load, converting tkreg RAS to scanner RAS.
+  // The header declares TkReg and FreeSurfer takes it at its word, so the
+  // coordinates have to be put back.
+  const positions = Float32Array.from([
+    -40.8336, -19.0194, 64.9093,   // lh.pial vertex 0 as the app holds it
+    1, 2, 3
+  ]);
+  const cras = [-1.9991, 0, -1.9991];
+
+  const shifted = writeFreeSurferLabel(Int32Array.from([0]), positions, { name: 'V1' });
+  assert.match(shifted.split('\n')[2], /^0\s+-40\.834\s+-19\.019\s+64\.909/,
+    'without the offset it writes what the loader produced');
+
+  const corrected = writeFreeSurferLabel(Int32Array.from([0]), positions, {
+    name: 'V1', offset: cras
+  });
+  // Back to the values in the file on disk.
+  assert.match(corrected.split('\n')[2], /^0\s+-38\.834\s+-19\.019\s+66\.908/);
+
+  const { coords } = readFreeSurferLabel(corrected);
+  assert.ok(Math.abs(coords[0] - -38.8345) < 0.001);
+  assert.ok(Math.abs(coords[2] - 66.9084) < 0.001);
+});

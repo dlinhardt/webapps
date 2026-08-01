@@ -38,7 +38,10 @@ export const POINTS_FORMAT = 'surf-roi-points/1';
  * @returns {string}
  */
 export function writePointsJson(points, vertices, mesh, options = {}) {
-  const { coordinateSpace = 'tkreg-ras-white', created = null } = options;
+  const { coordinateSpace = 'tkreg-ras-white', created = null, offset = null } = options;
+  // Same reason as the .label writer: the document names a coordinate space, so
+  // the numbers have to be in it. See io/geometryOffset.js.
+  const [dx, dy, dz] = offset || [0, 0, 0];
 
   const document = {
     format: POINTS_FORMAT,
@@ -51,9 +54,9 @@ export function writePointsJson(points, vertices, mesh, options = {}) {
         vertex: v,
         ...(point.name ? { name: point.name } : {}),
         xyz: [
-          round3(vertices[3 * v]),
-          round3(vertices[3 * v + 1]),
-          round3(vertices[3 * v + 2])
+          round3(vertices[3 * v] - dx),
+          round3(vertices[3 * v + 1] - dy),
+          round3(vertices[3 * v + 2] - dz)
         ]
       };
       if (point.color) entry.color = point.color;

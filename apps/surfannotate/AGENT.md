@@ -92,6 +92,18 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 - **Flood fill must only ever walk the 1-ring graph.** Augmenting it (unfolded 2-ring
   edges, k-ring neighbourhoods) adds edges that cross faces, so the fill hops the
   barrier and swallows the hemisphere. Validate the chain before filling.
+- **Exports must undo the loader's translation.** NiiVue adds the volume centre
+  to every vertex on load — `cras` from a FreeSurfer footer, `VolGeomC_R/A/S` from
+  GIfTI — turning tkreg RAS into scanner RAS so meshes line up with volumes. A
+  `.label` header declares `vox2ras=TkReg` and FreeSurfer's
+  `labelGetSurfaceRasCoords` takes it verbatim, so the shift has to come back off:
+  `io/geometryOffset.js` recomputes it from the same bytes and the writers subtract
+  it. It mirrors NiiVue's quirks deliberately — `cras` is applied even when the
+  footer says `valid = 0`, and GIfTI values are read only from CDATA — because a
+  correction that does not match what was applied is worse than none.
+  **Still open:** drawing on `lh.inflated` or a flat patch writes *that* surface's
+  coordinates. freeview substitutes the white surface (`SurfaceLabel.cpp:408`);
+  we could too, since same-topology surfaces are already loaded together.
 - **Exports are named `<hemisphere>.<roi>`, never after the source surface.** See
   `io/naming.js`. An ROI drawn on `lh.sphere.reg` is valid on any surface sharing that
   vertex indexing, so `lh.sphere.reg.surf.V1.label` would misrepresent it.

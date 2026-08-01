@@ -10,6 +10,7 @@
 // conflicts with the shared runtime.
 
 import { NVMesh, NVMeshLayerDefaults, NVMeshLoaders, cmapper } from '@niivue/niivue';
+import { niivueTranslation } from '../io/geometryOffset.js';
 
 /** A miss returns a far-away vertex; anything past this is treated as no hit. */
 const PICK_MAX_DISTANCE_MM = 3;
@@ -21,7 +22,11 @@ const PICK_MAX_DISTANCE_MM = 3;
  */
 export async function loadMeshFromFile(nv, file) {
   const buffer = await file.arrayBuffer();
-  return loadMeshFromBuffer(nv, buffer, file.name);
+  const mesh = await loadMeshFromBuffer(nv, buffer, file.name);
+  // Read from the same bytes NiiVue just parsed, so the correction is derived
+  // from the file rather than guessed at. See io/geometryOffset.js.
+  mesh.surfannotateTranslation = niivueTranslation(buffer);
+  return mesh;
 }
 
 /**

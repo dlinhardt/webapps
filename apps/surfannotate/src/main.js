@@ -863,6 +863,8 @@ async function loadSurface(file) {
       finder,
       index,
       openEdge: openCount > 0 ? openBoundary : null,
+      // What the loader added to every vertex, so exports can take it back off.
+      translation: mesh.surfannotateTranslation || [0, 0, 0],
       labelValues: new Float32Array(geometry.vertexCount),
       layerIndex: -1,
       overlays: [],
@@ -1610,7 +1612,8 @@ function exportFreeSurferLabel() {
   const indices = exportIndices();
   const text = writeFreeSurferLabel(indices, state.geometry.positions, {
     name: roiName(),
-    subject: baseName()
+    subject: baseName(),
+    offset: activeSurface()?.translation
   });
   const filename = `${exportStem()}.label`;
   download(filename, text);
@@ -1651,7 +1654,7 @@ function maskFromSession() {
 function exportPoints() {
   const text = writePointsJson(
     state.session.points, state.geometry.positions, state.meshIdentity,
-    { created: new Date().toISOString() }
+    { created: new Date().toISOString(), offset: activeSurface()?.translation }
   );
   const filename = `${exportStem()}.points.json`;
   download(filename, text, 'application/json');

@@ -17,14 +17,19 @@
  * @param {Int32Array|number[]} vertexIndices
  * @param {Float32Array} anatomicalVertices 3*V xyz in tkreg RAS (white/pial)
  * @param {object} [options]
+ * @param {number[]} [options.offset] subtracted from every coordinate, undoing
+ *   the volume-geometry translation the loader applied on the way in
  * @param {string} [options.name] label name recorded in the header
  * @param {string} [options.subject] subject id recorded in the header
  * @param {Float32Array|number[]} [options.stat] per-entry scalar, default 0
  * @returns {string}
  */
 export function writeFreeSurferLabel(vertexIndices, anatomicalVertices, options = {}) {
-  const { name = 'roi', subject = '', stat = null } = options;
+  const { name = 'roi', subject = '', stat = null, offset = null } = options;
   const count = vertexIndices.length;
+  // The header declares tkreg RAS, so the numbers under it must be tkreg RAS.
+  // See io/geometryOffset.js: the loader adds the volume centre on the way in.
+  const [dx, dy, dz] = offset || [0, 0, 0];
 
   const lines = new Array(count + 2);
   // The header is delimited by a comma and one line, so a name containing
@@ -35,9 +40,9 @@ export function writeFreeSurferLabel(vertexIndices, anatomicalVertices, options 
 
   for (let i = 0; i < count; i++) {
     const v = vertexIndices[i];
-    const x = anatomicalVertices[3 * v].toFixed(3);
-    const y = anatomicalVertices[3 * v + 1].toFixed(3);
-    const z = anatomicalVertices[3 * v + 2].toFixed(3);
+    const x = (anatomicalVertices[3 * v] - dx).toFixed(3);
+    const y = (anatomicalVertices[3 * v + 1] - dy).toFixed(3);
+    const z = (anatomicalVertices[3 * v + 2] - dz).toFixed(3);
     const s = (stat ? stat[i] : 0).toFixed(10);
     lines[i + 2] = `${v}  ${x}  ${y}  ${z} ${s}`;
   }

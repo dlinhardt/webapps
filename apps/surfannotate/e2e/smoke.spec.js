@@ -1473,3 +1473,37 @@ test('switching tool cancels a pending "click inside the region"', async ({ page
   expect(await page.evaluate(() => window.__surfannotate.awaitingSeed))
     .toBe(false, 'the pending seed would eat the first landmark click');
 });
+
+test('an exported .label carries tkreg coordinates, as its header claims', async ({ page }) => {
+  // NiiVue adds the volume centre on load (tkreg RAS -> scanner RAS), even when
+  // the footer says the volume geometry is invalid. The header declares TkReg
+  // and FreeSurfer's labelGetSurfaceRasCoords takes it verbatim, so writing the
+  // shifted values makes mri_label2vol and mri_label2label --regmethod coords
+  // silently wrong while everything keyed on the vertex index looks fine.
+  await loadSurface(page);
+
+  const inMemory = await page.evaluate(() => {
+    const s = window.__surfannotate;
+    return {
+      xyz: [s.geometry.positions[0], s.geometry.positions[1], s.geometry.positions[2]],
+      translation: window.__surfannotateUi.activeSurface().translation
+    };
+  });
+  // lh.pial's footer reads `cras = -1.9991 0.0000 -1.9991`.
+  expect(inMemory.translation[0]).toBeCloseTo(-1.9991, 3);
+  expect(inMemory.translation[1]).toBeCloseTo(0, 6);
+  expect(inMemory.translation[2]).toBeCloseTo(-1.9991, 3);
+
+  const label = await page.evaluate((offset) => window.__surfannotateIo.writeFreeSurferLabel(
+    Int32Array.from([0]), window.__surfannotate.geometry.positions,
+    { name: 'V1', subject: 'bert', offset }
+  ), inMemory.translation);
+
+  const row = label.trimEnd().split('\n')[2].trim().split(/\s+/).map(Number);
+  expect(row[0]).toBe(0);
+  // Back to the values stored in lh.pial itself.
+  expect(row[1]).toBeCloseTo(inMemory.xyz[0] - inMemory.translation[0], 3);
+  expect(row[1]).toBeCloseTo(-38.834, 2);
+  expect(row[3]).toBeCloseTo(66.908, 2);
+  expect(label.split('\n')[0]).toContain('vox2ras=TkReg');
+});
