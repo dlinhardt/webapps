@@ -30,6 +30,22 @@ its own — and that separation is verified by counting connected components, no
 A line running between *two different* cuts (the outer rim and the rim of a hole) does
 not separate an annulus, and is refused rather than silently filled.
 
+**Several surfaces and overlays at once.** Load as many surfaces as you like — by
+picker or by dropping them on the viewer — and switch between them from the list. One
+is shown at a time, because overlapping cortical surfaces occlude each other and a
+click over two of them could not be attributed to either. Overlays belong to the
+surface they were loaded onto, and each has its own visibility, colour map and range.
+
+ROIs follow the *vertex indexing*, not the file. Surfaces sharing one — a subject's
+`white`, `pial`, `inflated` and `sphere` — share the border points, so you can place
+them on the inflated surface and see them on the folded one. The traced border and the
+fill are rebuilt on the new surface rather than carried across, because the shortest
+path between two vertices genuinely runs differently over different geometry. Surfaces
+with unrelated topology keep separate, independent ROIs.
+
+Dropped files are identified by their magic number and name rather than by drop order,
+so a surface and an overlay can be dropped in any sequence.
+
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 
 ## Exports

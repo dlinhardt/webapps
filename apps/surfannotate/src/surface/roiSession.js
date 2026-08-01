@@ -61,6 +61,38 @@ export class RoiSession {
     return Boolean(this.openEdge);
   }
 
+  /**
+   * Point this session at a different surface that shares the same vertex
+   * indexing — `lh.white` and `lh.inflated` of one subject, say.
+   *
+   * The clicks survive, because a click is a vertex index and that index means
+   * the same vertex on either surface. Everything derived from them does not:
+   * the shortest path between two vertices runs differently over inflated
+   * geometry than over folded geometry, so the traced border and the fill are
+   * discarded and must be rebuilt. That is a real difference, not a limitation
+   * — the border genuinely is a different set of vertices on the two surfaces.
+   *
+   * @param {import('./adjacency.js').SurfaceGraph} graph
+   * @param {import('./pathfinder.js').SurfacePathfinder} finder
+   * @param {Float32Array} vertices
+   * @param {object} [options]
+   * @param {Uint8Array} [options.openEdge]
+   */
+  rebind(graph, finder, vertices, options = {}) {
+    if (graph.V !== this.graph.V) {
+      throw new Error(
+        `cannot rebind a session for ${this.graph.V} vertices onto ${graph.V}`
+      );
+    }
+    this.graph = graph;
+    this.finder = finder;
+    this.vertices = vertices;
+    this.openEdge = options.openEdge || null;
+    this._segmentCache.clear();
+    this._anchor = null;
+    this._reopen();
+  }
+
   setMode(mode) {
     if (mode !== MODE_ROI && mode !== MODE_POINTS) throw new Error(`unknown mode "${mode}"`);
     this.mode = mode;

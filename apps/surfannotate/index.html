@@ -10,23 +10,32 @@
     <div id="app">
       <div id="controls">
         <section class="panel">
-          <h2>Surface</h2>
+          <h2>Surfaces</h2>
           <label class="file-field">
-            <span>Surface mesh</span>
+            <span>Add surface</span>
             <!-- Deliberately unfiltered: FreeSurfer surfaces have irregular
                  names (lh.pial, lh.white, lh.pial.T1, surf.gii.gz), and an
                  accept list greys out exactly the files people want. The
                  loader validates instead. -->
-            <input type="file" id="surfaceInput" />
+            <input type="file" id="surfaceInput" multiple />
           </label>
-          <p class="hint">FreeSurfer (lh.pial, lh.white, lh.inflated), GIfTI .surf.gii, .mz3 and more.</p>
+          <ul class="layer-list" id="surfaceList" aria-label="Loaded surfaces"></ul>
+          <p class="hint" id="surfaceHint">
+            FreeSurfer (lh.pial, lh.white, lh.inflated), GIfTI .surf.gii, .mz3 and more.
+            Drop files on the viewer to add them.
+          </p>
+        </section>
 
+        <section class="panel">
+          <h2>Overlays</h2>
           <label class="file-field">
-            <span>Overlay <small>(optional)</small></span>
-            <input type="file" id="overlayInput" disabled />
+            <span>Add overlay</span>
+            <input type="file" id="overlayInput" multiple disabled />
           </label>
+          <ul class="layer-list" id="overlayList" aria-label="Overlays on the shown surface"></ul>
           <p class="hint">Curvature, thickness, .annot, .label.gii, .shape.gii, CIFTI .dscalar.nii.</p>
 
+          <p class="hint" id="overlaySelectedHint" hidden></p>
           <div class="row">
             <label for="overlayColormap">Colour map</label>
             <select id="overlayColormap" disabled>

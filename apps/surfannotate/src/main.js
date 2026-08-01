@@ -22,6 +22,7 @@ import { writeFreeSurferLabel } from './io/freesurferLabel.js';
 import { writeGiftiLabel, maskToLabelArray } from './io/gifti.js';
 import { writePointsJson, hashTriangles } from './io/points.js';
 import { exportStem as buildExportStem } from './io/naming.js';
+import { classifyFile, SNIFF_BYTES, SURFACE, OVERLAY, UNKNOWN } from './io/classify.js';
 
 // Label keys painted into the ROI layer.
 const LABEL_NONE = 0;
@@ -60,7 +61,10 @@ function isTextEntry(target) {
 
 const ui = {
   surfaceInput: el('surfaceInput'),
+  surfaceList: el('surfaceList'),
   overlayInput: el('overlayInput'),
+  overlayList: el('overlayList'),
+  overlaySelectedHint: el('overlaySelectedHint'),
   overlayOpacity: el('overlayOpacity'),
   overlayColormap: el('overlayColormap'),
   overlayMin: el('overlayMin'),
@@ -108,6 +112,23 @@ mountImagingWorkspace({
 
 const state = {
   nv: null,
+
+  // Every loaded surface, and which one is shown. Exactly one is visible at a
+  // time: cortical surfaces occlude each other, and more importantly the depth
+  // picker returns a position rather than an identity, so a click over two
+  // overlapping meshes could not be attributed to either.
+  surfaces: [],
+  activeId: null,
+  nextId: 1,
+
+  // ROI work is keyed by topology, not by file. Surfaces that share a vertex
+  // indexing — one subject's white, pial, inflated and sphere — share a
+  // session, so a border drawn on the inflated surface is still there after
+  // switching to the folded one. See RoiSession.rebind.
+  sessions: new Map(),
+
+  // Mirrors of the active surface. The rest of the app reads these rather than
+  // reaching into the list, which keeps this change off every call site.
   mesh: null,
   geometry: null,
   graph: null,
@@ -116,15 +137,29 @@ const state = {
   session: null,
   labelValues: null,
   layerIndex: -1,
+  meshIdentity: null,
+  sourceName: '',
+  hasOpenBoundary: false,
   overlayLayer: null,
   overlayAutoRange: null,
+
   pressOrigin: null,
   pickMemo: { x: -1, y: -1, mm: null },
-  meshIdentity: null,
   awaitingSeed: false,
-  roiOpacity: 0.55,
-  sourceName: ''
+  roiOpacity: 0.55
 };
+
+/** The surface currently shown, or null when nothing is loaded. */
+function activeSurface() {
+  return state.surfaces.find((entry) => entry.id === state.activeId) || null;
+}
+
+/** The overlay whose colour map and range the controls are editing. */
+function activeOverlay() {
+  const entry = activeSurface();
+  if (!entry) return null;
+  return entry.overlays.find((overlay) => overlay.id === entry.activeOverlayId) || null;
+}
 
 function setStatus(text) {
   ui.statusText.textContent = text;
@@ -147,13 +182,14 @@ async function init() {
   registerExtraColormaps(state.nv);
   state.nv.setSliceType(state.nv.sliceTypeRender);
 
-  ui.surfaceInput.addEventListener('change', (event) => {
-    const file = event.target.files?.[0];
-    if (file) loadSurface(file);
+  ui.surfaceInput.addEventListener('change', async (event) => {
+    for (const file of Array.from(event.target.files || [])) await loadSurface(file);
+    // Clear it, or picking the same file twice in a row fires no change event.
+    event.target.value = '';
   });
-  ui.overlayInput.addEventListener('change', (event) => {
-    const file = event.target.files?.[0];
-    if (file) addOverlay(file);
+  ui.overlayInput.addEventListener('change', async (event) => {
+    for (const file of Array.from(event.target.files || [])) await addOverlay(file);
+    event.target.value = '';
   });
 
   // These MUST be capture-phase. NiiVue's own drop listener lives on the canvas
@@ -267,10 +303,12 @@ async function init() {
   });
 
   const applyOverlayDisplay = () => {
-    if (!state.overlayLayer) return;
-    setOverlayDisplay(state.nv, state.mesh, state.overlayLayer, {
+    const overlay = activeOverlay();
+    if (!overlay) return;
+    overlay.opacity = Number(ui.overlayOpacity.value);
+    setOverlayDisplay(state.nv, state.mesh, overlay.layer, {
       colormap: ui.overlayColormap.value,
-      opacity: Number(ui.overlayOpacity.value)
+      opacity: overlay.visible ? overlay.opacity : 0
     });
   };
   ui.overlayOpacity.addEventListener('input', applyOverlayDisplay);
@@ -338,25 +376,34 @@ async function init() {
 }
 
 /**
- * A drop with no surface loaded is a surface; afterwards it is an overlay.
- * Dropping two files at once loads the first as the surface and the second as
- * its overlay, which is the common "lh.pial + lh.curv" case.
+ * Route each dropped file to the surface list or the overlay list.
+ *
+ * The old rule was positional — first drop is the surface, everything after is
+ * an overlay — which cannot express "add a second surface". So each file is
+ * classified from its own magic number and name instead. Files that cannot be
+ * identified fall back to the positional rule, which is right often enough and
+ * is what the user was already used to.
  */
 async function handleDroppedFiles(files) {
-  if (!state.mesh) {
-    await loadSurface(files[0]);
-    if (files.length > 1 && state.mesh) await addOverlay(files[1]);
-    return;
+  for (const file of files) {
+    let kind = UNKNOWN;
+    try {
+      const head = await file.slice(0, SNIFF_BYTES).arrayBuffer();
+      kind = classifyFile(file.name, head);
+    } catch (error) {
+      console.error('surfannotate: could not read the head of the dropped file', error);
+    }
+    if (kind === UNKNOWN) kind = activeSurface() ? OVERLAY : SURFACE;
+
+    if (kind === SURFACE) await loadSurface(file);
+    else if (activeSurface()) await addOverlay(file);
+    else setStatus(`${file.name} looks like an overlay — load a surface first.`);
   }
-  await addOverlay(files[0]);
 }
 
 async function loadSurface(file) {
   setStatus(`Loading ${file.name}…`);
   try {
-    // Replace any previous surface rather than stacking meshes.
-    for (const existing of [...state.nv.meshes]) state.nv.removeMesh(existing);
-
     const mesh = await loadMeshFromFile(state.nv, file);
     const geometry = getGeometry(mesh);
 
@@ -368,43 +415,49 @@ async function loadSurface(file) {
     const finder = new SurfacePathfinder(graph, geometry.positions);
     const index = buildVertexIndex(geometry.positions);
 
-    state.mesh = mesh;
-    state.geometry = geometry;
-    state.graph = graph;
-    state.finder = finder;
-    state.index = index;
     const openBoundary = findBoundaryVertices(geometry.triangles, geometry.vertexCount);
     let openCount = 0;
     for (let v = 0; v < openBoundary.length; v++) if (openBoundary[v]) openCount++;
-    state.hasOpenBoundary = openCount > 0;
 
-    state.session = new RoiSession(graph, finder, geometry.positions, {
-      openEdge: state.hasOpenBoundary ? openBoundary : null
-    });
-    state.labelValues = new Float32Array(geometry.vertexCount);
-    state.layerIndex = attachLabelLayer(mesh, state.labelValues, currentLabelTable());
-    state.sourceName = file.name;
-
-    state.meshIdentity = {
-      numVertices: geometry.vertexCount,
-      numTriangles: geometry.triangles.length / 3,
-      sourceFile: file.name,
-      triangleHash: await hashTriangles(geometry.triangles)
+    const triangleHash = await hashTriangles(geometry.triangles);
+    const entry = {
+      id: state.nextId++,
+      name: file.name,
+      mesh,
+      geometry,
+      graph,
+      finder,
+      index,
+      openEdge: openCount > 0 ? openBoundary : null,
+      labelValues: new Float32Array(geometry.vertexCount),
+      layerIndex: -1,
+      overlays: [],
+      activeOverlayId: null,
+      identity: {
+        numVertices: geometry.vertexCount,
+        numTriangles: geometry.triangles.length / 3,
+        sourceFile: file.name,
+        triangleHash
+      },
+      // Two surfaces are interchangeable for ROI purposes exactly when they
+      // have the same vertices in the same order joined the same way.
+      topologyKey: `${geometry.vertexCount}:${triangleHash}`
     };
 
-    commitLayer(state.nv, mesh);
-    ui.dropHint.hidden = true;
-    showExportName();
-    ui.overlayInput.disabled = false;
-    ui.overlayOpacity.disabled = false;
-    state.overlayLayer = null;
+    entry.layerIndex = attachLabelLayer(mesh, entry.labelValues, currentLabelTable());
+    state.surfaces.push(entry);
+    activateSurface(entry.id);
 
-    const note = state.hasOpenBoundary
+    const note = openCount > 0
       ? ' This surface is cut, so you can close an ROI against its edge.'
       : '';
+    const shared = state.sessions.get(entry.topologyKey);
+    const carried = shared && shared.clicks.length
+      ? ` Border points carried over from ${state.surfaces.filter(
+        (s) => s.topologyKey === entry.topologyKey).length - 1} matching surface(s).`
+      : '';
     setStatus(`${file.name}: ${geometry.vertexCount.toLocaleString()} vertices, ` +
-      `${(geometry.triangles.length / 3).toLocaleString()} faces.${note}`);
-    repaint();
+      `${(geometry.triangles.length / 3).toLocaleString()} faces.${note}${carried}`);
   } catch (error) {
     // Surface it in the UI *and* the console — a parse failure deep inside
     // NiiVue is otherwise silent and looks like "nothing happened".
@@ -414,32 +467,141 @@ async function loadSurface(file) {
       'Supported: FreeSurfer (lh.pial, lh.white, lh.inflated), GIfTI .surf.gii, ' +
       '.mz3, .obj, .stl, .ply, .vtk, .srf, .off.'
     );
-    ui.dropHint.hidden = false;
+    renderLayerLists();
   }
 }
 
+/**
+ * Show one surface and hide the rest, then point every mirror in `state` at it.
+ *
+ * The ROI session follows the *topology*, not the file: switching between two
+ * surfaces of the same subject keeps the border points, while switching to an
+ * unrelated mesh gets a fresh session and leaves the first one intact to come
+ * back to.
+ */
+function activateSurface(id, { announce = false } = {}) {
+  const entry = state.surfaces.find((surface) => surface.id === id);
+  if (!entry) return;
+
+  state.activeId = id;
+  for (const surface of state.surfaces) {
+    surface.mesh.visible = surface.id === id;
+  }
+
+  let session = state.sessions.get(entry.topologyKey);
+  if (!session) {
+    session = new RoiSession(entry.graph, entry.finder, entry.geometry.positions, {
+      openEdge: entry.openEdge
+    });
+    state.sessions.set(entry.topologyKey, session);
+  } else if (session.graph !== entry.graph) {
+    session.rebind(entry.graph, entry.finder, entry.geometry.positions, {
+      openEdge: entry.openEdge
+    });
+  }
+
+  state.mesh = entry.mesh;
+  state.geometry = entry.geometry;
+  state.graph = entry.graph;
+  state.finder = entry.finder;
+  state.index = entry.index;
+  state.session = session;
+  state.labelValues = entry.labelValues;
+  state.layerIndex = entry.layerIndex;
+  state.meshIdentity = entry.identity;
+  state.sourceName = entry.name;
+  state.hasOpenBoundary = Boolean(entry.openEdge);
+  state.awaitingSeed = false;
+
+  const overlay = activeOverlay();
+  state.overlayLayer = overlay ? overlay.layer : null;
+  state.overlayAutoRange = overlay ? overlay.autoRange : null;
+
+  ui.dropHint.hidden = true;
+  ui.overlayInput.disabled = false;
+  ui.overlayOpacity.disabled = false;
+  showExportName();
+  syncOverlayControls();
+  commitLayer(state.nv, entry.mesh);
+  repaint();
+
+  if (announce) {
+    const carried = session.clicks.length
+      ? ` ${session.clicks.length} border point(s) carried over.`
+      : '';
+    setStatus(`Showing ${entry.name} — ` +
+      `${entry.geometry.vertexCount.toLocaleString()} vertices.${carried}`);
+  }
+}
+
+function removeSurface(id) {
+  const position = state.surfaces.findIndex((entry) => entry.id === id);
+  if (position < 0) return;
+  const [entry] = state.surfaces.splice(position, 1);
+  state.nv.removeMesh(entry.mesh);
+
+  // Drop the shared session only once the last surface using that topology has
+  // gone, or switching away and back would silently lose the border points.
+  const stillUsed = state.surfaces.some((s) => s.topologyKey === entry.topologyKey);
+  if (!stillUsed) state.sessions.delete(entry.topologyKey);
+
+  if (state.activeId !== id) {
+    renderLayerLists();
+    return;
+  }
+  const next = state.surfaces[position] || state.surfaces[position - 1];
+  if (next) {
+    activateSurface(next.id);
+    setStatus(`Removed ${entry.name}. Showing ${next.name}.`);
+    return;
+  }
+
+  // Nothing left.
+  state.activeId = null;
+  for (const key of ['mesh', 'geometry', 'graph', 'finder', 'index', 'session',
+    'labelValues', 'meshIdentity', 'overlayLayer', 'overlayAutoRange']) {
+    state[key] = null;
+  }
+  state.layerIndex = -1;
+  state.sourceName = '';
+  state.hasOpenBoundary = false;
+  ui.dropHint.hidden = false;
+  ui.overlayInput.disabled = true;
+  showExportName();
+  syncOverlayControls();
+  renderLayerLists();
+  setStatus(`Removed ${entry.name}. Load a surface to begin.`);
+}
+
 async function addOverlay(file) {
-  if (!state.mesh) return;
+  const entry = activeSurface();
+  if (!entry) return;
   setStatus(`Loading overlay ${file.name}…`);
   try {
-    state.overlayLayer = await loadOverlay(state.nv, state.mesh, file, {
+    const layer = await loadOverlay(state.nv, entry.mesh, file, {
       opacity: Number(ui.overlayOpacity.value),
       colormap: ui.overlayColormap.value
     });
     // readLayer appends, so the ROI layer is no longer last. Re-attach it on top.
     reattachRoiLayer();
-    state.overlayAutoRange = {
-      low: state.overlayLayer.cal_min,
-      high: state.overlayLayer.cal_max
+
+    const overlay = {
+      id: state.nextId++,
+      name: file.name,
+      layer,
+      visible: true,
+      opacity: Number(ui.overlayOpacity.value),
+      autoRange: { low: layer.cal_min, high: layer.cal_max }
     };
-    ui.overlayColormap.disabled = false;
-    for (const control of [ui.overlayMin, ui.overlayMax, ui.overlayRangeReset]) {
-      control.disabled = false;
-    }
-    showOverlayRange(state.overlayLayer);
+    entry.overlays.push(overlay);
+    entry.activeOverlayId = overlay.id;
+    state.overlayLayer = layer;
+    state.overlayAutoRange = overlay.autoRange;
+
+    syncOverlayControls();
     setStatus(
       `Overlay ${file.name} loaded — display window ` +
-      `${state.overlayLayer.cal_min.toFixed(3)} to ${state.overlayLayer.cal_max.toFixed(3)}.`
+      `${layer.cal_min.toFixed(3)} to ${layer.cal_max.toFixed(3)}.`
     );
     repaint();
   } catch (error) {
@@ -448,12 +610,168 @@ async function addOverlay(file) {
   }
 }
 
+/** Make one of the active surface's overlays the one the controls edit. */
+function selectOverlay(id) {
+  const entry = activeSurface();
+  if (!entry) return;
+  entry.activeOverlayId = id;
+  const overlay = activeOverlay();
+  state.overlayLayer = overlay ? overlay.layer : null;
+  state.overlayAutoRange = overlay ? overlay.autoRange : null;
+  syncOverlayControls();
+  repaint();
+}
+
+/**
+ * Show or hide one overlay.
+ *
+ * NiiVue mesh layers have no visibility flag, so this rides on opacity — which
+ * means the user's chosen opacity has to be remembered separately, or hiding
+ * and re-showing a layer would silently reset it to opaque.
+ */
+function setOverlayVisible(id, visible) {
+  const entry = activeSurface();
+  const overlay = entry?.overlays.find((candidate) => candidate.id === id);
+  if (!overlay) return;
+  overlay.visible = visible;
+  setOverlayDisplay(state.nv, entry.mesh, overlay.layer, {
+    opacity: visible ? overlay.opacity : 0
+  });
+  renderLayerLists();
+  repaint();
+}
+
+function removeOverlay(id) {
+  const entry = activeSurface();
+  if (!entry) return;
+  const position = entry.overlays.findIndex((overlay) => overlay.id === id);
+  if (position < 0) return;
+  const [overlay] = entry.overlays.splice(position, 1);
+
+  const layerIndex = entry.mesh.layers.indexOf(overlay.layer);
+  if (layerIndex >= 0) entry.mesh.layers.splice(layerIndex, 1);
+  reattachRoiLayer();
+
+  if (entry.activeOverlayId === id) {
+    const next = entry.overlays[position] || entry.overlays[position - 1];
+    entry.activeOverlayId = next ? next.id : null;
+  }
+  const active = activeOverlay();
+  state.overlayLayer = active ? active.layer : null;
+  state.overlayAutoRange = active ? active.autoRange : null;
+
+  syncOverlayControls();
+  commitLayer(state.nv, entry.mesh);
+  repaint();
+  setStatus(`Removed overlay ${overlay.name}.`);
+}
+
+/** Enable, disable and fill the overlay controls for whatever is selected. */
+function syncOverlayControls() {
+  const overlay = activeOverlay();
+  const controls = [ui.overlayColormap, ui.overlayMin, ui.overlayMax, ui.overlayRangeReset];
+  for (const control of controls) control.disabled = !overlay;
+  ui.overlayOpacity.disabled = !overlay;
+
+  ui.overlaySelectedHint.hidden = !overlay;
+  if (overlay) {
+    ui.overlaySelectedHint.textContent = `Editing ${overlay.name}.`;
+    ui.overlayColormap.value = overlay.layer.colormap || 'gray';
+    ui.overlayOpacity.value = String(overlay.opacity);
+    showOverlayRange(overlay.layer);
+  } else {
+    // Blank rather than leave another surface's numbers sitting in the boxes,
+    // where they read as this surface's settings.
+    ui.overlayMin.value = '';
+    ui.overlayMax.value = '';
+  }
+  renderLayerLists();
+}
+
 /** Keep the ROI layer above any overlay so the boundary stays visible. */
 function reattachRoiLayer() {
-  const mesh = state.mesh;
-  const existing = mesh.layers.findIndex((layer) => layer.name === 'surfannotate-roi');
-  if (existing >= 0) mesh.layers.splice(existing, 1);
-  state.layerIndex = attachLabelLayer(mesh, state.labelValues, currentLabelTable());
+  const entry = activeSurface();
+  if (!entry) return;
+  const existing = entry.mesh.layers.findIndex((layer) => layer.name === 'surfannotate-roi');
+  if (existing >= 0) entry.mesh.layers.splice(existing, 1);
+  entry.layerIndex = attachLabelLayer(entry.mesh, entry.labelValues, currentLabelTable());
+  state.layerIndex = entry.layerIndex;
+}
+
+// -- the layer lists ------------------------------------------------------
+
+function makeRemoveButton(title, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'layer-remove';
+  button.title = title;
+  button.setAttribute('aria-label', title);
+  button.textContent = '×';
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+/**
+ * Rebuild both lists from state.
+ *
+ * These lists, not the file inputs, are the record of what is loaded. A native
+ * `<input type="file">` shows only the last file picked through it and shows
+ * nothing at all for a drag-and-drop, which is why dropping a surface used to
+ * look like nothing had happened.
+ */
+function renderLayerLists() {
+  ui.surfaceList.innerHTML = '';
+  for (const entry of state.surfaces) {
+    const item = document.createElement('li');
+    if (entry.id === state.activeId) item.classList.add('selected');
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = 'activeSurface';
+    radio.checked = entry.id === state.activeId;
+    radio.id = `surface-${entry.id}`;
+    radio.addEventListener('change', () => activateSurface(entry.id, { announce: true }));
+
+    const name = document.createElement('label');
+    name.className = 'layer-name';
+    name.htmlFor = radio.id;
+    name.textContent = entry.name;
+    name.title = entry.name;
+
+    const meta = document.createElement('span');
+    meta.className = 'layer-meta';
+    meta.textContent = `${Math.round(entry.geometry.vertexCount / 1000)}k`;
+    meta.title = `${entry.geometry.vertexCount.toLocaleString()} vertices`;
+
+    item.append(radio, name, meta,
+      makeRemoveButton(`Remove ${entry.name}`, () => removeSurface(entry.id)));
+    ui.surfaceList.appendChild(item);
+  }
+
+  ui.overlayList.innerHTML = '';
+  const entry = activeSurface();
+  for (const overlay of entry ? entry.overlays : []) {
+    const item = document.createElement('li');
+    if (overlay.id === entry.activeOverlayId) item.classList.add('selected');
+
+    const check = document.createElement('input');
+    check.type = 'checkbox';
+    check.checked = overlay.visible;
+    check.title = 'Show this overlay';
+    check.setAttribute('aria-label', `Show ${overlay.name}`);
+    check.addEventListener('change', () => setOverlayVisible(overlay.id, check.checked));
+
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'layer-name';
+    name.textContent = overlay.name;
+    name.title = `Edit the colour map and range of ${overlay.name}`;
+    name.addEventListener('click', () => selectOverlay(overlay.id));
+
+    item.append(check, name,
+      makeRemoveButton(`Remove ${overlay.name}`, () => removeOverlay(overlay.id)));
+    ui.overlayList.appendChild(item);
+  }
 }
 
 /** Show a sensible number of decimals for whatever the overlay's units are. */
@@ -771,4 +1089,8 @@ window.__surfannotateIo = {
 // The same actions the buttons invoke, so a test can drive the real code path
 // (including the repaint and control-state sync) without synthesising a click
 // that has to land on a specific vertex in the 3D view.
-window.__surfannotateUi = { repaint, runFill, setMode, loadSurface, addOverlay };
+window.__surfannotateUi = {
+  repaint, runFill, setMode, loadSurface, addOverlay,
+  activateSurface, removeSurface, selectOverlay, setOverlayVisible, removeOverlay,
+  activeSurface, activeOverlay, handleDroppedFiles
+};

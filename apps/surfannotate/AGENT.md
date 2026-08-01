@@ -17,7 +17,7 @@ src/
     meshAdapter.js          Loading, picking, layers, overlays
     colormaps.js            Colour maps NiiVue does not ship
   io/                       File writers/readers, pure and unit-tested
-    freesurferLabel.js, gifti.js, points.js, naming.js
+    freesurferLabel.js, gifti.js, points.js, naming.js, classify.js
 ```
 
 The split matters: `surface/` and `io/` run under plain `node --test` with no browser,
@@ -31,6 +31,18 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `indexNearestXYZmm`), so keeping the surface area in one file makes that migration a
   single-file change. Pin stays at **0.69.0** — npm `latest`, and byte-identical mesh
   code to the 0.68.x the rest of this monorepo uses.
+- **`state.surfaces` is the list; `state.mesh`/`graph`/`session`/... are mirrors of
+  whichever entry is active.** Mirroring keeps the multi-surface change off every call
+  site, but it means `activateSurface` is the single place that may write them.
+- **Exactly one surface is visible at a time.** Not a UI preference: the depth picker
+  returns a position, never an identity, so a click over two overlapping meshes could
+  not be attributed to either. Multiple simultaneous surfaces would silently break
+  vertex picking.
+- **ROI sessions are keyed by topology (`vertexCount:triangleHash`), not by file.** One
+  subject's white/pial/inflated share a session so border points survive a switch;
+  `RoiSession.rebind` moves it and deliberately discards the traced chain and fill,
+  which are geometry-dependent. Deleting a surface only drops the session once the last
+  surface with that topology is gone.
 - **The clicked vertices are the only authoritative ROI state.** The traced chain and
   the filled mask are always derived and are discarded whenever the clicks change.
   freeview does the opposite and that is what makes its undo impossible.

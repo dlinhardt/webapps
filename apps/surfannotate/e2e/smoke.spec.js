@@ -658,3 +658,210 @@ test('typing in text fields is not stolen by the undo shortcut', async ({ page }
   await page.keyboard.press('Backspace');
   expect(await page.evaluate(() => window.__surfannotate.session.clicks.length)).toBe(2);
 });
+
+// -- several surfaces and overlays at once ---------------------------------
+
+const surfaceRows = (page) => page.locator('#surfaceList li');
+const overlayRows = (page) => page.locator('#overlayList li');
+
+test('a dropped surface shows up in the surface list', async ({ page }) => {
+  // A native file input shows nothing for a drag-and-drop, so before the list
+  // existed a dropped surface rendered but the panel looked empty — it seemed
+  // as though the drop had not registered at all.
+  const bytes = readFileSync(join(FIXTURES, 'lh.flat.surf.gii')).toString('base64');
+  await page.evaluate(async (b64) => {
+    const binary = atob(b64);
+    const buffer = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buffer[i] = binary.charCodeAt(i);
+    const file = new File([buffer], 'lh.flat.surf.gii', { type: 'application/octet-stream' });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    const canvas = document.getElementById('gl');
+    const box = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transfer,
+      clientX: box.left + box.width / 2, clientY: box.top + box.height / 2
+    }));
+  }, bytes);
+
+  await expect(page.locator('#statusText')).toContainText('1,681 vertices', { timeout: 60_000 });
+  await expect(surfaceRows(page)).toHaveCount(1);
+  await expect(surfaceRows(page).first()).toContainText('lh.flat.surf.gii');
+  await expect(surfaceRows(page).first().locator('input[type=radio]')).toBeChecked();
+});
+
+test('a second surface is added rather than replacing the first', async ({ page }) => {
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(1);
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+
+  // Both meshes stay loaded; exactly one is visible, and it is the newest.
+  const shown = await page.evaluate(() => window.__surfannotate.nv.meshes.map((m) => m.visible));
+  expect(shown).toEqual([false, true]);
+
+  // Switching the radio switches which is drawn and which the tools act on.
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  const after = await page.evaluate(() => ({
+    visible: window.__surfannotate.nv.meshes.map((m) => m.visible),
+    active: window.__surfannotate.sourceName,
+    vertices: window.__surfannotate.geometry.vertexCount,
+    graphMatches: window.__surfannotate.graph.V === window.__surfannotate.geometry.vertexCount
+  }));
+  expect(after.visible).toEqual([true, false]);
+  expect(after.active).toBe('lh.flat.surf.gii');
+  expect(after.vertices).toBe(1681);
+  expect(after.graphMatches).toBe(true);
+});
+
+test('removing a surface falls back to another, and the last leaves a clean slate', async ({ page }) => {
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+
+  await surfaceRows(page).nth(1).locator('.layer-remove').click();
+  await expect(surfaceRows(page)).toHaveCount(1);
+  expect(await page.evaluate(() => window.__surfannotate.sourceName)).toBe('lh.flat.surf.gii');
+  expect(await page.evaluate(() => window.__surfannotate.nv.meshes.length)).toBe(1);
+
+  await surfaceRows(page).first().locator('.layer-remove').click();
+  await expect(surfaceRows(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.__surfannotate.session)).toBe(null);
+  await expect(page.locator('#dropHint')).toBeVisible();
+});
+
+test('border points survive a switch between surfaces sharing a vertex indexing', async ({ page }) => {
+  // The same file twice stands in for lh.white and lh.inflated: identical
+  // vertex count and triangles, so an ROI drawn on one is valid on the other.
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    session.addClick(2 * 41 + 1);
+    session.addClick(2 * 41 + 39);
+    session.closeOnEdge();
+    session.fill();
+    window.__surfannotateUi.repaint();
+  });
+  const before = await page.evaluate(() => ({
+    clicks: [...window.__surfannotate.session.clicks],
+    filled: window.__surfannotate.session.filled.reduce((n, v) => n + v, 0)
+  }));
+  expect(before.filled).toBe(82);
+
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  const after = await page.evaluate(() => ({
+    clicks: [...window.__surfannotate.session.clicks],
+    // Paths and fills are geometry-dependent, so they are discarded and redone.
+    closed: window.__surfannotate.session.closed,
+    filled: window.__surfannotate.session.filled
+  }));
+  expect(after.clicks).toEqual(before.clicks);
+  expect(after.closed).toBe(false);
+  expect(after.filled).toBe(null);
+
+  // And re-closing on the new surface reproduces the same region.
+  const redone = await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    session.closeOnEdge();
+    return session.fill().count;
+  });
+  expect(redone).toBe(82);
+});
+
+test('surfaces with different topology keep separate ROIs', async ({ page }) => {
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await page.evaluate(() => {
+    window.__surfannotate.session.addClick(100);
+    window.__surfannotate.session.addClick(200);
+  });
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+  expect(await page.evaluate(() => window.__surfannotate.session.clicks.length))
+    .toBe(0, 'an unrelated mesh starts empty');
+
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  expect(await page.evaluate(() => [...window.__surfannotate.session.clicks]))
+    .toEqual([100, 200], 'and switching back restores the first ROI');
+});
+
+test('several overlays coexist, each with its own visibility and colour map', async ({ page }) => {
+  await loadSurface(page);
+  await page.setInputFiles('#overlayInput', join(FIXTURES, 'lh.curv'));
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.curv loaded', {
+    timeout: 60_000
+  });
+  await expect(overlayRows(page)).toHaveCount(1);
+
+  await page.setInputFiles('#overlayInput', join(FIXTURES, 'lh.curv'));
+  await expect(overlayRows(page)).toHaveCount(2);
+  expect(await page.evaluate(() => window.__surfannotate.mesh.layers.length))
+    .toBe(3, 'two overlays plus the ROI layer');
+
+  // The ROI layer must stay last, or an overlay paints over the boundary.
+  expect(await page.evaluate(() => {
+    const layers = window.__surfannotate.mesh.layers;
+    return layers[layers.length - 1].name;
+  })).toBe('surfannotate-roi');
+
+  // Unticking hides one overlay without touching the other's opacity.
+  await overlayRows(page).first().locator('input[type=checkbox]').uncheck();
+  const opacities = await page.evaluate(() =>
+    window.__surfannotateUi.activeSurface().overlays.map((o) => ({
+      visible: o.visible, stored: o.opacity, applied: o.layer.opacity
+    })));
+  expect(opacities[0]).toMatchObject({ visible: false, applied: 0 });
+  expect(opacities[0].stored).toBeGreaterThan(0);
+  expect(opacities[1].visible).toBe(true);
+
+  // Selecting an overlay points the colour-map controls at it.
+  await overlayRows(page).first().locator('.layer-name').click();
+  await expect(page.locator('#overlaySelectedHint')).toContainText('lh.curv');
+  await page.selectOption('#overlayColormap', 'gist_rainbow');
+  const maps = await page.evaluate(() =>
+    window.__surfannotateUi.activeSurface().overlays.map((o) => o.layer.colormap));
+  expect(maps[0]).toBe('gist_rainbow');
+  expect(maps[1]).not.toBe('gist_rainbow');
+
+  await overlayRows(page).first().locator('.layer-remove').click();
+  await expect(overlayRows(page)).toHaveCount(1);
+  expect(await page.evaluate(() => window.__surfannotate.mesh.layers.length)).toBe(2);
+});
+
+test('overlays belong to their own surface', async ({ page }) => {
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(overlayRows(page)).toHaveCount(0);
+
+  // Switching surfaces shows that surface's overlays, not the previous one's.
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  await expect(overlayRows(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.__surfannotate.overlayLayer)).toBe(null);
+});
+
+test('a dropped overlay is recognised as an overlay, not a second surface', async ({ page }) => {
+  await loadSurface(page);
+  const bytes = readFileSync(join(FIXTURES, 'lh.curv')).toString('base64');
+  await page.evaluate(async (b64) => {
+    const binary = atob(b64);
+    const buffer = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buffer[i] = binary.charCodeAt(i);
+    const file = new File([buffer], 'lh.curv', { type: 'application/octet-stream' });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    const canvas = document.getElementById('gl');
+    const box = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transfer,
+      clientX: box.left + box.width / 2, clientY: box.top + box.height / 2
+    }));
+  }, bytes);
+
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.curv loaded', {
+    timeout: 60_000
+  });
+  await expect(surfaceRows(page)).toHaveCount(1, 'the curv file did not become a surface');
+  await expect(overlayRows(page)).toHaveCount(1);
+});

@@ -129,6 +129,94 @@
   font-size: 0.8rem;
 }
 
+/* Loaded surfaces and overlays. The list is the record of what is loaded —
+   a native file input can only ever show the last file chosen through it, and
+   shows nothing at all for a drag-and-drop. */
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.layer-list:empty {
+  display: none;
+}
+
+.layer-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: var(--nd-radius-sm, 4px);
+  font-size: 0.8rem;
+}
+
+.layer-list li.selected {
+  background: rgba(127, 127, 160, 0.14);
+}
+
+.layer-list input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* The shell styles bare buttons inside the controls panel, so these need to be
+   specific enough to win — otherwise a layer name renders as a boxed control
+   rather than as the row's label. */
+.layer-list .layer-name,
+.layer-list button.layer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layer-meta {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-list .layer-remove,
+.layer-list button.layer-remove {
+  flex: 0 0 auto;
+  width: 1.3rem;
+  height: 1.3rem;
+  line-height: 1;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  border-radius: var(--nd-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font-size: 0.95rem;
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.layer-list .layer-remove:hover {
+  opacity: 1;
+  background: rgba(220, 80, 80, 0.25);
+}
+
 .point-list {
   margin: 0.25rem 0 0;
   padding-left: 1.1rem;
