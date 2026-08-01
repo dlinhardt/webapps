@@ -33,11 +33,14 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `indexNearestXYZmm`), so keeping the surface area in one file makes that migration a
   single-file change. Pin stays at **0.69.0** — npm `latest`, and byte-identical mesh
   code to the 0.68.x the rest of this monorepo uses.
-- **The favicons in `public/` are rendered, not hand-authored.** The source artwork is
-  711x508; each PNG is that fitted centred into a square, because a non-square icon is
-  stretched by the browser rather than padded. There is no transparent margin to trim,
-  so squaring necessarily letterboxes. Re-render with a canvas (headless Chromium will
-  do) rather than editing the PNGs.
+- **The favicons in `public/` are generated — run `node icon/render.mjs`, do not edit
+  the PNGs.** `icon/surfannotate.svg` is the master and is deliberately *not* shipped:
+  ~46 kB gzipped against 1.9 kB for the 32px PNG a tab actually uses, and the rasterised
+  versions are indistinguishable at every size a browser asks for. Its viewBox is already
+  square and tight to the *painted* bounds — measured by rasterising and finding the alpha
+  box, because `getBBox()` ignores stroke width and would clip the brain outline. Note
+  that `drawImage(img, 0, 0, w, h)` stretches rather than fitting, which is why the
+  viewBox has to be square before rendering.
 - **`index.html` opens on a start page, not the app.** `#startPage` is a fixed-position
   section over `#app`, hidden by `#enterAppButton` — the same shape calmar uses. The app
   is behind it the whole time, so the canvas is already sized and nothing needs
