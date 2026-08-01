@@ -1300,3 +1300,19 @@ test.describe('start page', () => {
     await expect(page.locator('.nd-imaging-brand-copy')).toContainText('SurfAnnotate');
   });
 });
+
+test('the app declares a favicon that is actually served', async ({ page }) => {
+  const href = await page.getAttribute('link[rel="icon"]', 'href');
+  expect(href).toBeTruthy();
+  // Vite substitutes %BASE_URL% in index.html. If that ever stops happening the
+  // href goes out as a literal, and the icon 404s without any other symptom.
+  expect(href).not.toContain('%');
+  expect(href.endsWith('/favicon.svg')).toBe(true);
+
+  const response = await page.request.get(new URL(href, page.url()).toString());
+  expect(response.status()).toBe(200);
+  expect(response.headers()['content-type']).toContain('svg');
+  const svg = await response.text();
+  expect(svg).toContain('<svg');
+  expect(svg).toContain('viewBox="0 0 32 32"');
+});

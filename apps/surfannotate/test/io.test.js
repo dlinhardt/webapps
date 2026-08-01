@@ -206,3 +206,32 @@ test('mesh identity compares topology, not geometry', async () => {
   assert.equal(wrongTopology.ok, false);
   assert.match(wrongTopology.reason, /different topology/);
 });
+
+test('a .label expands into one value per vertex', () => {
+  const indices = Int32Array.from([2, 5, 9]);
+  const positions = new Float32Array(30);
+  for (let v = 0; v < 10; v++) positions[3 * v] = v;
+  const text = writeFreeSurferLabel(indices, positions, { name: 'V1', subject: 'lh' });
+
+  const { values, count, hasStat } = labelToValues(text, 10);
+  assert.equal(count, 3);
+  assert.equal(hasStat, false, 'a plain region has no statistic');
+  assert.deepEqual(Array.from(values), [0, 0, 1, 0, 0, 1, 0, 0, 0, 1],
+    'a mask, not a field of zeros');
+});
+
+test('a .label with a statistic keeps the statistic', () => {
+  const text = '#!ascii label V1 , from subject lh vox2ras=TkReg\n2\n' +
+    '3  1.0 2.0 3.0 0.75\n7  4.0 5.0 6.0 -0.25\n';
+  const { values, hasStat } = labelToValues(text, 8);
+  assert.equal(hasStat, true);
+  assert.equal(values[3], 0.75);
+  assert.equal(values[7], -0.25);
+  assert.equal(values[0], 0);
+});
+
+test('a .label from another mesh is refused rather than silently truncated', () => {
+  const text = '#!ascii label V1 , from subject lh vox2ras=TkReg\n1\n' +
+    '900  1.0 2.0 3.0 0.0\n';
+  assert.throws(() => labelToValues(text, 10), /different mesh/);
+});
