@@ -13,6 +13,8 @@ for each app are recorded in `registry/apps.yml`.
 - `apps/niimath`: BSD-2-Clause (`apps/niimath/LICENSE`)
 - `apps/dicom2vid`: BSD-3-Clause (`apps/dicom2vid/LICENSE`)
 - `apps/browserqc`: BSD-2-Clause (`apps/browserqc/LICENSE`)
+- `apps/surfannotate`: MIT (`apps/surfannotate/LICENSE`); bundled third-party
+  notices in `apps/surfannotate/THIRD-PARTY.md`
 - `apps/vesselboost`, `apps/spinalcordtoolbox`, `apps/calmar`, and `apps/dicompare`:
   no machine-detectable top-level licence was present in the imported upstream
   snapshot; these are recorded as `NOASSERTION` until their maintainers add one.

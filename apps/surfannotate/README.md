@@ -116,5 +116,11 @@ and would breach the artifact budget if they reached `dist/`.
 
 ## Licence
 
-MIT. Uses [NiiVue](https://github.com/niivue/niivue) (BSD-2-Clause) for rendering and
-mesh parsing.
+MIT — see `LICENSE`. A permissive dependency does not dictate the licence of the work
+that uses it, so this being MIT while NiiVue is BSD-2-Clause is not a conflict; what
+those licences do require is that their notices travel with any redistribution of their
+code. The production bundle contains that code with the notices stripped by
+minification, so they are reproduced in `THIRD-PARTY.md`.
+
+Uses [NiiVue](https://github.com/niivue/niivue) (BSD-2-Clause) for rendering and mesh
+parsing, and `@neurodesk/webapp-components` (MIT) for the shell.
