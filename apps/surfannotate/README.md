@@ -56,8 +56,13 @@ unassigned cortex between them. No fill can cross an ROI marked as an edge.
 This works on closed surfaces too. `lh.pial` has no edge to begin with, but once V1 is
 cut out it is a sphere with a hole in it, and every edge closure applies.
 
-Completed ROIs are listed with their own colour, a visibility tick and a remove button;
-selecting one makes the export buttons write it instead of the region being drawn.
+Completed ROIs are listed with their own colour, a visibility tick and a remove button.
+Clicking a name makes the export buttons write it instead of the region being drawn, and
+the pencil reopens it: the ROI leaves the list, its border points go back on the canvas,
+and the border is retraced the way it was closed, so it can be adjusted and saved again.
+Reopening recomputes the border from the points rather than restoring the saved trace,
+because the points are the authoritative state and the surface may have changed since —
+another ROI may have become an edge, and the border should respect it.
 
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 

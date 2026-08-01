@@ -1019,3 +1019,105 @@ test('completed ROIs follow the topology, like the ROI being drawn', async ({ pa
   await surfaceRows(page).first().locator('input[type=radio]').check();
   await expect(roiRows(page)).toHaveCount(1, 'and they come back on the original');
 });
+
+test('a completed ROI can be reopened and its border points adjusted', async ({ page }) => {
+  await loadFlat(page);
+  await drawStrip(page, 4);
+  await page.fill('#roiName', 'V1');
+  await page.locator('#saveRoi').click();
+  await expect(roiRows(page)).toHaveCount(1);
+
+  const saved = await page.evaluate(() => {
+    const roi = window.__surfannotateUi.savedRois()[0];
+    return { clicks: roi.clicks, closure: roi.closure };
+  });
+  expect(saved.clicks).toEqual([4 * 41 + 1, 4 * 41 + 39]);
+  expect(saved.closure).toBe('edge');
+
+  await roiRows(page).first().locator('.layer-edit').click();
+
+  // Reopening is un-saving: it leaves the list and goes back on the canvas,
+  // already closed and filled so it can be adjusted from where it was.
+  await expect(roiRows(page)).toHaveCount(0);
+  await expect(page.locator('#roiName')).toHaveValue('V1');
+  const reopened = await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    return {
+      clicks: [...session.clicks],
+      closed: session.closed,
+      closure: session.closure,
+      filled: session.filled ? session.filled.reduce((n, v) => n + v, 0) : 0
+    };
+  });
+  expect(reopened.clicks).toEqual(saved.clicks);
+  expect(reopened.closed).toBe(true);
+  expect(reopened.closure).toBe('edge');
+  expect(reopened.filled).toBe(4 * 41, 'the region comes back as it was');
+
+  // Adjust it — one more point — and save again.
+  const adjusted = await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    session.undoClick();
+    session.addClick(6 * 41 + 39);
+    session.closeOnEdge();
+    return session.fill().count;
+  });
+  expect(adjusted).not.toBe(4 * 41);
+  await page.locator('#saveRoi').click();
+  await expect(roiRows(page)).toHaveCount(1);
+  await expect(roiRows(page).first()).toContainText('V1');
+});
+
+test('reopening an ROI that was an edge frees its own vertices first', async ({ page }) => {
+  // An ROI cannot be an edge for its own border: while it is cut out of the
+  // graph its own clicks are isolated and no path can reach them.
+  await loadFlat(page);
+  await drawStrip(page, 4);
+  await page.fill('#roiName', 'V1');
+  await page.locator('#saveRoi').click();
+  await roiRows(page).first().locator('.layer-flag input').check();
+  expect(await page.evaluate(() => window.__surfannotate.excluded !== null)).toBe(true);
+
+  await roiRows(page).first().locator('.layer-edit').click();
+  const after = await page.evaluate(() => ({
+    excluded: window.__surfannotate.excluded,
+    closed: window.__surfannotate.session.closed,
+    filled: window.__surfannotate.session.filled
+      ? window.__surfannotate.session.filled.reduce((n, v) => n + v, 0) : 0
+  }));
+  expect(after.excluded).toBe(null, 'the surface is whole again');
+  expect(after.closed).toBe(true, 'and the border retraced through its own vertices');
+  expect(after.filled).toBe(4 * 41);
+});
+
+test('reopening a loop ROI refills the side that was saved', async ({ page }) => {
+  // Reopening seeds the refill from a vertex inside the saved region rather than
+  // re-running the automatic inside/outside heuristic, because the saved region
+  // is recorded fact where the heuristic is a geometric guess. NOTE: on this
+  // fixture the two always agree wherever a region can be saved at all, so this
+  // test covers the round trip, not the difference between them.
+  await loadFlat(page);
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41, at = (i, j) => j * n + i;
+    for (const v of [at(10, 10), at(30, 10), at(30, 30), at(10, 30)]) session.addClick(v);
+    session.closePath();
+    session.fill({ seed: at(20, 20) });
+    window.__surfannotateUi.repaint();
+  });
+  const before = await page.evaluate(() =>
+    window.__surfannotate.session.filled.reduce((n, v) => n + v, 0));
+  expect(before).toBeGreaterThan(0);
+
+  await page.fill('#roiName', 'square');
+  await page.locator('#saveRoi').click();
+  await roiRows(page).first().locator('.layer-edit').click();
+
+  const after = await page.evaluate(() => ({
+    closure: window.__surfannotate.session.closure,
+    filled: window.__surfannotate.session.filled
+      ? window.__surfannotate.session.filled.reduce((n, v) => n + v, 0) : 0
+  }));
+  expect(after.closure).toBe('loop');
+  expect(after.filled).toBe(before, 'the same side, not the complement');
+});

@@ -248,6 +248,11 @@ function saveRoi() {
     mask: Uint8Array.from(session.filled),
     clicks: Array.from(session.clicks),
     chain: Int32Array.from(session.chain),
+    // How it was closed, so reopening retraces it the same way rather than
+    // guessing between a loop and an edge closure.
+    closure: session.closure,
+    regionIndex: session.regionIndex,
+    includeBoundary: ui.includeBoundary.checked,
     asEdge: false,
     visible: true,
     colorIndex: state.rois.length % SAVED_ROI_COLORS.length
@@ -260,6 +265,63 @@ function saveRoi() {
   setStatus(`Saved ${name} — ${countMask(roi.mask).toLocaleString()} vertices. ` +
     'Tick "edge" to draw the next area against it.');
   repaint();
+}
+
+/**
+ * Put a completed ROI back on the drawing board.
+ *
+ * Reopening is un-saving: the ROI leaves the list, its border points go back
+ * into the session, and the border is retraced the way it was closed. It has to
+ * leave the list first — an ROI cannot serve as an edge for its own border, and
+ * while it is cut out of the graph its own clicks are unreachable.
+ *
+ * The border is recomputed from the clicks rather than restored from the saved
+ * chain, because the clicks are the authoritative state and the surface may have
+ * changed underneath: another ROI may have become an edge since, and the border
+ * should respect it.
+ */
+function reopenRoi(id) {
+  const entry = activeSurface();
+  const roi = state.rois.find((candidate) => candidate.id === id);
+  if (!entry || !roi || roi.topologyKey !== entry.topologyKey) return;
+
+  state.rois.splice(state.rois.indexOf(roi), 1);
+  if (state.selectedRoiId === id) state.selectedRoiId = null;
+  if (roi.asEdge) applyExclusion();
+
+  const session = state.session;
+  session.clearRoi();
+  for (const vertex of roi.clicks) session.addClick(vertex);
+  ui.roiName.value = roi.name;
+  ui.includeBoundary.checked = Boolean(roi.includeBoundary);
+
+  const closed = roi.closure === CLOSURE_EDGE ? session.closeOnEdge() : session.closePath();
+  let filled = { ok: false };
+  if (closed.ok) {
+    filled = roi.closure === CLOSURE_EDGE
+      ? session.fill({ region: roi.regionIndex, includeBoundary: roi.includeBoundary })
+      // A loop on a surface with an edge needs to be told which side. The saved
+      // region already says, so take a seed from it rather than ask again.
+      : session.fill({ seed: seedFrom(roi, session), includeBoundary: roi.includeBoundary });
+  }
+
+  renderLayerLists();
+  showExportName();
+  repaint();
+  setStatus(filled.ok
+    ? `Reopened ${roi.name} — ${session.clicks.length} border points restored. ` +
+      'Adjust it and save again.'
+    : `Reopened ${roi.name} — ${session.clicks.length} border points restored, but the ` +
+      'border could not be retraced on the surface as it is now. Close it again.');
+}
+
+/** A vertex inside the saved region and off its new border, to seed a refill. */
+function seedFrom(roi, session) {
+  const boundary = session.boundaryMask();
+  for (let v = 0; v < roi.mask.length; v++) {
+    if (roi.mask[v] && !boundary[v]) return v;
+  }
+  return -1;
 }
 
 function removeRoi(id) {
@@ -945,7 +1007,15 @@ function renderLayerLists() {
     edge.addEventListener('change', () => setRoiEdge(roi.id, edge.checked));
     edgeLabel.append(edge, document.createTextNode('edge'));
 
-    item.append(show, name, edgeLabel,
+    const reopen = document.createElement('button');
+    reopen.type = 'button';
+    reopen.className = 'layer-edit';
+    reopen.title = `Reopen ${roi.name} to adjust its border`;
+    reopen.setAttribute('aria-label', `Reopen ${roi.name}`);
+    reopen.textContent = '\u270e';
+    reopen.addEventListener('click', () => reopenRoi(roi.id));
+
+    item.append(show, name, edgeLabel, reopen,
       makeRemoveButton(`Remove ${roi.name}`, () => removeRoi(roi.id)));
     ui.roiList.appendChild(item);
   }
@@ -1338,5 +1408,6 @@ window.__surfannotateUi = {
   repaint, runFill, setMode, loadSurface, addOverlay,
   activateSurface, removeSurface, selectOverlay, setOverlayVisible, removeOverlay,
   activeSurface, activeOverlay, handleDroppedFiles,
-  saveRoi, removeRoi, setRoiEdge, setRoiVisible, selectRoi, savedRois, exclusionMask
+  saveRoi, removeRoi, reopenRoi, setRoiEdge, setRoiVisible, selectRoi, savedRois,
+  exclusionMask
 };

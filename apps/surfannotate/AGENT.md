@@ -50,6 +50,11 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   flat patch. Vertices keep their indices (labels and clicks refer to them), and
   `isIsolated` is what keeps them out of paths and fills. Resist adding a barrier
   parameter to the algorithms: the graph is the barrier.
+- **Reopening a completed ROI is un-saving it.** It must leave the list *before* the
+  session is restored: an ROI cannot be an edge for its own border, and while it is cut
+  out of the graph its own clicks are isolated and unreachable. The border is recomputed
+  from the clicks, not restored from the saved chain, for the same reason the clicks are
+  authoritative everywhere else.
 - **The clicked vertices are the only authoritative ROI state.** The traced chain and
   the filled mask are always derived and are discarded whenever the clicks change.
   freeview does the opposite and that is what makes its undo impossible.
