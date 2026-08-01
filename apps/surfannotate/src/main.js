@@ -121,8 +121,8 @@ mountImagingWorkspace({
   status: el('status'),
   title: 'SurfAnnotate',
   subtitle: 'Surface ROIs and vertex selection',
-  // The badge is hidden in styles.css to match the other Neurodesk webapps;
-  // the shared shell has no option to omit it.
+  // Hidden in styles.css — the shell has no option to omit it. Kept as a
+  // sensible value rather than removed, so unhiding is a one-line change.
   mark: 'S'
 });
 
@@ -151,6 +151,9 @@ const state = {
   // vertex when two areas would claim it.
   rois: [],
   selectedRoiId: null,
+  // The area lifted out of the list by the pencil. It lives here, not in
+  // `rois`, until it is saved again — see restoreEdited.
+  editing: null,
   // While an area is being edited, its position in the list. Areas before it
   // constrain the drawing; areas after it are re-derived when it is saved.
   // -1 means a new area, which goes on the end.
@@ -178,6 +181,7 @@ const state = {
   overlayAutoRange: null,
 
   pressOrigin: null,
+  hoverPending: false,
   pickMemo: { x: -1, y: -1, mm: null },
   awaitingSeed: false,
   roiOpacity: 0.55
@@ -261,6 +265,12 @@ function recomputeParcellation() {
   const entry = activeSurface();
   if (!entry) return;
   const areas = savedRois();
+  // One uninterruptible task, ~13 ms per area on a 150k-vertex surface. Past a
+  // handful of areas that is long enough to look like a hang, and the status
+  // line would otherwise still be showing whatever it said before.
+  if (areas.length > 3) {
+    setStatus(`Re-resolving ${areas.length} areas…`);
+  }
   const { areas: resolved } = resolveParcellation({
     graph: entry.graph,
     positions: entry.geometry.positions,
@@ -278,6 +288,30 @@ function recomputeParcellation() {
   renderLayerLists();
   repaint();
   return resolved.filter((area) => area.error);
+}
+
+/**
+ * Put a reopened area back where it came from.
+ *
+ * Reopening lifts an area off the list and into the working session, so until it
+ * is saved the list is not the whole truth. Anything that walks away from the
+ * edit — opening another area, switching surface, clearing — has to put it back,
+ * or the only copy goes with the session.
+ *
+ * @returns {object|null} the area that was restored
+ */
+function restoreEdited() {
+  const area = state.editing;
+  if (!area) return null;
+  const at = state.editIndex >= 0 ? state.editIndex : savedRois().length;
+  const areas = savedRois();
+  const anchor = areas[at];
+  const position = anchor ? state.rois.indexOf(anchor) : state.rois.length;
+  state.rois.splice(position, 0, area);
+  state.editing = null;
+  state.editIndex = -1;
+  state.editColor = null;
+  return area;
 }
 
 /** The first palette colour no area is using, so neighbours stay distinct. */
@@ -335,9 +369,14 @@ function saveRoi() {
   const position = anchorArea ? state.rois.indexOf(anchorArea) : state.rois.length;
   state.rois.splice(position, 0, area);
 
-  state.selectedRoiId = area.id;
+  // Deliberately NOT selected. Selecting it would point the export buttons at
+  // this area while the name field goes on naming the next one, so the next
+  // export writes these vertices under that name — wrong data under a plausible
+  // filename, with a status line confirming it.
+  state.selectedRoiId = null;
   state.editIndex = -1;
   state.editColor = null;
+  state.editing = null;
   session.clearRoi();
 
   const failed = recomputeParcellation();
@@ -358,8 +397,13 @@ function reopenRoi(id) {
   const area = state.rois.find((candidate) => candidate.id === id);
   if (!entry || !area || area.topologyKey !== entry.topologyKey) return;
 
+  // Anything already being edited goes back on the list first: the area is held
+  // only by the session while it is open, so reopening a second one, switching
+  // surfaces, or clearing would otherwise drop it for good.
+  restoreEdited();
   state.editIndex = savedRois().indexOf(area);
   state.editColor = area.colorIndex;
+  state.editing = area;
   state.rois.splice(state.rois.indexOf(area), 1);
   if (state.selectedRoiId === id) state.selectedRoiId = null;
   recomputeParcellation();
@@ -619,9 +663,13 @@ async function init() {
     repaint();
   });
   ui.clearRoi.addEventListener('click', () => {
+    const restored = restoreEdited();
     state.session.clearRoi();
     state.awaitingSeed = false;
-    setStatus('Boundary cleared.');
+    if (restored) recomputeParcellation();
+    setStatus(restored
+      ? `Cleared. ${restored.name} went back on the list unchanged.`
+      : 'Boundary cleared.');
     repaint();
   });
   ui.undoPointSelection.addEventListener('click', () => {
@@ -868,6 +916,9 @@ async function loadSurface(file) {
 function activateSurface(id, { announce = false } = {}) {
   const entry = state.surfaces.find((surface) => surface.id === id);
   if (!entry) return;
+  // Before the active topology changes, or savedRois() would put it back on the
+  // wrong surface's list.
+  restoreEdited();
 
   state.activeId = id;
   for (const surface of state.surfaces) {
@@ -922,6 +973,7 @@ function activateSurface(id, { announce = false } = {}) {
 function removeSurface(id) {
   const position = state.surfaces.findIndex((entry) => entry.id === id);
   if (position < 0) return;
+  restoreEdited();
   const [entry] = state.surfaces.splice(position, 1);
   state.nv.removeMesh(entry.mesh);
 
@@ -955,6 +1007,9 @@ function removeSurface(id) {
   showExportName();
   syncOverlayControls();
   renderLayerLists();
+  // repaint() cannot do this: it returns early without a session, so every
+  // control would keep the enabled state it had and then dereference null.
+  resetControls();
   setStatus(`Removed ${entry.name}. Load a surface to begin.`);
 }
 
@@ -1249,6 +1304,9 @@ function showExportName() {
 
 function setMode(mode) {
   if (!state.session) return;
+  // A pending "click inside the region you want" would otherwise swallow the
+  // first click in the new mode, which lands as a fill instead of a landmark.
+  state.awaitingSeed = false;
   state.session.setMode(mode);
   const isRoi = mode === MODE_ROI;
   ui.modeRoi.classList.toggle('active', isRoi);
@@ -1341,8 +1399,19 @@ function onCanvasHover(event) {
   // the cursor; it made the surface busy, and every hover moved NiiVue's
   // crosshair, which is the same state the click picker reads - so the next
   // click was frequently mistaken for a miss and dropped.
-  const vertex = vertexAt(event);
-  ui.vertexReadout.textContent = vertex >= 0 ? `vertex ${vertex}` : '';
+  // A depth pick is two full-scene renders and a synchronous gl.readPixels. Run
+  // one per animation frame at most, and never while one is in flight: without
+  // this, every mouse move over the canvas costs a pick, which on a software
+  // renderer — a Neurodesk container or VDI session, not just CI — is half a
+  // second each and the app appears frozen whenever the pointer is over it.
+  if (state.hoverPending) return;
+  state.hoverPending = true;
+  requestAnimationFrame(() => {
+    state.hoverPending = false;
+    if (!state.session) return;
+    const vertex = vertexAt(event);
+    ui.vertexReadout.textContent = vertex >= 0 ? `vertex ${vertex}` : '';
+  });
 }
 
 function runFill(seed = -1) {
@@ -1455,6 +1524,20 @@ function repaint() {
   if (!state.session) return;
   paintLabels();
   syncControls();
+}
+
+/** Put every drawing control back to how it starts, with nothing loaded. */
+function resetControls() {
+  for (const control of [ui.undoPoint, ui.closePath, ui.closeOnEdge, ui.fillRegion,
+    ui.clearRoi, ui.undoPointSelection, ui.clearPoints, ui.saveRoi,
+    ui.exportLabel, ui.exportGifti, ui.exportPoints]) {
+    control.disabled = true;
+  }
+  ui.flipRegion.hidden = true;
+  ui.edgeRow.hidden = true;
+  ui.edgeHint.hidden = true;
+  ui.pointList.innerHTML = '';
+  ui.roiList.innerHTML = '';
 }
 
 function syncControls() {

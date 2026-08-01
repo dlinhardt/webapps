@@ -10,6 +10,21 @@
 //   - Encoding and Endian are both required attributes; Endian must describe
 //     the bytes actually written.
 
+/**
+ * Make a string safe inside CDATA.
+ *
+ * CDATA has exactly one escape problem: the sequence that ends it. A name
+ * containing `]]>` closes the section early and the file stops being XML —
+ * three characters, well inside the ROI name field's limit. The fix is the
+ * standard one: end the section, emit the `>` as a normal escaped character,
+ * and open a new section.
+ *
+ * @param {string} value
+ */
+function cdata(value) {
+  return String(value).replace(/]]>/g, ']]]]><![CDATA[>');
+}
+
 const XML_HEADER =
   '<?xml version="1.0" encoding="UTF-8"?>\n' +
   '<!DOCTYPE GIFTI SYSTEM "http://gifti.projects.nitrc.org/gifti.dtd">\n';
@@ -110,7 +125,7 @@ function renderLabelTable(entries) {
   const rows = entries.map((entry) => {
     const [r, g, b, a] = entry.rgba;
     return `    <Label Key="${entry.key}" Red="${fmt(r)}" Green="${fmt(g)}" ` +
-      `Blue="${fmt(b)}" Alpha="${fmt(a)}"><![CDATA[${entry.name}]]></Label>`;
+      `Blue="${fmt(b)}" Alpha="${fmt(a)}"><![CDATA[${cdata(entry.name)}]]></Label>`;
   });
   return '  <LabelTable>\n' + rows.join('\n') + '\n  </LabelTable>\n';
 }
@@ -135,7 +150,8 @@ function renderMetaData(entries, depth) {
   if (!keys.length) return '';
   const pad = '  '.repeat(depth);
   const rows = keys.map((key) =>
-    `${pad}  <MD><Name><![CDATA[${key}]]></Name><Value><![CDATA[${entries[key]}]]></Value></MD>`
+    `${pad}  <MD><Name><![CDATA[${cdata(key)}]]></Name>` +
+    `<Value><![CDATA[${cdata(entries[key])}]]></Value></MD>`
   );
   return `${pad}<MetaData>\n${rows.join('\n')}\n${pad}</MetaData>\n`;
 }
@@ -158,7 +174,7 @@ async function gzipBytes(bytes) {
   if (typeof CompressionStream !== 'function') {
     throw new Error('gzip requested but CompressionStream is unavailable');
   }
-  const stream = new CompressionStream('gzip');
+  const stream = new CompressionStream('deflate');
   const writer = stream.writable.getWriter();
   writer.write(bytes);
   writer.close();

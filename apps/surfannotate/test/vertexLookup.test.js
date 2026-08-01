@@ -86,3 +86,45 @@ test('a flat mesh (zero extent on one axis) indexes correctly', () => {
   const actual = index.nearest(3.4, 2.6, 0);
   assert.ok(Math.abs(actual.distance - expected.distance) < 1e-6);
 });
+
+test('a strictly planar patch is indexed in bounded time and memory', () => {
+  // mris_flatten writes z = 0 for every vertex. Sizing the grid by volume made
+  // the cell size vanish and the cell count explode across the two real axes —
+  // seconds of allocation at patch scale, or an outright RangeError.
+  const V = 40_000;
+  const side = Math.ceil(Math.sqrt(V));
+  const vertices = new Float32Array(V * 3);
+  for (let v = 0; v < V; v++) {
+    vertices[3 * v] = (v % side) * 0.7;
+    vertices[3 * v + 1] = Math.floor(v / side) * 0.7;
+    vertices[3 * v + 2] = 0;
+  }
+
+  const started = Date.now();
+  const index = buildVertexIndex(vertices);
+  assert.ok(Date.now() - started < 2000, 'must not take seconds');
+  assert.ok(index.cellSize > 0.01, `cell size collapsed to ${index.cellSize}`);
+
+  // And it still answers correctly: check against a brute-force scan.
+  for (const probe of [0, 1234, V - 1, Math.floor(V / 2)]) {
+    const x = vertices[3 * probe];
+    const y = vertices[3 * probe + 1];
+    const found = index.nearest(x + 0.1, y + 0.1, 0);
+    assert.equal(found.vertex, probe, `planar lookup missed near vertex ${probe}`);
+  }
+});
+
+test('degenerate geometry does not blow up the grid', () => {
+  // Collinear: two axes have no extent at all.
+  const line = new Float32Array(300);
+  for (let v = 0; v < 100; v++) line[3 * v] = v * 0.5;
+  const lineIndex = buildVertexIndex(line);
+  assert.ok(lineIndex.cellSize > 0);
+  assert.equal(lineIndex.nearest(9.6, 0, 0).vertex, 19);
+
+  // Every vertex in the same place: no extent on any axis.
+  const heap = new Float32Array(300);
+  const heapIndex = buildVertexIndex(heap);
+  assert.ok(heapIndex.nearest(0, 0, 0).vertex >= 0);
+  assert.equal(heapIndex.nearest(0, 0, 0).distance, 0);
+});

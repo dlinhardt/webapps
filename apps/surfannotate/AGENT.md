@@ -156,6 +156,7 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 | Command | Covers |
 | --- | --- |
 | `pnpm --filter surfannotate test` | `surface/` and `io/` — adjacency, A*, chain validation, fill (including escape and figure-eight cases), hatching, vertex lookup vs brute force, ROI session contract, every file writer |
+| `pnpm --filter surfannotate lint` | `node --check` over every JS file |
 | `pnpm --filter surfannotate test:e2e` | Real Chromium with SwiftShader: shell mount, WebGL2, surface load and index, picking, draw→close→fill→export, drag-and-drop, click-vs-drag, overlay window, marker lifecycle, colour map and range, ROI naming, edge closure on a flat patch |
 
 `test/fixtures/lh.flat.surf.gii` is a synthetic flat patch — a disk with one open edge,
@@ -164,7 +165,6 @@ like `mris_flatten` output but a few kB. Regenerate with
 purpose: a sheet is one-sided, NiiVue does not cull back faces but does shade them by
 the flipped normal, so from the wrong side the patch renders near-black on a dark
 background and looks like a failed load. -x is where the default render view looks from.
-| `pnpm --filter surfannotate lint` | `node --check` over every JS file |
 
 **When adding an e2e test, verify it fails without the fix.** Two drag-and-drop tests
 here passed against broken code — one dispatched events on the wrong element, and the

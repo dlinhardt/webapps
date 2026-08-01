@@ -52,3 +52,15 @@ test('an unknown hemisphere leaves just the ROI name', () => {
   assert.equal(exportStem('V1', { filename: 'brain.mz3' }), 'V1');
   assert.equal(exportStem('', { filename: 'brain.mz3' }), 'roi');
 });
+
+test('a filename carrying both L and R is refused rather than guessed', () => {
+  // Picking the first would export a right hemisphere as `lh.<roi>`, silently.
+  assert.equal(hemispherePrefix({ filename: 'MSM-L.R.midthickness.32k_fs_LR.surf.gii' }), '');
+  assert.equal(hemispherePrefix({ filename: 'S1200_L_to_R.R.midthickness.gii' }), '');
+  assert.equal(hemispherePrefix({ filename: 'atlas-L.R.32k.surf.gii' }), '');
+  // An unambiguous single letter still resolves.
+  assert.equal(hemispherePrefix({ filename: 'S1200.L.inflated.32k_fs_LR.surf.gii' }), 'lh');
+  assert.equal(hemispherePrefix({ filename: 'S1200.R.inflated.32k_fs_LR.surf.gii' }), 'rh');
+  // And a stronger signal still wins over the ambiguity.
+  assert.equal(hemispherePrefix({ filename: 'sub-01_hemi-R_L.to.R.surf.gii' }), 'rh');
+});

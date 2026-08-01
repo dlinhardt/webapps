@@ -3,3 +3,4 @@
 # exception: its generator is committed, and `test:e2e` runs it.
 test/fixtures/*
 !test/fixtures/make-flat-patch.mjs
+!test/fixtures/make-real-patch.mjs

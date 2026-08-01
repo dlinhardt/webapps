@@ -1083,6 +1083,7 @@ test('removing an area gives its vertices back to the surface', async ({ page })
 test('a selected area is what the export buttons write', async ({ page }) => {
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
+  await roiRows(page).first().locator('.layer-name').click();
 
   await expect(page.locator('#exportLabel')).toBeEnabled();
   const download = page.waitForEvent('download');
@@ -1183,6 +1184,7 @@ test('an exported .label can be dropped back in as an overlay', async ({ page })
   // to its curvature parser, which cannot read ASCII, so the drop did nothing.
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
+  await roiRows(page).first().locator('.layer-name').click();
 
   const download = page.waitForEvent('download');
   await page.locator('#exportLabel').click();
@@ -1361,4 +1363,113 @@ test('the Cite button opens the citations, from the app and from the start page'
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(page.locator('#startPage')).toBeVisible('escape closed the dialog, not the page');
+});
+
+// -- regressions found by adversarial testing ------------------------------
+
+test('saving an area does not silently retarget the export', async ({ page }) => {
+  // Saving used to select the area, and the export buttons prefer the selection
+  // while the filename comes from the name box — so the next export wrote the
+  // saved area's vertices under the new area's name.
+  await loadFlat(page);
+  await saveStrip(page, 2, 'V1');
+
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41;
+    session.addClick(9 * n + 1);
+    session.addClick(9 * n + (n - 2));
+    session.closeOnEdge();
+    session.fill();
+    window.__surfannotateUi.repaint();
+  });
+  await page.fill('#roiName', 'V2');
+
+  const onScreen = await page.evaluate(() =>
+    window.__surfannotate.session.filled.reduce((n, v) => n + v, 0));
+  expect(onScreen).not.toBe(82);
+
+  const download = page.waitForEvent('download');
+  await page.locator('#exportLabel').click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('lh.V2.label');
+  const stream = await file.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const lines = Buffer.concat(chunks).toString('utf8').trimEnd().split('\n');
+  expect(Number(lines[1])).toBe(onScreen, 'the region on screen, not the saved one');
+});
+
+test('a reopened area survives every way of walking away from the edit', async ({ page }) => {
+  // Reopening lifts the area off the list into the session. Nothing used to put
+  // it back, so switching surface, clearing, or reopening another lost it.
+  await loadFlat(page);
+  await saveStrip(page, 2, 'V1');
+  await saveStrip(page, 9, 'V2');
+
+  // Reopen V1, then reopen V2 instead.
+  await roiRows(page).first().locator('.layer-edit').click();
+  await roiRows(page).first().locator('.layer-edit').click();
+  let names = await page.evaluate(() => window.__surfannotateUi.savedRois().map((a) => a.name));
+  expect(names).toEqual(['V1'], 'V1 came back when V2 was opened');
+
+  // Reopen V1 — which puts V2 back — then Clear, which puts V1 back too.
+  await page.locator('#roiList li').first().locator('.layer-edit').click();
+  await page.locator('#clearRoi').click();
+  names = await page.evaluate(() => window.__surfannotateUi.savedRois().map((a) => a.name));
+  expect(names).toEqual(['V1', 'V2'], 'Clear put it back, in its own place');
+  await expect(page.locator('#statusText')).toContainText('went back on the list');
+
+  // Reopen, then switch to another surface and back.
+  await roiRows(page).first().locator('.layer-edit').click();
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  names = await page.evaluate(() => window.__surfannotateUi.savedRois().map((a) => a.name));
+  expect(names).toEqual(['V1', 'V2'], 'switching surfaces put it back');
+});
+
+test('removing the last surface disarms the controls instead of crashing', async ({ page }) => {
+  // repaint() returns early without a session, so the teardown path has to reset
+  // the controls itself — otherwise every button keeps its enabled state and
+  // then dereferences null.
+  await loadFlat(page);
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41;
+    session.addClick(2 * n + 1);
+    session.addClick(2 * n + (n - 2));
+    session.closeOnEdge();
+    session.fill();
+    window.__surfannotateUi.repaint();
+  });
+
+  await surfaceRows(page).first().locator('.layer-remove').click();
+  await expect(surfaceRows(page)).toHaveCount(0);
+
+  for (const id of ['undoPoint', 'closePath', 'closeOnEdge', 'fillRegion', 'clearRoi',
+    'saveRoi', 'exportLabel', 'exportGifti', 'exportPoints']) {
+    await expect(page.locator(`#${id}`), `#${id} must be disabled`).toBeDisabled();
+  }
+  await expect(page.locator('#flipRegion')).toBeHidden();
+  await expect(page.locator('#roiList li')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('switching tool cancels a pending "click inside the region"', async ({ page }) => {
+  await loadFlat(page);
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41, at = (i, j) => j * n + i;
+    for (const v of [at(10, 10), at(30, 10), at(30, 30), at(10, 30)]) session.addClick(v);
+    session.closePath();
+    window.__surfannotateUi.repaint();
+  });
+  await page.locator('#fillRegion').click();
+  await expect(page.locator('#statusText')).toContainText('click inside the region you want');
+  expect(await page.evaluate(() => window.__surfannotate.awaitingSeed)).toBe(true);
+
+  await page.locator('#modePoints').click();
+  expect(await page.evaluate(() => window.__surfannotate.awaitingSeed))
+    .toBe(false, 'the pending seed would eat the first landmark click');
 });

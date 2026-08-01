@@ -37,17 +37,40 @@ export function buildVertexIndex(vertices, options = {}) {
     if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
   }
 
-  const spanX = Math.max(maxX - minX, 1e-6);
-  const spanY = Math.max(maxY - minY, 1e-6);
-  const spanZ = Math.max(maxZ - minZ, 1e-6);
+  const spanX = Math.max(maxX - minX, 0);
+  const spanY = Math.max(maxY - minY, 0);
+  const spanZ = Math.max(maxZ - minZ, 0);
 
-  // Choose a cell size that puts roughly `targetPerCell` vertices in each cell.
-  const volume = spanX * spanY * spanZ;
-  const cellSize = Math.max(Math.cbrt((volume * targetPerCell) / V), 1e-6);
+  // Size the grid from the axes that actually have extent.
+  //
+  // A flat patch is strictly planar — mris_flatten writes z = 0 for every
+  // vertex — so a volume of spanX * spanY * spanZ collapses to nothing, and the
+  // cube root of nothing is a cell size of nothing. The grid then explodes
+  // across the two real axes: on a 150k-vertex patch that is ~10^9 cells, which
+  // is either seconds of allocation or a RangeError that loadSurface reports as
+  // a corrupt file. Taking the root over however many dimensions the data
+  // actually occupies keeps the cell size meaningful in every case.
+  const largest = Math.max(spanX, spanY, spanZ, 1e-6);
+  const real = [spanX, spanY, spanZ].filter((span) => span > largest * 1e-9);
+  const extent = real.reduce((product, span) => product * span, 1);
+  let cellSize = Math.max(
+    Math.pow((extent * targetPerCell) / V, 1 / Math.max(real.length, 1)),
+    1e-6
+  );
 
-  const nx = Math.max(1, Math.ceil(spanX / cellSize));
-  const ny = Math.max(1, Math.ceil(spanY / cellSize));
-  const nz = Math.max(1, Math.ceil(spanZ / cellSize));
+  // And a backstop, so no geometry however odd can cost unbounded memory:
+  // grow the cells until the grid fits in a few per vertex.
+  const maxCells = Math.max(64, V * 4);
+  const gridFor = (size) => [
+    Math.max(1, Math.ceil(spanX / size)),
+    Math.max(1, Math.ceil(spanY / size)),
+    Math.max(1, Math.ceil(spanZ / size))
+  ];
+  let [nx, ny, nz] = gridFor(cellSize);
+  while (nx * ny * nz > maxCells) {
+    cellSize *= 1.5;
+    [nx, ny, nz] = gridFor(cellSize);
+  }
   const cellCount = nx * ny * nz;
 
   const cellOf = (x, y, z) => {

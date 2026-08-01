@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gunzipSync } from 'node:zlib';
+import { inflateSync } from 'node:zlib';
 
 import {
   writeFreeSurferLabel, readFreeSurferLabel, sanitizeHeaderField, labelToValues
@@ -126,7 +126,7 @@ test('.label.gii payload decodes back to the per-vertex values', async () => {
   assert.deepEqual(Array.from(decoded), Array.from(labels));
 });
 
-test('.label.gii gzip encoding decompresses to the same bytes', async () => {
+test('.label.gii compressed encoding is a zlib stream, as the spec requires', async () => {
   const labels = Int32Array.from([1, 1, 0, 0, 1, 1]);
   const xml = await writeGiftiLabel(labels, [{ key: 1, name: 'roi', rgba: [1, 1, 1, 1] }], {
     gzip: true
@@ -134,7 +134,13 @@ test('.label.gii gzip encoding decompresses to the same bytes', async () => {
 
   assert.ok(xml.includes('Encoding="GZipBase64Binary"'));
   const encoded = /<Data>([^<]*)<\/Data>/.exec(xml)[1];
-  const raw = gunzipSync(Buffer.from(encoded, 'base64'));
+  const bytes = Buffer.from(encoded, 'base64');
+  // GIfTI 1.0 s5.0 says ZLIB, and gifti_clib uses compress2()/uncompress(): a
+  // zlib stream (0x78 ..), not a gzip container (0x1f 0x8b). This assertion used
+  // to gunzip, which agreed with the writer and so caught nothing — nibabel and
+  // wb_command would both have refused the file.
+  assert.equal(bytes[0], 0x78, 'must be a zlib stream, not gzip');
+  const raw = inflateSync(bytes);
   assert.deepEqual(Array.from(new Int32Array(raw.buffer, raw.byteOffset, labels.length)),
     Array.from(labels));
 });
@@ -234,4 +240,19 @@ test('a .label from another mesh is refused rather than silently truncated', () 
   const text = '#!ascii label V1 , from subject lh vox2ras=TkReg\n1\n' +
     '900  1.0 2.0 3.0 0.0\n';
   assert.throws(() => labelToValues(text, 10), /different mesh/);
+});
+
+test('a name containing the CDATA terminator still yields valid XML', () => {
+  // `]]>` closes the section early: three characters, well inside the ROI name
+  // field's 64-character limit, and the file stops being XML.
+  return writeGiftiLabel(Int32Array.from([0, 2]), [
+    { key: 0, name: '???', rgba: [0, 0, 0, 0] },
+    { key: 2, name: 'a]]>b', rgba: [0.9, 0.2, 0.2, 1] }
+  ], { arrayName: 'a]]>b', metadata: { Note: 'x]]>y' } }).then((xml) => {
+    assert.ok(!/]]>[^<]/.test(xml.replace(/]]]]><!\[CDATA\[>/g, '')),
+      'no bare CDATA terminator survives');
+    assert.ok(xml.includes(']]]]><![CDATA[>'), 'it is split, not dropped');
+    // The name still reads back as itself once the split is undone.
+    assert.ok(xml.replace(/]]]]><!\[CDATA\[>/g, ']]>').includes('a]]>b'));
+  });
 });

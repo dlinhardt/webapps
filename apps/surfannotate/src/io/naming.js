@@ -34,8 +34,15 @@ export function hemispherePrefix({ anatomicalStructure = '', filename = '' } = {
   if (/(^|[._-])(right|rh)([._-]|$)/i.test(name)) return 'rh';
   // HCP-style `S1200.L.inflated.32k_fs_LR.surf.gii`. Case-sensitive and
   // separator-delimited, so `fs_LR` and stray lowercase letters do not match.
-  if (/(^|[._-])L([._-]|$)/.test(name)) return 'lh';
-  if (/(^|[._-])R([._-]|$)/.test(name)) return 'rh';
+  //
+  // A bare letter is the weakest signal here, so it only counts when it is
+  // unambiguous. `MSM-L.R.midthickness.gii` carries both, and picking the first
+  // would export a RIGHT hemisphere as `lh.<roi>` with nothing to warn you —
+  // exactly the silent left/right flip this function exists to prevent.
+  const bareL = /(^|[._-])L([._-]|$)/.test(name);
+  const bareR = /(^|[._-])R([._-]|$)/.test(name);
+  if (bareL && !bareR) return 'lh';
+  if (bareR && !bareL) return 'rh';
   return '';
 }
 

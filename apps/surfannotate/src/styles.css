@@ -606,9 +606,11 @@ button.mini:disabled {
   .start-hero { grid-template-columns: 1fr; }
 }
 
-/* The shared shell always draws a one-glyph badge beside the title. The rest of
-   the Neurodesk webapps show the name alone, so hide it here rather than change
-   the shared component and every app with it. */
+/* The shared shell always draws a one-glyph badge beside the title, and offers no
+   way to omit it. The other imaging-workspace apps keep theirs (deface 'D',
+   niimath 'N', browserqc 'Q'); this one follows calmar and spinalcordtoolbox,
+   which build their own headers and show the name alone. Hidden here rather than
+   changed in the component, which every app shares. */
 .nd-imaging-mark {
   display: none;
 }
