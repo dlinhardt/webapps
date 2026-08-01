@@ -7,6 +7,107 @@
     <meta name="description" content="Cortical surface viewer with manual ROI delineation and vertex selection. Runs entirely in your browser." />
   </head>
   <body>
+    <!-- Shown first, then hidden by "Start annotating". The app is behind it the
+         whole time rather than on a second page, matching the other Neurodesk
+         webapps and keeping the single-bundle build. -->
+    <section class="start-page" id="startPage" aria-label="SurfAnnotate start page">
+      <header class="start-header">
+        <div class="start-brand">
+          <strong>SurfAnnotate</strong>
+          <span>Surface ROIs and vertex selection</span>
+        </div>
+        <a href="../" class="start-link" title="More Neurodesk web apps">More Apps</a>
+      </header>
+
+      <main class="start-main">
+        <section class="start-hero">
+          <div class="start-hero-copy">
+            <p class="start-kicker">Cortical surface annotation in the browser</p>
+            <h2>Delineate areas on a cortical surface, and export them.</h2>
+            <p class="start-intro">
+              Load a FreeSurfer or GIfTI surface — folded, inflated, spherical, or an
+              unfolded flat patch — and mark regions by clicking along their border.
+              The points are joined by the shortest path across the mesh, so the border
+              follows the surface rather than a straight line through it. Areas are drawn
+              in sequence and partition the surface: each one's border becomes the edge
+              the next is closed against, so neighbouring areas share a boundary exactly
+              instead of leaving a sliver between them.
+            </p>
+            <div class="start-actions">
+              <button class="start-primary" id="enterAppButton" type="button">
+                Start annotating
+              </button>
+            </div>
+            <p class="start-local-badge">
+              Your surfaces, overlays and labels never leave this machine — there is no
+              server to send them to.
+            </p>
+          </div>
+
+          <aside class="start-local-panel" aria-label="What it reads and writes">
+            <h3>Reads</h3>
+            <ul>
+              <li>FreeSurfer surfaces: <code>lh.pial</code>, <code>lh.white</code>,
+                <code>lh.inflated</code>, flat patches</li>
+              <li>GIfTI <code>.surf.gii</code>, <code>.mz3</code>, and more</li>
+              <li>Overlays: curvature, thickness, <code>.annot</code>,
+                <code>.label</code>, <code>.label.gii</code>, CIFTI <code>.dscalar.nii</code></li>
+            </ul>
+            <h3>Writes</h3>
+            <ul>
+              <li>FreeSurfer <code>.label</code></li>
+              <li>GIfTI <code>.label.gii</code></li>
+              <li>Vertex lists as JSON</li>
+            </ul>
+          </aside>
+        </section>
+
+        <section class="start-how" aria-labelledby="startHowHeading">
+          <h3 id="startHowHeading">How it works</h3>
+          <div class="start-steps">
+            <article class="start-step">
+              <div class="start-step-number">1</div>
+              <h4>Load a surface</h4>
+              <p>
+                Pick a file or drop it on the viewer. Load several and switch between
+                them; an area drawn on the inflated surface is still there on the folded
+                one.
+              </p>
+            </article>
+            <article class="start-step">
+              <div class="start-step-number">2</div>
+              <h4>Click the border</h4>
+              <p>
+                Nothing is traced while you click, so you can rotate freely. Close the
+                border and fill it. On a cut surface the edge of the patch closes it for
+                you — two points can be enough.
+              </p>
+            </article>
+            <article class="start-step">
+              <div class="start-step-number">3</div>
+              <h4>Save and export</h4>
+              <p>
+                Saved areas become the edges the next ones are drawn against, and can be
+                reopened to adjust. Export each as a <code>.label</code> or
+                <code>.label.gii</code>.
+              </p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="start-footer">
+        <span>
+          Everything runs in this browser tab — no upload, no account, no server.
+        </span>
+        <span>
+          MIT licensed &middot; rendering by
+          <a href="https://github.com/niivue/niivue" target="_blank"
+             rel="noopener noreferrer">NiiVue</a>
+        </span>
+      </footer>
+    </section>
+
     <div id="app">
       <div id="controls">
         <section class="panel">

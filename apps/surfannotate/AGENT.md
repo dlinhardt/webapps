@@ -33,6 +33,17 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `indexNearestXYZmm`), so keeping the surface area in one file makes that migration a
   single-file change. Pin stays at **0.69.0** — npm `latest`, and byte-identical mesh
   code to the 0.68.x the rest of this monorepo uses.
+- **`index.html` opens on a start page, not the app.** `#startPage` is a fixed-position
+  section over `#app`, hidden by `#enterAppButton` — the same shape calmar uses. The app
+  is behind it the whole time, so the canvas is already sized and nothing needs
+  re-laying out. Every e2e test dismisses it in `beforeEach`.
+- **Loads are serialised through `enqueueLoad`.** A file input fires `change` when the
+  files are set, not when the async handler finishes, so two quick picks — or a pick
+  during a drop — started overlapping `loadSurface` calls that interleaved on
+  `state.surfaces` and the active-surface mirrors.
+- **`setInputFiles` does not wait for the load.** In e2e, always follow it with a wait on
+  the status text or the surface-list count before touching `window.__surfannotate`.
+  Getting this wrong shows up as a rare `session is null`, one test per full run.
 - **`state.surfaces` is the list; `state.mesh`/`graph`/`session`/... are mirrors of
   whichever entry is active.** Mirroring keeps the multi-surface change off every call
   site, but it means `activateSurface` is the single place that may write them.

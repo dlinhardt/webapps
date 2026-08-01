@@ -121,7 +121,9 @@ mountImagingWorkspace({
   status: el('status'),
   title: 'SurfAnnotate',
   subtitle: 'Surface ROIs and vertex selection',
-  mark: 'S' // a 30x30 badge — one glyph, not a tagline
+  // The badge is hidden in styles.css to match the other Neurodesk webapps;
+  // the shared shell has no option to omit it.
+  mark: 'S'
 });
 
 const state = {
@@ -467,6 +469,21 @@ function activeOverlay() {
   return entry.overlays.find((overlay) => overlay.id === entry.activeOverlayId) || null;
 }
 
+/**
+ * Loads run one at a time.
+ *
+ * A file input fires `change` as soon as the files are set, not when our async
+ * handler finishes, so picking two files in quick succession — or picking one
+ * while a drop is still parsing — starts two `loadSurface` calls at once. They
+ * then interleave on `state.surfaces` and on the active-surface mirrors, and the
+ * app ends up showing one surface while the tools point at another.
+ */
+let loadQueue = Promise.resolve();
+function enqueueLoad(task) {
+  loadQueue = loadQueue.then(task, task);
+  return loadQueue;
+}
+
 function setStatus(text) {
   ui.statusText.textContent = text;
 }
@@ -488,14 +505,22 @@ async function init() {
   registerExtraColormaps(state.nv);
   state.nv.setSliceType(state.nv.sliceTypeRender);
 
-  ui.surfaceInput.addEventListener('change', async (event) => {
-    for (const file of Array.from(event.target.files || [])) await loadSurface(file);
-    // Clear it, or picking the same file twice in a row fires no change event.
+  ui.surfaceInput.addEventListener('change', (event) => {
+    const files = Array.from(event.target.files || []);
+    // Clear it now, not after loading: picking the same file twice in a row
+    // fires no change event otherwise, and clearing later would wipe the files
+    // a second pick had already put there.
     event.target.value = '';
+    enqueueLoad(async () => {
+      for (const file of files) await loadSurface(file);
+    });
   });
-  ui.overlayInput.addEventListener('change', async (event) => {
-    for (const file of Array.from(event.target.files || [])) await addOverlay(file);
+  ui.overlayInput.addEventListener('change', (event) => {
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
+    enqueueLoad(async () => {
+      for (const file of files) await addOverlay(file);
+    });
   });
 
   // These MUST be capture-phase. NiiVue's own drop listener lives on the canvas
@@ -529,7 +554,7 @@ async function init() {
       setStatus('That drop contained no file. Try dragging the file itself, not a shortcut.');
       return;
     }
-    handleDroppedFiles(Array.from(files));
+    enqueueLoad(() => handleDroppedFiles(Array.from(files)));
   }, CAPTURE);
 
   // The browser's default is to navigate away when a file is dropped anywhere
@@ -679,7 +704,27 @@ async function init() {
     }
   });
 
+  bindStartPage();
   setStatus('Load a surface to begin.');
+}
+
+/**
+ * The start page is a section over the app, so entering is just hiding it.
+ * NiiVue sized its canvas at attach time behind the overlay, so nothing needs
+ * re-laying out — but a redraw costs nothing and covers a resize during reading.
+ */
+function bindStartPage() {
+  const startPage = el('startPage');
+  const enter = el('enterAppButton');
+  if (!startPage || !enter) return;
+  enter.addEventListener('click', () => {
+    startPage.hidden = true;
+    ui.surfaceInput.focus();
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'));
+      state.nv?.drawScene();
+    });
+  });
 }
 
 /**

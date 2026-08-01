@@ -15,6 +15,8 @@ test.beforeEach(async ({ page }) => {
     if (message.type() === 'error') errors.push(message.text());
   });
   await page.goto('./');
+  // Every test below drives the app itself; the start page is covered on its own.
+  await page.locator('#enterAppButton').click();
 });
 
 async function loadSurface(page) {
@@ -25,8 +27,9 @@ async function loadSurface(page) {
 test('the shell mounts with the shared workspace and a link back to the catalog', async ({ page }) => {
   await expect(page.locator('#controls')).toBeVisible();
   await expect(page.locator('#viewer canvas')).toBeVisible();
-  // Required of every app in the composite site.
-  const moreApps = page.locator('[title="More Neurodesk web apps"]');
+  // Required of every app in the composite site. Scoped to the shell: the start
+  // page carries its own copy of the link, so the page has two.
+  const moreApps = page.locator('#app [title="More Neurodesk web apps"]');
   await expect(moreApps).toHaveCount(1);
   await expect(moreApps).toHaveAttribute('href', '../');
 });
@@ -773,6 +776,7 @@ test('border points survive a switch between surfaces sharing a vertex indexing'
 
 test('surfaces with different topology keep separate ROIs', async ({ page }) => {
   await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(1);
   await page.evaluate(() => {
     window.__surfannotate.session.addClick(100);
     window.__surfannotate.session.addClick(200);
@@ -833,6 +837,7 @@ test('several overlays coexist, each with its own visibility and colour map', as
 test('overlays belong to their own surface', async ({ page }) => {
   await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
   await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
   await expect(overlayRows(page)).toHaveCount(0);
 
   // Switching surfaces shows that surface's overlays, not the previous one's.
@@ -1253,4 +1258,45 @@ test('a .label from a different surface is refused with a reason', async ({ page
 
   await expect(page.locator('#statusText')).toContainText('different mesh', { timeout: 30_000 });
   await expect(overlayRows(page)).toHaveCount(0);
+});
+
+// -- the start page ---------------------------------------------------------
+
+test.describe('start page', () => {
+  // These need the page as it first loads, before the shared beforeEach enters.
+  test.use({});
+
+  test('explains the app and only then hands over to it', async ({ page }) => {
+    await page.reload();
+    const start = page.locator('#startPage');
+    await expect(start).toBeVisible();
+    await expect(start.getByRole('heading', { level: 2 })).toContainText('cortical surface');
+    await expect(start.locator('.start-step')).toHaveCount(3);
+    // Required of every app in the composite site, on this page too.
+    await expect(start.locator('a[href="../"]')).toHaveCount(1);
+
+    await page.locator('#enterAppButton').click();
+    await expect(start).toBeHidden();
+    await expect(page.locator('#controls')).toBeVisible();
+    await expect(page.locator('#viewer canvas')).toBeVisible();
+
+    // The app was behind it all along, so the canvas is already sized.
+    const canvas = await page.evaluate(() => {
+      const box = document.getElementById('gl').getBoundingClientRect();
+      return { width: Math.round(box.width), height: Math.round(box.height) };
+    });
+    expect(canvas.width).toBeGreaterThan(200);
+    expect(canvas.height).toBeGreaterThan(200);
+  });
+
+  test('the one-glyph badge is gone', async ({ page }) => {
+    await page.reload();
+    await page.locator('#enterAppButton').click();
+    // The shared shell always renders it; the app hides it to match the others.
+    const mark = page.locator('.nd-imaging-mark');
+    await expect(mark).toHaveCount(1, 'still in the DOM — hidden, not removed');
+    await expect(mark).toBeHidden();
+    // The name itself stays.
+    await expect(page.locator('.nd-imaging-brand-copy')).toContainText('SurfAnnotate');
+  });
 });

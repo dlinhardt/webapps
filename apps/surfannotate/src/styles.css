@@ -369,3 +369,246 @@ button.mini:disabled {
   border-radius: 0 var(--nd-radius-sm, 4px) var(--nd-radius-sm, 4px) 0;
   opacity: 0.85;
 }
+
+/* -- start page ---------------------------------------------------------- */
+
+/* The other Neurodesk webapps show a short explanation before the tool, so the
+   app is not the first thing a visitor meets. It is a section over the app
+   rather than a separate document: the bundle, the shell and the composite-site
+   path all stay exactly as they were. */
+.start-page {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--nd-color-bg, #0f1419);
+  color: var(--nd-color-text, #e8edf4);
+  /* The shell sets its font on .nd-imaging-workspace, and this sits outside it,
+     so without this the start page renders in the browser's default serif. */
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.start-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nd-space-md, 1rem);
+  padding: var(--nd-space-md, 1rem) clamp(1rem, 4vw, 2.5rem);
+  background: var(--nd-color-surface, #1a2332);
+  border-bottom: 1px solid var(--nd-color-border, #2d3f5a);
+}
+
+.start-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--nd-space-sm, 0.5rem);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.start-brand strong { font-size: 1.05rem; font-weight: 700; }
+.start-brand span { color: var(--nd-color-text-muted, #8b99ad); font-size: 0.88rem; }
+
+.start-link {
+  flex: 0 0 auto;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.start-link:hover { color: var(--nd-color-text, #e8edf4); }
+
+.start-main {
+  flex: 1 1 auto;
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vh, 3rem) clamp(1rem, 4vw, 2.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(1.5rem, 5vh, 3rem);
+}
+
+.start-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: clamp(1.5rem, 4vw, 3rem);
+  align-items: start;
+}
+
+.start-kicker {
+  margin: 0 0 var(--nd-space-sm, 0.5rem);
+  color: var(--nd-color-success, #10b981);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.start-hero h2 {
+  margin: 0;
+  font-size: clamp(1.7rem, 3vw, 2.6rem);
+  line-height: 1.12;
+  font-weight: 700;
+}
+
+.start-intro {
+  max-width: 62ch;
+  margin: var(--nd-space-md, 1rem) 0 0;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.start-actions { margin-top: var(--nd-space-lg, 1.5rem); }
+
+.start-primary {
+  min-height: 44px;
+  padding: 0 1.6rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--nd-color-primary, #3b82f6);
+  border: 1px solid var(--nd-color-primary, #3b82f6);
+  border-radius: var(--nd-radius-md, 8px);
+  cursor: pointer;
+  transition: background var(--nd-transition-fast, 150ms ease);
+}
+
+.start-primary:hover { background: var(--nd-color-primary-hover, #2563eb); }
+
+.start-local-badge {
+  display: inline-block;
+  max-width: 62ch;
+  margin: var(--nd-space-lg, 1.5rem) 0 0;
+  padding: var(--nd-space-sm, 0.5rem) var(--nd-space-md, 1rem);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: var(--nd-radius-md, 8px);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.start-local-panel {
+  padding: var(--nd-space-md, 1rem);
+  background: var(--nd-color-surface, #1a2332);
+  border: 1px solid var(--nd-color-border, #2d3f5a);
+  border-radius: var(--nd-radius-md, 8px);
+}
+
+.start-local-panel h3 {
+  margin: 0 0 var(--nd-space-sm, 0.5rem);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nd-color-text-dim, #5c6b7f);
+}
+
+.start-local-panel h3 + ul { margin-bottom: var(--nd-space-md, 1rem); }
+.start-local-panel ul:last-child { margin-bottom: 0; }
+
+.start-local-panel ul {
+  display: grid;
+  gap: var(--nd-space-sm, 0.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.start-local-panel li { position: relative; padding-left: 16px; }
+
+.start-local-panel li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nd-color-primary, #3b82f6);
+}
+
+.start-page code {
+  font-size: 0.94em;
+  color: var(--nd-color-text, #e8edf4);
+}
+
+.start-how h3 {
+  margin: 0 0 var(--nd-space-md, 1rem);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nd-color-text-dim, #5c6b7f);
+}
+
+.start-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: clamp(1rem, 3vw, 2rem);
+}
+
+.start-step {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  column-gap: var(--nd-space-sm, 0.5rem);
+  align-items: start;
+}
+
+.start-step-number {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--nd-color-primary, #3b82f6);
+  background: var(--nd-color-primary-glow, rgba(59, 130, 246, 0.25));
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.start-step h4 { grid-column: 2; margin: 0.35rem 0 0.25rem; font-size: 0.9rem; }
+
+.start-step p {
+  grid-column: 2;
+  margin: 0;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.start-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nd-space-md, 1rem);
+  flex-wrap: wrap;
+  padding: var(--nd-space-md, 1rem) clamp(1rem, 4vw, 2.5rem);
+  border-top: 1px solid var(--nd-color-border, #2d3f5a);
+  color: var(--nd-color-text-dim, #5c6b7f);
+  font-size: 0.78rem;
+}
+
+.start-footer a { color: inherit; }
+
+@media (max-width: 760px) {
+  .start-hero { grid-template-columns: 1fr; }
+}
+
+/* The shared shell always draws a one-glyph badge beside the title. The rest of
+   the Neurodesk webapps show the name alone, so hide it here rather than change
+   the shared component and every app with it. */
+.nd-imaging-mark {
+  display: none;
+}
