@@ -19,7 +19,7 @@ src/
     meshAdapter.js          Loading, picking, layers, overlays
     colormaps.js            Colour maps NiiVue does not ship
   io/                       File writers/readers, pure and unit-tested
-    freesurferLabel.js, gifti.js, points.js, naming.js, classify.js
+    freesurferLabel.js, gifti.js, points.js, naming.js, classify.js, geometryOffset.js
 ```
 
 The split matters: `surface/` and `io/` run under plain `node --test` with no browser,
@@ -28,7 +28,11 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 
 ## Key conventions
 
-- **All NiiVue access goes through `src/niivue/meshAdapter.js`.** 1.0.0-rc.x is a
+- **All NiiVue *mesh* access goes through `src/niivue/meshAdapter.js`.** Construction
+  and the canvas (`new Niivue`, `attachToCanvas`, `setSliceType`, `drawScene`,
+  `removeMesh`) stay in `main.js`, and colormaps in `niivue/colormaps.js`; it is the
+  mesh, layer and picking surface that is centralised, and that is what the 1.0.0-rc
+  rewrite changes. 1.0.0-rc.x is a
   ground-up rewrite (`pts`/`tris` → `positions`/`indices`, camelCase layer fields, no
   `indexNearestXYZmm`), so keeping the surface area in one file makes that migration a
   single-file change. Pin stays at **0.69.0** — npm `latest`, and byte-identical mesh
@@ -52,9 +56,18 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 - **`setInputFiles` does not wait for the load.** In e2e, always follow it with a wait on
   the status text or the surface-list count before touching `window.__surfannotate`.
   Getting this wrong shows up as a rare `session is null`, one test per full run.
-- **`state.surfaces` is the list; `state.mesh`/`graph`/`session`/... are mirrors of
-  whichever entry is active.** Mirroring keeps the multi-surface change off every call
-  site, but it means `activateSurface` is the single place that may write them.
+- **`state.surfaces` is the list; `state.mesh`/`geometry`/`session`/... are mirrors of
+  whichever entry is active,** written by `activateSurface`. The exceptions are
+  deliberate: `state.graph`/`finder`/`excluded` belong to **`bindSession`**, because
+  they track the *cut* graph rather than the surface's own, and the overlay mirrors
+  belong to the overlay handlers. Assigning `entry.graph` in `activateSurface` puts the
+  uncut graph back over bindSession's work and forces a second full rebuild.
+- **Every guard in `fill.js` is a fraction of the WALKABLE surface, not `graph.V`.**
+  `excludeVertices` keeps a completed area's vertices and their indices and only strips
+  their edges, so `graph.V` stops being the size of the surface a flood can reach the
+  moment any area is saved. Measured against it, the >half-the-surface swap fires
+  spuriously — handing back the exterior as the ROI, with `error: null` — and the 40%
+  escape guard goes blind as the parcellation fills up.
 - **Exactly one surface is visible at a time.** Not a UI preference: the depth picker
   returns a position, never an identity, so a click over two overlapping meshes could
   not be attributed to either. Multiple simultaneous surfaces would silently break
@@ -77,6 +90,10 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 - **Order is meaning.** Each area is resolved with the areas above it cut away, so
   earlier areas win every overlap and editing one re-derives all the ones below it.
   This is what makes a moved shared boundary move both sides.
+- **`restoreEdited` clears the session too.** The area is authoritative again once it
+  is back on the list, and a leftover copy of its clicks means a later Save appends it
+  a second time under a new id and colour — the duplicate then resolves as
+  unresolvable, because the original already owns the territory.
 - **Reopening keeps the area's position** (`state.editIndex`). That is what makes it
   work at all: an area's border points routinely lie *inside* the area drawn next to it,
   because the fill excludes the border row, so V2 claims the row V1 was clicked along.

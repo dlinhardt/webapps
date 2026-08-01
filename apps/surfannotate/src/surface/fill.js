@@ -58,9 +58,17 @@ export function fillClosedRegion(graph, barrier, options = {}) {
   for (let v = 0; v < V; v++) if (barrier[v]) barrierCount++;
   if (barrierCount === 0) return fail('EMPTY_BOUNDARY');
 
+  // Every guard below is a fraction of the surface the fill can actually reach,
+  // which is NOT graph.V. `excludeVertices` leaves a completed area's vertices
+  // in place — they keep their indices, which every label and click depends on —
+  // and merely strips their edges. So once any area is saved, graph.V counts
+  // vertices no flood can ever touch, and measuring against it makes the guards
+  // progressively blinder as the parcellation fills up.
+  const walkable = walkableCount(graph);
+
   const result = seed >= 0
-    ? fillFromSeed(graph, barrier, seed, maxFraction)
-    : fillByComplement(graph, barrier, vertices, maxFraction);
+    ? fillFromSeed(graph, barrier, seed, maxFraction, walkable)
+    : fillByComplement(graph, barrier, vertices, maxFraction, walkable);
 
   if (result.error) return result;
 
@@ -75,14 +83,21 @@ export function fillClosedRegion(graph, barrier, options = {}) {
   return result;
 }
 
+/** Vertices a flood could reach: everything still joined to something. */
+function walkableCount(graph) {
+  let walkable = 0;
+  for (let v = 0; v < graph.V; v++) if (!isIsolated(graph, v)) walkable++;
+  return walkable;
+}
+
 /** BFS outwards from an interior vertex; the barrier stops the flood. */
-function fillFromSeed(graph, barrier, seed, maxFraction) {
+function fillFromSeed(graph, barrier, seed, maxFraction, walkable) {
   const V = graph.V;
   if (seed >= V || seed < 0) throw new Error(`seed ${seed} outside 0..${V - 1}`);
   if (barrier[seed]) return fail('SEED_ON_BOUNDARY');
 
   const { inside, count } = floodFrom(graph, barrier, seed);
-  if (count > maxFraction * V) {
+  if (count > maxFraction * walkable) {
     // Either the chain has a gap, or the click landed outside the loop.
     return { inside: null, count, error: 'FILL_ESCAPED', components: 1 };
   }
@@ -90,7 +105,7 @@ function fillFromSeed(graph, barrier, seed, maxFraction) {
 }
 
 /** Flood the exterior, then keep everything that is neither exterior nor barrier. */
-function fillByComplement(graph, barrier, vertices, maxFraction) {
+function fillByComplement(graph, barrier, vertices, maxFraction, walkable) {
   const V = graph.V;
   if (!vertices) throw new Error('auto fill needs options.vertices for the centroid');
 
@@ -112,8 +127,10 @@ function fillByComplement(graph, barrier, vertices, maxFraction) {
 
   // The seed is geometrically outside the boundary, but if the loop encircles
   // most of the surface the smaller side is the one the user meant. Workbench
-  // applies the same >half-the-surface rule.
-  if (outsideCount < V / 2) {
+  // applies the same >half-the-surface rule — expressed here as a direct
+  // comparison rather than against a total, so it needs no denominator and
+  // cannot be fooled by vertices that were cut out of the graph.
+  if (outsideCount < insideCount) {
     for (let v = 0; v < V; v++) {
       const swap = inside[v];
       inside[v] = outside[v];
@@ -123,7 +140,7 @@ function fillByComplement(graph, barrier, vertices, maxFraction) {
   }
 
   if (insideCount === 0) return fail('EMPTY_REGION');
-  if (insideCount > maxFraction * V) {
+  if (insideCount > maxFraction * walkable) {
     return { inside: null, count: insideCount, error: 'AMBIGUOUS_REGION', components: 0 };
   }
 

@@ -5,9 +5,9 @@ import assert from 'node:assert/strict';
 
 import { buildAdjacency, findBoundaryVertices, isIsolated } from '../src/surface/adjacency.js';
 import { excludeVertices, unionMasks } from '../src/surface/exclude.js';
-import { SurfacePathfinder, validateChain } from '../src/surface/pathfinder.js';
+import { SurfacePathfinder, validateChain, buildChain } from '../src/surface/pathfinder.js';
 import { RoiSession, CLOSURE_EDGE } from '../src/surface/roiSession.js';
-import { regionComponents } from '../src/surface/fill.js';
+import { regionComponents, fillClosedRegion } from '../src/surface/fill.js';
 import { makeGrid, at, countMask } from './helpers.js';
 
 const N = 11;
@@ -158,4 +158,49 @@ test('excluding nothing leaves the surface exactly as it was', () => {
   assert.deepEqual(Array.from(cut.graph.adjOffset), Array.from(graph.adjOffset));
   assert.deepEqual(Array.from(cut.graph.adjNeighbor), Array.from(graph.adjNeighbor));
   assert.deepEqual(Array.from(cut.openEdge), Array.from(baseEdge));
+});
+
+test('the fill guards measure the reachable surface, not the vertex count', () => {
+  // excludeVertices keeps a completed area's vertices and their indices, and
+  // only strips their edges — so graph.V stops being the size of the surface a
+  // flood can reach. Measuring the guards against it makes them blinder as the
+  // parcellation fills up.
+  const grid = makeGrid(N);
+  const graph = buildAdjacency(grid.vertices, grid.triangles);
+
+  // An earlier area already owns the top half.
+  const claimed = new Uint8Array(grid.V);
+  for (let j = 6; j < N; j++) for (let i = 0; i < N; i++) claimed[at(N, i, j)] = 1;
+  const cut = excludeVertices(graph, claimed, null);
+
+  const finder = new SurfacePathfinder(cut.graph, grid.vertices);
+  const { chain } = buildChain(finder,
+    [at(N, 2, 1), at(N, 4, 1), at(N, 4, 3), at(N, 2, 3)], { closed: true });
+  const barrier = new Uint8Array(grid.V);
+  for (const v of chain) barrier[v] = 1;
+
+  const auto = fillClosedRegion(cut.graph, barrier, { vertices: grid.vertices });
+  assert.equal(auto.error, null);
+  // The small loop, not its complement: against graph.V the >half rule fired
+  // spuriously and handed back the exterior with error: null.
+  assert.equal(auto.inside[at(N, 3, 2)], 1, 'the interior must be inside');
+  assert.equal(auto.inside[at(N, 0, 0)], 0, 'the far exterior must not');
+  assert.ok(auto.count < 6, `expected the small interior, got ${auto.count}`);
+
+  // And the escape guard fires on a flood that swallows what is left, even
+  // when that is a small fraction of graph.V. Claim most of the surface, so the
+  // remaining strip is under 40% of the nominal count: a lone barrier vertex
+  // encloses nothing, so the flood runs over everything still reachable.
+  const mostly = new Uint8Array(grid.V);
+  for (let j = 3; j < N; j++) for (let i = 0; i < N; i++) mostly[at(N, i, j)] = 1;
+  const narrow = excludeVertices(graph, mostly, null);
+  const walkable = grid.V - countMask(mostly);
+
+  const open = new Uint8Array(grid.V);
+  open[at(N, 0, 0)] = 1;
+  const escaped = fillClosedRegion(narrow.graph, open, { seed: at(N, 5, 1) });
+  assert.ok(walkable < 0.4 * grid.V,
+    'the reachable strip must be under the old threshold for this to discriminate');
+  assert.equal(escaped.error, 'FILL_ESCAPED',
+    'measured against graph.V this leak was accepted silently');
 });

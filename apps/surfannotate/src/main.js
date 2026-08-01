@@ -247,14 +247,6 @@ function bindSession(entry, session) {
   state.excluded = excluded;
 }
 
-/** Re-cut the surface after the parcellation changed, then redraw. */
-function applyExclusion() {
-  const entry = activeSurface();
-  if (!entry || !state.session) return;
-  bindSession(entry, state.session);
-  repaint();
-}
-
 /**
  * Re-derive every area's region from its border points, in list order.
  *
@@ -314,6 +306,11 @@ function restoreEdited() {
   state.editing = null;
   state.editIndex = -1;
   state.editColor = null;
+  // The list is authoritative again, so the session's copy of the clicks has to
+  // go: leaving it means a later Save appends the same area a second time, with
+  // a new id and colour, and the duplicate then resolves as unresolvable
+  // because the original already owns the territory.
+  state.session?.clearRoi();
   return area;
 }
 
@@ -946,8 +943,10 @@ function activateSurface(id, { announce = false } = {}) {
 
   state.mesh = entry.mesh;
   state.geometry = entry.geometry;
-  state.graph = entry.graph;
-  state.finder = entry.finder;
+  // state.graph and state.finder are bindSession's to write — it has just set
+  // them to the CUT graph, and assigning entry.graph here would put the uncut
+  // one back, defeat bindSession's own short-circuit, and force a second full
+  // excludeVertices + pathfinder rebuild on every activation.
   state.index = entry.index;
   state.session = session;
   state.labelValues = entry.labelValues;
@@ -982,7 +981,7 @@ function activateSurface(id, { announce = false } = {}) {
 function removeSurface(id) {
   const position = state.surfaces.findIndex((entry) => entry.id === id);
   if (position < 0) return;
-  restoreEdited();
+  if (state.activeId === id) restoreEdited();
   const [entry] = state.surfaces.splice(position, 1);
   state.nv.removeMesh(entry.mesh);
 
@@ -1738,10 +1737,8 @@ window.__surfannotateIo = {
 // The same actions the buttons invoke, so a test can drive the real code path
 // (including the repaint and control-state sync) without synthesising a click
 // that has to land on a specific vertex in the 3D view.
+// Only what the e2e suite drives. Everything here is module-private in the
+// bundle otherwise, and a shipping app should not export its internals wholesale.
 window.__surfannotateUi = {
-  repaint, runFill, setMode, loadSurface, addOverlay,
-  activateSurface, removeSurface, selectOverlay, setOverlayVisible, removeOverlay,
-  activeSurface, activeOverlay, handleDroppedFiles,
-  saveRoi, removeRoi, reopenRoi, moveRoi, setRoiVisible, selectRoi, savedRois,
-  exclusionMask, recomputeParcellation
+  repaint, runFill, setMode, activateSurface, activeSurface, activeOverlay, savedRois
 };
