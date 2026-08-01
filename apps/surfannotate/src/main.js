@@ -40,6 +40,24 @@ const LABEL_TABLE = [
 
 const el = (id) => document.getElementById(id);
 
+/** Input types where a keystroke edits text rather than driving the viewer. */
+const TEXT_INPUT_TYPES = new Set([
+  'text', 'search', 'url', 'tel', 'email', 'password', 'number'
+]);
+
+/**
+ * True when a key event belongs to a field the user is typing into. Sliders,
+ * checkboxes and buttons deliberately do not count: focus stays on the ROI
+ * opacity slider after you drag it, and the undo shortcut should still work
+ * there.
+ */
+function isTextEntry(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  if (target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return true;
+  return target.tagName === 'INPUT' && TEXT_INPUT_TYPES.has(target.type);
+}
+
 const ui = {
   surfaceInput: el('surfaceInput'),
   overlayInput: el('overlayInput'),
@@ -298,7 +316,13 @@ async function init() {
   ui.exportPoints.addEventListener('click', exportPoints);
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
+    // Backspace and Delete are the undo shortcut for the viewer, but they are
+    // also how you edit text. Without this guard the shortcut swallows every
+    // keystroke aimed at the ROI name or the colour-range fields, and those
+    // boxes can only be cleared by selecting all and overtyping.
+    if (isTextEntry(event.target)) return;
+
+    if (event.key === 'Escape' && state.awaitingSeed) {
       state.awaitingSeed = false;
       setStatus('Cancelled.');
     }

@@ -624,3 +624,37 @@ test('the control panel stays one column and scrolls, never wrapping off-screen'
     await expect(page.locator(`#${id}`)).toBeInViewport();
   }
 });
+
+test('typing in text fields is not stolen by the undo shortcut', async ({ page }) => {
+  // Backspace/Delete undo the last border point, on a document-level listener
+  // that calls preventDefault. Unguarded it also eats every keystroke aimed at
+  // a text box, so the ROI name could only be changed by select-all-and-retype.
+  await loadSurface(page);
+
+  const name = page.locator('#roiName');
+  await name.fill('V1x');
+  await name.press('Backspace');
+  await expect(name).toHaveValue('V1', 'Backspace must delete a character');
+  await name.press('Backspace');
+  await expect(name).toHaveValue('V');
+
+  // Number fields have the same problem; they enable once an overlay is loaded.
+  await page.setInputFiles('#overlayInput', join(FIXTURES, 'lh.curv'));
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.curv loaded', {
+    timeout: 60_000
+  });
+  const max = page.locator('#overlayMax');
+  await max.fill('12');
+  await max.press('Backspace');
+  await expect(max).toHaveValue('1');
+
+  // ...and the shortcut still works when focus is not in a text field.
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    session.addClick(1000); session.addClick(2000); session.addClick(3000);
+    window.__surfannotateUi.repaint();
+  });
+  await page.locator('#roiOpacity').focus();
+  await page.keyboard.press('Backspace');
+  expect(await page.evaluate(() => window.__surfannotate.session.clicks.length)).toBe(2);
+});
