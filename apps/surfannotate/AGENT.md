@@ -9,6 +9,7 @@ src/
     adjacency.js            CSR 1-ring vertex graph from (vertices, triangles)
     pathfinder.js           A* shortest path along mesh edges; chain building and validation
     edgeAnchor.js           Distance-to-cut field; extends a border out to an open edge
+    exclude.js              Cuts a completed ROI out of the graph so its rim is an edge
     fill.js                 Flood fill inside a closed boundary, seeded or automatic
     roiSession.js           Drawing state: clicks, trace, fill, landmarks
     vertexLookup.js         Uniform-grid nearest-vertex search
@@ -43,6 +44,12 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `RoiSession.rebind` moves it and deliberately discards the traced chain and fill,
   which are geometry-dependent. Deleting a surface only drops the session once the last
   surface with that topology is gone.
+- **"Use a completed ROI as an edge" is one graph operation, not a special case.**
+  `exclude.js` isolates the ROI's vertices, which makes its rim an open edge; every
+  other layer — pathfinder, fill, `closeOnEdge` — then behaves as it already did for a
+  flat patch. Vertices keep their indices (labels and clicks refer to them), and
+  `isIsolated` is what keeps them out of paths and fills. Resist adding a barrier
+  parameter to the algorithms: the graph is the barrier.
 - **The clicked vertices are the only authoritative ROI state.** The traced chain and
   the filled mask are always derived and are discarded whenever the clicks change.
   freeview does the opposite and that is what makes its undo impossible.

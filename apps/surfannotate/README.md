@@ -46,6 +46,19 @@ with unrelated topology keep separate, independent ROIs.
 Dropped files are identified by their magic number and name rather than by drop order,
 so a surface and an overlay can be dropped in any sequence.
 
+**Areas drawn in sequence.** Save a filled region to the completed list, and it can
+then be ticked as an **edge**: the ROI is cut out of the surface graph, so its border
+behaves exactly like the cut edge of a flat patch. Draw V1, tick it, and V2 needs only
+the clicks along its own outer border — the V1/V2 boundary is inherited exactly rather
+than re-clicked, so the two areas share a boundary instead of leaving a sliver of
+unassigned cortex between them. No fill can cross an ROI marked as an edge.
+
+This works on closed surfaces too. `lh.pial` has no edge to begin with, but once V1 is
+cut out it is a sphere with a hole in it, and every edge closure applies.
+
+Completed ROIs are listed with their own colour, a visibility tick and a remove button;
+selecting one makes the export buttons write it instead of the region being drawn.
+
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 
 ## Exports

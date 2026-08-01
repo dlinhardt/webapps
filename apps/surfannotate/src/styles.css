@@ -187,6 +187,18 @@
   cursor: pointer;
 }
 
+/* The "edge" tick on a completed ROI. */
+.layer-flag {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  opacity: 0.75;
+  cursor: pointer;
+  user-select: none;
+}
+
 .layer-meta {
   flex: 0 0 auto;
   font-size: 0.7rem;

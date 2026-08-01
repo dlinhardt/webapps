@@ -865,3 +865,157 @@ test('a dropped overlay is recognised as an overlay, not a second surface', asyn
   await expect(surfaceRows(page)).toHaveCount(1, 'the curv file did not become a surface');
   await expect(overlayRows(page)).toHaveCount(1);
 });
+
+// -- completed ROIs, and using one as an edge for the next ------------------
+
+const roiRows = (page) => page.locator('#roiList li');
+
+async function loadFlat(page) {
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await expect(page.locator('#statusText')).toContainText('1,681 vertices', { timeout: 60_000 });
+}
+
+/** Cut the strip below row `j` on the flat patch: close it on the edge and fill. */
+async function drawStrip(page, row) {
+  await page.evaluate((j) => {
+    const { session } = window.__surfannotate;
+    const n = 41;
+    session.addClick(j * n + 1);
+    session.addClick(j * n + (n - 2));
+    session.closeOnEdge();
+    session.fill();
+    window.__surfannotateUi.repaint();
+  }, row);
+}
+
+test('a filled region is saved to the completed list and clears the canvas', async ({ page }) => {
+  await loadFlat(page);
+  await expect(page.locator('#saveRoi')).toBeDisabled();
+
+  await drawStrip(page, 2);
+  await expect(page.locator('#saveRoi')).toBeEnabled();
+  await page.fill('#roiName', 'V1');
+  await page.locator('#saveRoi').click();
+
+  await expect(roiRows(page)).toHaveCount(1);
+  await expect(roiRows(page).first()).toContainText('V1');
+  await expect(page.locator('#statusText')).toContainText('Saved V1 — 82 vertices');
+
+  const after = await page.evaluate(() => ({
+    clicks: window.__surfannotate.session.clicks.length,
+    filled: window.__surfannotate.session.filled,
+    saved: window.__surfannotateUi.savedRois().map((r) => r.name)
+  }));
+  expect(after.clicks).toBe(0, 'the working session is cleared for the next area');
+  expect(after.filled).toBe(null);
+  expect(after.saved).toEqual(['V1']);
+});
+
+test('a completed ROI ticked as an edge is cut out of the surface', async ({ page }) => {
+  await loadFlat(page);
+  await drawStrip(page, 2);
+  await page.fill('#roiName', 'V1');
+  await page.locator('#saveRoi').click();
+  expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
+
+  await roiRows(page).first().locator('.layer-flag input').check();
+  await expect(page.locator('#statusText')).toContainText('V1 is now an edge');
+
+  const after = await page.evaluate(() => {
+    const s = window.__surfannotate;
+    const n = 41;
+    const inside = 1 * n + 20;
+    return {
+      excludedCount: [...s.excluded].reduce((a, v) => a + v, 0),
+      insideIsolated: s.graph.adjOffset[inside + 1] === s.graph.adjOffset[inside],
+      rimIsEdge: s.session.openEdge[2 * n + 20] === 1,
+      middleNotEdge: s.session.openEdge[20 * n + 20] === 1
+    };
+  });
+  expect(after.excludedCount).toBe(82);
+  expect(after.insideIsolated).toBe(true);
+  expect(after.rimIsEdge).toBe(true);
+  expect(after.middleNotEdge).toBe(false);
+});
+
+test('the next area can be closed against a completed ROI', async ({ page }) => {
+  await loadFlat(page);
+  await drawStrip(page, 2);
+  await page.fill('#roiName', 'V1');
+  await page.locator('#saveRoi').click();
+  await roiRows(page).first().locator('.layer-flag input').check();
+
+  // V2 needs two clicks only: its lower border is V1's rim.
+  const v2 = await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41;
+    session.addClick(6 * n + 1);
+    session.addClick(6 * n + (n - 2));
+    const closed = session.closeOnEdge();
+    const filled = session.fill();
+    return { ok: closed.ok, error: closed.error, count: filled.count };
+  });
+  expect(v2.ok).toBe(true, v2.error || '');
+  // V1 covers rows 0-1, so V2 is rows 2-5: from V1's rim to the new border.
+  expect(v2.count).toBe(4 * 41);
+
+  const overlap = await page.evaluate(() => {
+    const s = window.__surfannotate;
+    const v1 = window.__surfannotateUi.savedRois()[0].mask;
+    let n = 0;
+    for (let v = 0; v < v1.length; v++) if (v1[v] && s.session.filled[v]) n++;
+    return n;
+  });
+  expect(overlap).toBe(0, 'V2 did not swallow V1');
+});
+
+test('unticking or removing an edge ROI puts its vertices back', async ({ page }) => {
+  await loadFlat(page);
+  await drawStrip(page, 2);
+  await page.locator('#saveRoi').click();
+
+  const edge = roiRows(page).first().locator('.layer-flag input');
+  await edge.check();
+  expect(await page.evaluate(() => window.__surfannotate.excluded !== null)).toBe(true);
+  await edge.uncheck();
+  expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
+
+  await edge.check();
+  await roiRows(page).first().locator('.layer-remove').click();
+  await expect(roiRows(page)).toHaveCount(0);
+  expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
+});
+
+test('a selected completed ROI is what the export buttons write', async ({ page }) => {
+  await loadFlat(page);
+  await drawStrip(page, 2);
+  await page.fill('#roiName', 'V1');
+  await page.locator('#saveRoi').click();
+
+  // Nothing is being drawn now, yet the selected completed ROI is exportable.
+  await expect(page.locator('#exportLabel')).toBeEnabled();
+  const download = page.waitForEvent('download');
+  await page.locator('#exportLabel').click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe('lh.V1.label');
+
+  const stream = await file.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const lines = Buffer.concat(chunks).toString('utf8').trimEnd().split('\n');
+  expect(Number(lines[1])).toBe(82, 'the saved region, not an empty one');
+});
+
+test('completed ROIs follow the topology, like the ROI being drawn', async ({ page }) => {
+  await loadFlat(page);
+  await drawStrip(page, 2);
+  await page.locator('#saveRoi').click();
+  await expect(roiRows(page)).toHaveCount(1);
+
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+  await expect(roiRows(page)).toHaveCount(0, 'an unrelated mesh shows none');
+
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  await expect(roiRows(page)).toHaveCount(1, 'and they come back on the original');
+});

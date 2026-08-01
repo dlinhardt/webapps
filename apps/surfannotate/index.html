@@ -132,6 +132,20 @@
         </section>
 
         <section class="panel">
+          <h2>Completed ROIs</h2>
+          <div class="button-row">
+            <button type="button" id="saveRoi" disabled>Save filled region</button>
+          </div>
+          <ul class="layer-list" id="roiList" aria-label="Completed ROIs"></ul>
+          <p class="hint" id="roiListHint">
+            Tick <strong>edge</strong> and a completed ROI is cut out of the surface: its
+            border then works exactly like the edge of a flat patch, so the next area can
+            be closed against it and no fill can cross it. This works on closed surfaces
+            too — once V1 is an edge, V2 can be closed against it.
+          </p>
+        </section>
+
+        <section class="panel">
           <h2>Export</h2>
           <label class="file-field">
             <span>ROI name</span>

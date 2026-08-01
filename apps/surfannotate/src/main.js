@@ -5,13 +5,14 @@ import { mountImagingWorkspace } from '@neurodesk/webapp-components/core/mount-i
 import { Niivue } from '@niivue/niivue';
 import { registerExtraColormaps } from './niivue/colormaps.js';
 
-import { buildAdjacency, findBoundaryVertices } from './surface/adjacency.js';
+import { buildAdjacency, findBoundaryVertices, isIsolated } from './surface/adjacency.js';
+import { excludeVertices, unionMasks } from './surface/exclude.js';
 import { SurfacePathfinder } from './surface/pathfinder.js';
 import { buildVertexIndex } from './surface/vertexLookup.js';
 import {
   RoiSession, MODE_ROI, MODE_POINTS, SESSION_ERRORS, CLOSURE_EDGE
 } from './surface/roiSession.js';
-import { FILL_ERRORS } from './surface/fill.js';
+import { FILL_ERRORS, maskToIndices } from './surface/fill.js';
 import { hatchMask, FILL_STYLES } from './surface/hatch.js';
 import {
   loadMeshFromFile, loadOverlay, getGeometry, pickWorldMm, resolveVertex,
@@ -37,6 +38,14 @@ const LABEL_TABLE = [
   { key: LABEL_REGION, name: 'roi', rgba: [0.9, 0.2, 0.2, 0.55] },
   { key: LABEL_POINT, name: 'landmark', rgba: [0.2, 0.85, 0.9, 1] },
   { key: LABEL_CLICK, name: 'border point', rgba: [1, 0.55, 0.1, 1] }
+];
+
+// Completed ROIs are painted from a palette, starting well clear of the keys
+// above so the two sets never collide.
+const LABEL_SAVED_BASE = 16;
+const SAVED_ROI_COLORS = [
+  [0.30, 0.69, 0.31], [0.13, 0.59, 0.95], [1.00, 0.60, 0.00], [0.61, 0.35, 0.71],
+  [0.00, 0.74, 0.83], [0.91, 0.12, 0.39], [0.55, 0.76, 0.29], [0.80, 0.52, 0.25]
 ];
 
 const el = (id) => document.getElementById(id);
@@ -89,6 +98,8 @@ const ui = {
   undoPointSelection: el('undoPointSelection'),
   clearPoints: el('clearPoints'),
   pointList: el('pointList'),
+  saveRoi: el('saveRoi'),
+  roiList: el('roiList'),
   roiName: el('roiName'),
   exportLabel: el('exportLabel'),
   exportGifti: el('exportGifti'),
@@ -127,6 +138,13 @@ const state = {
   // switching to the folded one. See RoiSession.rebind.
   sessions: new Map(),
 
+  // Completed ROIs, each tied to a topology like the sessions. Ticking one as an
+  // edge cuts it out of the working graph — see bindSession.
+  rois: [],
+  selectedRoiId: null,
+  excluded: null,
+  boundKey: '',
+
   // Mirrors of the active surface. The rest of the app reads these rather than
   // reaching into the list, which keeps this change off every call site.
   mesh: null,
@@ -148,6 +166,157 @@ const state = {
   awaitingSeed: false,
   roiOpacity: 0.55
 };
+
+/** Completed ROIs of the shown surface's topology, in the order they were saved. */
+function savedRois() {
+  const entry = activeSurface();
+  if (!entry) return [];
+  return state.rois.filter((roi) => roi.topologyKey === entry.topologyKey);
+}
+
+/**
+ * The vertices cut out of the working surface: every completed ROI ticked as an
+ * edge, merged. Null when there are none, so the untouched graph is used.
+ */
+function exclusionMask() {
+  const entry = activeSurface();
+  if (!entry) return null;
+  const masks = savedRois().filter((roi) => roi.asEdge).map((roi) => roi.mask);
+  if (!masks.length) return null;
+  return unionMasks(entry.geometry.vertexCount, masks);
+}
+
+/**
+ * Point the session at the active surface, with completed ROIs cut out of it.
+ *
+ * Everything the drawing tools do runs on the graph handed to the session, so
+ * cutting the graph here is the whole of the "use a finished area as an edge"
+ * feature: paths will not route through it, fills cannot cross it, and its rim
+ * is reported as an edge for `closeOnEdge` to anchor to.
+ */
+function bindSession(entry, session) {
+  // Rebinding discards the traced border and the fill, so do it only when the
+  // surface or the set of edge ROIs actually changed — otherwise re-activating
+  // the surface already shown would throw away work in progress.
+  const edgeIds = savedRois().filter((roi) => roi.asEdge).map((roi) => roi.id).join(',');
+  const key = `${entry.id}|${edgeIds}`;
+  if (state.boundKey === key && session.graph === state.graph) return;
+  state.boundKey = key;
+
+  const excluded = exclusionMask();
+  const base = entry.openEdge;
+  if (!excluded) {
+    session.rebind(entry.graph, entry.finder, entry.geometry.positions, { openEdge: base });
+    state.graph = entry.graph;
+    state.finder = entry.finder;
+    state.excluded = null;
+    return;
+  }
+  const cut = excludeVertices(entry.graph, excluded, base);
+  const finder = new SurfacePathfinder(cut.graph, entry.geometry.positions);
+  session.rebind(cut.graph, finder, entry.geometry.positions, { openEdge: cut.openEdge });
+  state.graph = cut.graph;
+  state.finder = finder;
+  state.excluded = excluded;
+}
+
+/** Re-cut the surface after the set of edge ROIs changed, then redraw. */
+function applyExclusion() {
+  const entry = activeSurface();
+  if (!entry || !state.session) return;
+  bindSession(entry, state.session);
+  repaint();
+}
+
+/**
+ * Move the filled region out of the working session and into the completed
+ * list, so the next area can be drawn — and so this one can be used as an edge.
+ */
+function saveRoi() {
+  const entry = activeSurface();
+  const session = state.session;
+  if (!entry || !session?.filled) {
+    setStatus('Fill a region before saving it.');
+    return;
+  }
+  const name = roiName();
+  const roi = {
+    id: state.nextId++,
+    name,
+    topologyKey: entry.topologyKey,
+    // Copy: the session's mask is about to be cleared and reused.
+    mask: Uint8Array.from(session.filled),
+    clicks: Array.from(session.clicks),
+    chain: Int32Array.from(session.chain),
+    asEdge: false,
+    visible: true,
+    colorIndex: state.rois.length % SAVED_ROI_COLORS.length
+  };
+  state.rois.push(roi);
+  state.selectedRoiId = roi.id;
+
+  session.clearRoi();
+  renderLayerLists();
+  setStatus(`Saved ${name} — ${countMask(roi.mask).toLocaleString()} vertices. ` +
+    'Tick "edge" to draw the next area against it.');
+  repaint();
+}
+
+function removeRoi(id) {
+  const position = state.rois.findIndex((roi) => roi.id === id);
+  if (position < 0) return;
+  const [roi] = state.rois.splice(position, 1);
+  if (state.selectedRoiId === id) state.selectedRoiId = null;
+  // Dropping an ROI that was acting as an edge puts those vertices back.
+  if (roi.asEdge) applyExclusion();
+  renderLayerLists();
+  setStatus(`Removed ${roi.name}.`);
+  repaint();
+}
+
+function setRoiEdge(id, asEdge) {
+  const roi = state.rois.find((candidate) => candidate.id === id);
+  if (!roi) return;
+  roi.asEdge = asEdge;
+  applyExclusion();
+  setStatus(asEdge
+    ? `${roi.name} is now an edge — its border closes regions, and no fill can cross it.`
+    : `${roi.name} is no longer an edge.`);
+}
+
+function setRoiVisible(id, visible) {
+  const roi = state.rois.find((candidate) => candidate.id === id);
+  if (!roi) return;
+  roi.visible = visible;
+  repaint();
+}
+
+/** Select the ROI the export buttons act on. */
+function selectRoi(id) {
+  state.selectedRoiId = state.selectedRoiId === id ? null : id;
+  const roi = state.rois.find((candidate) => candidate.id === id);
+  if (roi && state.selectedRoiId === id) {
+    ui.roiName.value = roi.name;
+    showExportName();
+    setStatus(`${roi.name} selected — the export buttons will write it.`);
+  } else {
+    setStatus('Export will write the region being drawn.');
+  }
+  renderLayerLists();
+  repaint();
+}
+
+/** The completed ROI the export buttons target, or null for the working region. */
+function selectedRoi() {
+  if (state.selectedRoiId === null) return null;
+  return savedRois().find((roi) => roi.id === state.selectedRoiId) || null;
+}
+
+function countMask(mask) {
+  let n = 0;
+  for (let v = 0; v < mask.length; v++) if (mask[v]) n++;
+  return n;
+}
 
 /** The surface currently shown, or null when nothing is loaded. */
 function activeSurface() {
@@ -349,6 +518,7 @@ async function init() {
 
   ui.roiName.addEventListener('input', showExportName);
 
+  ui.saveRoi.addEventListener('click', saveRoi);
   ui.exportLabel.addEventListener('click', exportFreeSurferLabel);
   ui.exportGifti.addEventListener('click', exportGiftiLabel);
   ui.exportPoints.addEventListener('click', exportPoints);
@@ -494,11 +664,9 @@ function activateSurface(id, { announce = false } = {}) {
       openEdge: entry.openEdge
     });
     state.sessions.set(entry.topologyKey, session);
-  } else if (session.graph !== entry.graph) {
-    session.rebind(entry.graph, entry.finder, entry.geometry.positions, {
-      openEdge: entry.openEdge
-    });
   }
+  state.session = session;
+  bindSession(entry, session);
 
   state.mesh = entry.mesh;
   state.geometry = entry.geometry;
@@ -748,6 +916,40 @@ function renderLayerLists() {
     ui.surfaceList.appendChild(item);
   }
 
+  ui.roiList.innerHTML = '';
+  for (const roi of savedRois()) {
+    const item = document.createElement('li');
+    if (roi.id === state.selectedRoiId) item.classList.add('selected');
+
+    const show = document.createElement('input');
+    show.type = 'checkbox';
+    show.checked = roi.visible;
+    show.title = `Show ${roi.name} on the surface`;
+    show.setAttribute('aria-label', `Show ${roi.name}`);
+    show.addEventListener('change', () => setRoiVisible(roi.id, show.checked));
+
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'layer-name';
+    name.textContent = roi.name;
+    name.title = `Export ${roi.name} instead of the region being drawn`;
+    name.addEventListener('click', () => selectRoi(roi.id));
+
+    const edgeLabel = document.createElement('label');
+    edgeLabel.className = 'layer-flag';
+    edgeLabel.title = `Cut ${roi.name} out of the surface so its border acts as an edge`;
+    const edge = document.createElement('input');
+    edge.type = 'checkbox';
+    edge.checked = roi.asEdge;
+    edge.setAttribute('aria-label', `Use ${roi.name} as an edge`);
+    edge.addEventListener('change', () => setRoiEdge(roi.id, edge.checked));
+    edgeLabel.append(edge, document.createTextNode('edge'));
+
+    item.append(show, name, edgeLabel,
+      makeRemoveButton(`Remove ${roi.name}`, () => removeRoi(roi.id)));
+    ui.roiList.appendChild(item);
+  }
+
   ui.overlayList.innerHTML = '';
   const entry = activeSurface();
   for (const overlay of entry ? entry.overlays : []) {
@@ -849,6 +1051,17 @@ function onCanvasClick(event) {
   const vertex = vertexAt(event);
   if (vertex < 0) return; // the ray missed the surface
 
+  // A vertex inside an ROI being used as an edge has been cut out of the graph,
+  // so no path can reach it. Say so, rather than accept the click and fail at
+  // "Close ROI" with an unexplained gap.
+  if (state.excluded && isIsolated(state.graph, vertex)) {
+    const owner = savedRois().find((roi) => roi.asEdge && roi.mask[vertex]);
+    setStatus(owner
+      ? `That point is inside ${owner.name}, which is being used as an edge.`
+      : 'That point is inside a completed ROI being used as an edge.');
+    return;
+  }
+
   if (state.awaitingSeed) {
     state.awaitingSeed = false;
     runFill(vertex);
@@ -929,6 +1142,15 @@ function paintLabels() {
 
   state.labelValues.fill(LABEL_NONE);
 
+  // Completed ROIs sit underneath whatever is being drawn now.
+  savedRois().forEach((roi, index) => {
+    if (!roi.visible) return;
+    const key = LABEL_SAVED_BASE + index;
+    for (let v = 0; v < state.labelValues.length; v++) {
+      if (roi.mask[v]) state.labelValues[v] = key;
+    }
+  });
+
   // Fill style is purely visual — the region itself is unchanged, so exports
   // are identical whichever style is showing.
   const style = ui.fillStyle.value;
@@ -960,9 +1182,20 @@ function paintLabels() {
 
 /** The palette with the region's alpha taken from the opacity slider. */
 function currentLabelTable() {
-  return LABEL_TABLE.map((entry) => entry.key === LABEL_REGION
+  const base = LABEL_TABLE.map((entry) => entry.key === LABEL_REGION
     ? { ...entry, rgba: [entry.rgba[0], entry.rgba[1], entry.rgba[2], state.roiOpacity] }
     : entry);
+  const saved = savedRois().map((roi, index) => {
+    const [r, g, b] = SAVED_ROI_COLORS[roi.colorIndex];
+    // An ROI acting as an edge is drawn solid: it is now part of the surface's
+    // structure rather than a translucent annotation over it.
+    return {
+      key: LABEL_SAVED_BASE + index,
+      name: roi.name,
+      rgba: [r, g, b, roi.asEdge ? 0.9 : state.roiOpacity]
+    };
+  });
+  return base.concat(saved);
 }
 
 function repaint() {
@@ -990,7 +1223,8 @@ function syncControls() {
   ui.undoPointSelection.disabled = !hasPoints;
   ui.clearPoints.disabled = !hasPoints;
 
-  const exportable = hasRegion || session.chain.length > 0;
+  ui.saveRoi.disabled = !hasRegion;
+  const exportable = hasRegion || session.chain.length > 0 || Boolean(selectedRoi());
   ui.exportLabel.disabled = !exportable;
   ui.exportGifti.disabled = !exportable;
   ui.exportPoints.disabled = !hasPoints;
@@ -1037,7 +1271,7 @@ function exportStem() {
 }
 
 function exportFreeSurferLabel() {
-  const indices = state.session.regionIndices();
+  const indices = exportIndices();
   const text = writeFreeSurferLabel(indices, state.geometry.positions, {
     name: roiName(),
     subject: baseName()
@@ -1059,7 +1293,18 @@ async function exportGiftiLabel() {
   setStatus(`Exported ${filename}.`);
 }
 
+/**
+ * The vertices every export writes. Both formats go through this, so a selected
+ * completed ROI is honoured identically by each — the .label export used to read
+ * the session directly and would write an empty file after a save cleared it.
+ */
+function exportIndices() {
+  return maskToIndices(maskFromSession());
+}
+
 function maskFromSession() {
+  const chosen = selectedRoi();
+  if (chosen) return chosen.mask;
   const session = state.session;
   if (session.filled) return session.filled;
   const mask = new Uint8Array(state.geometry.vertexCount);
@@ -1092,5 +1337,6 @@ window.__surfannotateIo = {
 window.__surfannotateUi = {
   repaint, runFill, setMode, loadSurface, addOverlay,
   activateSurface, removeSurface, selectOverlay, setOverlayVisible, removeOverlay,
-  activeSurface, activeOverlay, handleDroppedFiles
+  activeSurface, activeOverlay, handleDroppedFiles,
+  saveRoi, removeRoi, setRoiEdge, setRoiVisible, selectRoi, savedRois, exclusionMask
 };
