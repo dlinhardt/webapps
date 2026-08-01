@@ -1301,18 +1301,34 @@ test.describe('start page', () => {
   });
 });
 
-test('the app declares a favicon that is actually served', async ({ page }) => {
-  const href = await page.getAttribute('link[rel="icon"]', 'href');
-  expect(href).toBeTruthy();
-  // Vite substitutes %BASE_URL% in index.html. If that ever stops happening the
-  // href goes out as a literal, and the icon 404s without any other symptom.
-  expect(href).not.toContain('%');
-  expect(href.endsWith('/favicon.svg')).toBe(true);
+test('every declared icon is actually served', async ({ page }) => {
+  const links = await page.$$eval('link[rel="icon"], link[rel="apple-touch-icon"]',
+    (nodes) => nodes.map((node) => ({
+      rel: node.getAttribute('rel'),
+      sizes: node.getAttribute('sizes'),
+      href: node.getAttribute('href')
+    })));
+  expect(links.length).toBeGreaterThanOrEqual(3);
+  expect(links.some((link) => link.rel === 'apple-touch-icon')).toBe(true);
 
-  const response = await page.request.get(new URL(href, page.url()).toString());
-  expect(response.status()).toBe(200);
-  expect(response.headers()['content-type']).toContain('svg');
-  const svg = await response.text();
-  expect(svg).toContain('<svg');
-  expect(svg).toContain('viewBox="0 0 32 32"');
+  for (const link of links) {
+    // Vite substitutes %BASE_URL% in index.html. If that ever stops happening
+    // the href goes out as a literal and the icon 404s with no other symptom.
+    expect(link.href, JSON.stringify(link)).not.toContain('%');
+    const response = await page.request.get(new URL(link.href, page.url()).toString());
+    expect(response.status(), `${link.href} must be served`).toBe(200);
+    expect(response.headers()['content-type']).toContain('png');
+
+    // Square, and the size the tag claims — a non-square icon is stretched by
+    // the browser rather than padded.
+    const declared = Number(link.sizes.split('x')[0]);
+    const measured = await page.evaluate(async (href) => {
+      const img = new Image();
+      img.src = href;
+      await img.decode();
+      return { width: img.naturalWidth, height: img.naturalHeight };
+    }, new URL(link.href, page.url()).toString());
+    expect(measured.width, `${link.href} width`).toBe(declared);
+    expect(measured.height, `${link.href} height`).toBe(declared);
+  }
 });

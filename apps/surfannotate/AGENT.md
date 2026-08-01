@@ -33,6 +33,11 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `indexNearestXYZmm`), so keeping the surface area in one file makes that migration a
   single-file change. Pin stays at **0.69.0** — npm `latest`, and byte-identical mesh
   code to the 0.68.x the rest of this monorepo uses.
+- **The favicons in `public/` are rendered, not hand-authored.** The source artwork is
+  711x508; each PNG is that fitted centred into a square, because a non-square icon is
+  stretched by the browser rather than padded. There is no transparent margin to trim,
+  so squaring necessarily letterboxes. Re-render with a canvas (headless Chromium will
+  do) rather than editing the PNGs.
 - **`index.html` opens on a start page, not the app.** `#startPage` is a fixed-position
   section over `#app`, hidden by `#enterAppButton` — the same shape calmar uses. The app
   is behind it the whole time, so the canvas is already sized and nothing needs
