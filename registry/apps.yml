@@ -224,5 +224,5 @@ apps:
     shell: imaging-workspace
     ci:
       toolchains: [node]
-      shared_runtime: false
+      shared_runtime: true
       release: false
