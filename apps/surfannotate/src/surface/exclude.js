@@ -1,9 +1,9 @@
 // Turning a finished ROI into an edge of the surface.
 //
-// Areas are delineated in sequence, and each one's border is mostly the border
-// of the area before it: V1 is drawn first, then V2 shares the whole V1/V2
+// ROIs are delineated in sequence, and each one's border is mostly the border
+// of the ROI before it: V1 is drawn first, then V2 shares the whole V1/V2
 // boundary with it, then V3 shares its outer boundary with V2. Re-clicking that
-// shared border for every area is both tedious and wrong — the two areas end up
+// shared border for every ROI is both tedious and wrong — the two ROIs end up
 // with slightly different boundaries and a sliver of unassigned cortex between
 // them.
 //

@@ -10,7 +10,7 @@ src/
     pathfinder.js           A* shortest path along mesh edges; chain building and validation
     edgeAnchor.js           Distance-to-cut field; extends a border out to an open edge
     exclude.js              Cuts a completed ROI out of the graph so its rim is an edge
-    parcellation.js         Resolves ordered area definitions into disjoint regions
+    parcellation.js         Resolves ordered ROI definitions into disjoint regions
     fill.js                 Flood fill inside a closed boundary, seeded or automatic
     roiSession.js           Drawing state: clicks, trace, fill, landmarks
     vertexLookup.js         Uniform-grid nearest-vertex search
@@ -63,9 +63,9 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   belong to the overlay handlers. Assigning `entry.graph` in `activateSurface` puts the
   uncut graph back over bindSession's work and forces a second full rebuild.
 - **Every guard in `fill.js` is a fraction of the WALKABLE surface, not `graph.V`.**
-  `excludeVertices` keeps a completed area's vertices and their indices and only strips
+  `excludeVertices` keeps a completed ROI's vertices and their indices and only strips
   their edges, so `graph.V` stops being the size of the surface a flood can reach the
-  moment any area is saved. Measured against it, the >half-the-surface swap fires
+  moment any ROI is saved. Measured against it, the >half-the-surface swap fires
   spuriously — handing back the exterior as the ROI, with `error: null` — and the 40%
   escape guard goes blind as the parcellation fills up.
 - **Exactly one surface is visible at a time.** Not a UI preference: the depth picker
@@ -83,23 +83,23 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   flat patch. Vertices keep their indices (labels and clicks refer to them), and
   `isIsolated` is what keeps them out of paths and fills. Resist adding a barrier
   parameter to the algorithms: the graph is the barrier.
-- **An area is a definition, not a mask.** `state.rois` holds border points, closure
+- **An ROI is a definition, not a mask.** `state.rois` holds border points, closure
   mode, region index and an anchor; `mask`/`chain`/`error` on them are *outputs* of
   `recomputeParcellation` and are overwritten wholesale. Never edit a mask in place —
   the next recompute discards it.
-- **Order is meaning.** Each area is resolved with the areas above it cut away, so
-  earlier areas win every overlap and editing one re-derives all the ones below it.
+- **Order is meaning.** Each ROI is resolved with the ROIs above it cut away, so
+  earlier ROIs win every overlap and editing one re-derives all the ones below it.
   This is what makes a moved shared boundary move both sides.
-- **`restoreEdited` clears the session too.** The area is authoritative again once it
+- **`restoreEdited` clears the session too.** The ROI is authoritative again once it
   is back on the list, and a leftover copy of its clicks means a later Save appends it
   a second time under a new id and colour — the duplicate then resolves as
   unresolvable, because the original already owns the territory.
-- **Reopening keeps the area's position** (`state.editIndex`). That is what makes it
-  work at all: an area's border points routinely lie *inside* the area drawn next to it,
+- **Reopening keeps the ROI's position** (`state.editIndex`). That is what makes it
+  work at all: an ROI's border points routinely lie *inside* the ROI drawn next to it,
   because the fill excludes the border row, so V2 claims the row V1 was clicked along.
-  Editing V1 in place means only the areas above it constrain, and V2 is below.
-- **The anchor is how an area is recognised after its neighbours move.** Component size
-  ordering alone flips as areas grow and shrink; `anchorVertex` picks the vertex furthest
+  Editing V1 in place means only the ROIs above it constrain, and V2 is below.
+- **The anchor is how an ROI is recognised after its neighbours move.** Component size
+  ordering alone flips as ROIs grow and shrink; `anchorVertex` picks the vertex furthest
   from the border by hop count, which is the last one a neighbour would take. The border is recomputed
   from the clicks, not restored from the saved chain, for the same reason the clicks are
   authoritative everywhere else.
@@ -120,7 +120,7 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   correction that does not match what was applied is worse than none.
   `showCoordinateSource` distinguishes the two cases, because the advice differs: an
   inflated or spherical surface shares the native vertex indexing, so switching to a
-  loaded `lh.white` carries the areas over; a flat patch is a *cut* with its own
+  loaded `lh.white` carries the ROIs over; a flat patch is a *cut* with its own
   numbering and fewer vertices, so sending the user to a whole hemisphere would hide
   their work rather than fix anything.
   Drawing on `lh.inflated` or a flat patch still writes *that* surface's coordinates

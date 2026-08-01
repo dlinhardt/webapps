@@ -870,7 +870,7 @@ test('a dropped overlay is recognised as an overlay, not a second surface', asyn
   await expect(overlayRows(page)).toHaveCount(1);
 });
 
-// -- areas as a parcellation ------------------------------------------------
+// -- ROIs as a parcellation ------------------------------------------------
 
 const roiRows = (page) => page.locator('#roiList li');
 
@@ -879,7 +879,7 @@ async function loadFlat(page) {
   await expect(page.locator('#statusText')).toContainText('1,681 vertices', { timeout: 60_000 });
 }
 
-/** Define an area by a line across the flat patch at row `j`, and save it. */
+/** Define an ROI by a line across the flat patch at row `j`, and save it. */
 async function saveStrip(page, row, name) {
   await page.evaluate((j) => {
     const { session } = window.__surfannotate;
@@ -897,7 +897,7 @@ async function saveStrip(page, row, name) {
 const areaSizes = (page) => page.evaluate(() => window.__surfannotateUi.savedRois()
   .map((a) => ({ name: a.name, n: a.mask ? a.mask.reduce((t, v) => t + v, 0) : null })));
 
-test('a filled region is saved as an area and clears the canvas', async ({ page }) => {
+test('a filled region is saved as an ROI and clears the canvas', async ({ page }) => {
   await loadFlat(page);
   await expect(page.locator('#saveRoi')).toBeDisabled();
 
@@ -910,16 +910,16 @@ test('a filled region is saved as an area and clears the canvas', async ({ page 
     clicks: window.__surfannotate.session.clicks.length,
     filled: window.__surfannotate.session.filled
   }));
-  expect(after.clicks).toBe(0, 'the working session is cleared for the next area');
+  expect(after.clicks).toBe(0, 'the working session is cleared for the next ROI');
   expect(after.filled).toBe(null);
 });
 
-test('a saved area is cut out of the surface for the next one', async ({ page }) => {
+test('a saved ROI is cut out of the surface for the next one', async ({ page }) => {
   await loadFlat(page);
   expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
   await saveStrip(page, 2, 'V1');
 
-  // No tick needed: every area above the one being drawn owns its vertices.
+  // No tick needed: every ROI above the one being drawn owns its vertices.
   const after = await page.evaluate(() => {
     const s = window.__surfannotate;
     const n = 41;
@@ -937,7 +937,7 @@ test('a saved area is cut out of the surface for the next one', async ({ page })
   expect(after.middleIsEdge).toBe(false);
 });
 
-test('the next area is closed against the one before it', async ({ page }) => {
+test('the next ROI is closed against the one before it', async ({ page }) => {
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
 
@@ -962,7 +962,7 @@ test('the next area is closed against the one before it', async ({ page }) => {
   ]);
 });
 
-test('editing an area moves the shared boundary, and the neighbour follows', async ({ page }) => {
+test('editing an ROI moves the shared boundary, and the neighbour follows', async ({ page }) => {
   // The point of the parcellation: V2 was never redefined, but pulling V1's
   // border back hands it the vertices V1 gave up, with nothing left over.
   await loadFlat(page);
@@ -1006,10 +1006,10 @@ test('editing an area moves the shared boundary, and the neighbour follows', asy
   expect(overlap).toEqual({ both: 0, neither: 0 });
 });
 
-test('an area keeps its place in the list while it is being edited', async ({ page }) => {
+test('an ROI keeps its place in the list while it is being edited', async ({ page }) => {
   // Reopening V1 while V2 exists used to fail: V1's border points sit inside
   // V2. Position is what fixes it — V1 is edited where it was, so only the
-  // areas above it constrain, and V2 is below.
+  // ROIs above it constrain, and V2 is below.
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
   await saveStrip(page, 6, 'V2');
@@ -1038,7 +1038,7 @@ test('an area keeps its place in the list while it is being edited', async ({ pa
   expect(after.filled).toBe(82, 'the region comes back as it was');
 });
 
-test('reordering areas changes who owns the overlap', async ({ page }) => {
+test('reordering ROIs changes who owns the overlap', async ({ page }) => {
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
   await saveStrip(page, 6, 'V2');
@@ -1069,7 +1069,7 @@ test('reordering areas changes who owns the overlap', async ({ page }) => {
   expect(sizes[1]).toEqual({ name: 'V1', n: 2 * 41 });
 });
 
-test('removing an area gives its vertices back to the surface', async ({ page }) => {
+test('removing an ROI gives its vertices back to the surface', async ({ page }) => {
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
   expect(await page.evaluate(() => window.__surfannotate.excluded !== null)).toBe(true);
@@ -1079,7 +1079,7 @@ test('removing an area gives its vertices back to the surface', async ({ page })
   expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
 });
 
-test('a selected area is what the export buttons write', async ({ page }) => {
+test('a selected ROI is what the export buttons write', async ({ page }) => {
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
   await roiRows(page).first().locator('.layer-name').click();
@@ -1097,7 +1097,7 @@ test('a selected area is what the export buttons write', async ({ page }) => {
   expect(Number(lines[1])).toBe(82, 'the saved region, not an empty one');
 });
 
-test('areas follow the topology, like the ROI being drawn', async ({ page }) => {
+test('ROIs follow the topology, like the ROI being drawn', async ({ page }) => {
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
   await expect(roiRows(page)).toHaveCount(1);
@@ -1110,7 +1110,7 @@ test('areas follow the topology, like the ROI being drawn', async ({ page }) => 
   await expect(roiRows(page)).toHaveCount(1, 'and they come back on the original');
 });
 
-test('a loop area is reopened onto the side it was filled on', async ({ page }) => {
+test('a loop ROI is reopened onto the side it was filled on', async ({ page }) => {
   await loadFlat(page);
   await page.evaluate(() => {
     const { session } = window.__surfannotate;
@@ -1135,8 +1135,8 @@ test('a loop area is reopened onto the side it was filled on', async ({ page }) 
   expect(after.filled).toBe(before, 'the same side, not the complement');
 });
 
-test('an area keeps its colour when it is edited', async ({ page }) => {
-  // The palette index came from the list length, so re-saving an edited area
+test('an ROI keeps its colour when it is edited', async ({ page }) => {
+  // The palette index came from the list length, so re-saving an edited ROI
   // recoloured it — and could give it the same colour as its neighbour.
   await loadFlat(page);
   await saveStrip(page, 5, 'V1');
@@ -1162,13 +1162,13 @@ test('an area keeps its colour when it is edited', async ({ page }) => {
   const after = await page.evaluate(() =>
     window.__surfannotateUi.savedRois().map((a) => a.colorIndex));
   expect(after).toEqual([0, 1, 2]);
-  expect(new Set(after).size).toBe(3, 'and no two areas share a colour');
+  expect(new Set(after).size).toBe(3, 'and no two ROIs share a colour');
 });
 
-test('the area name is entered where the area is made', async ({ page }) => {
+test('the ROI name is entered where the ROI is made', async ({ page }) => {
   await loadFlat(page);
   // The field used to live in the Export panel, below the Save button that uses it.
-  const areasPanel = page.locator('section.panel', { hasText: 'Areas' }).first();
+  const areasPanel = page.locator('section.panel', { hasText: 'ROIs' }).first();
   await expect(areasPanel.locator('#roiName')).toHaveCount(1);
   await expect(areasPanel.locator('#saveRoi')).toHaveCount(1);
 
@@ -1366,10 +1366,10 @@ test('the Cite button opens the citations, from the app and from the start page'
 
 // -- regressions found by adversarial testing ------------------------------
 
-test('saving an area does not silently retarget the export', async ({ page }) => {
-  // Saving used to select the area, and the export buttons prefer the selection
+test('saving an ROI does not silently retarget the export', async ({ page }) => {
+  // Saving used to select the ROI, and the export buttons prefer the selection
   // while the filename comes from the name box — so the next export wrote the
-  // saved area's vertices under the new area's name.
+  // saved ROI's vertices under the new ROI's name.
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
 
@@ -1399,8 +1399,8 @@ test('saving an area does not silently retarget the export', async ({ page }) =>
   expect(Number(lines[1])).toBe(onScreen, 'the region on screen, not the saved one');
 });
 
-test('a reopened area survives every way of walking away from the edit', async ({ page }) => {
-  // Reopening lifts the area off the list into the session. Nothing used to put
+test('a reopened ROI survives every way of walking away from the edit', async ({ page }) => {
+  // Reopening lifts the ROI off the list into the session. Nothing used to put
   // it back, so switching surface, clearing, or reopening another lost it.
   await loadFlat(page);
   await saveStrip(page, 2, 'V1');
@@ -1523,7 +1523,7 @@ test('the export panel says where the coordinates come from, and warns when they
   await expect(hint).toHaveClass(/warn/);
   await expect(hint).toContainText('not anatomical');
   // A patch is a cut of a surface, renumbered — so it must NOT send the user to
-  // lh.pial, which would hide their areas rather than fix anything.
+  // lh.pial, which would hide their ROIs rather than fix anything.
   await expect(hint).toContainText('different number of vertices');
   await expect(hint).toContainText('belong to this patch alone');
   await expect(hint).not.toContainText('Switch to');
@@ -1552,11 +1552,11 @@ test('the warning names a loaded anatomical surface of the same topology', async
   const hint = page.locator('#exportHint');
   await expect(hint).toHaveClass(/warn/);
   await expect(hint).toContainText('Switch to lh.pial before exporting');
-  await expect(hint).toContainText('the areas come with you');
+  await expect(hint).toContainText('the ROIs come with you');
 });
 
-test('switching to a different vertex indexing says the areas are hidden, not lost', async ({ page }) => {
-  // Areas belong to a vertex indexing. A flat patch is a cut of a surface with
+test('switching to a different vertex indexing says the ROIs are hidden, not lost', async ({ page }) => {
+  // ROIs belong to a vertex indexing. A flat patch is a cut of a surface with
   // its own numbering, so switching to a whole hemisphere shows none of them —
   // which looks exactly like the work has been thrown away.
   await loadFlat(page);
@@ -1572,7 +1572,7 @@ test('switching to a different vertex indexing says the areas are hidden, not lo
   await surfaceRows(page).nth(1).locator('input[type=radio]').check();
 
   await expect(roiRows(page)).toHaveCount(0);
-  await expect(page.locator('#statusText')).toContainText('2 area(s) on other surfaces');
+  await expect(page.locator('#statusText')).toContainText('2 ROI(s) on other surfaces');
   await expect(page.locator('#statusText')).toContainText('reappear when you switch back');
 
   // And they do.

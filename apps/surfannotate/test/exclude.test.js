@@ -1,4 +1,4 @@
-// Drawing an area against the border of the area drawn before it.
+// Drawing an ROI against the border of the ROI drawn before it.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,21 +17,21 @@ function patchWithArea(a, b) {
   const grid = makeGrid(N);
   const graph = buildAdjacency(grid.vertices, grid.triangles);
   const baseEdge = findBoundaryVertices(grid.triangles, grid.V);
-  const area = new Uint8Array(grid.V);
+  const roi = new Uint8Array(grid.V);
   for (let j = a; j <= b; j++) {
-    for (let i = a; i <= b; i++) area[at(N, i, j)] = 1;
+    for (let i = a; i <= b; i++) roi[at(N, i, j)] = 1;
   }
-  return { grid, graph, baseEdge, area };
+  return { grid, graph, baseEdge, roi };
 }
 
 test('an excluded region is cut out of the graph but keeps its indices', () => {
-  const { graph, baseEdge, area } = patchWithArea(4, 6);
-  const cut = excludeVertices(graph, area, baseEdge);
+  const { graph, baseEdge, roi } = patchWithArea(4, 6);
+  const cut = excludeVertices(graph, roi, baseEdge);
 
   assert.equal(cut.excludedCount, 9, 'the 3x3 block');
   assert.equal(cut.graph.V, graph.V, 'vertex numbering is untouched');
   for (let v = 0; v < graph.V; v++) {
-    if (area[v]) assert.ok(isIsolated(cut.graph, v), `vertex ${v} should be cut out`);
+    if (roi[v]) assert.ok(isIsolated(cut.graph, v), `vertex ${v} should be cut out`);
   }
   // Nothing outside the region lost a neighbour it should have kept.
   const outside = at(N, 0, 0);
@@ -42,8 +42,8 @@ test('an excluded region is cut out of the graph but keeps its indices', () => {
 });
 
 test('the rim of the excluded region becomes an edge', () => {
-  const { graph, baseEdge, area } = patchWithArea(4, 6);
-  const cut = excludeVertices(graph, area, baseEdge);
+  const { graph, baseEdge, roi } = patchWithArea(4, 6);
+  const cut = excludeVertices(graph, roi, baseEdge);
 
   // Vertices touching the block are now edge vertices...
   assert.equal(cut.openEdge[at(N, 3, 5)], 1);
@@ -83,13 +83,13 @@ test('excluding a region turns a closed surface into one with an edge', () => {
   const baseEdge = findBoundaryVertices(triangles, n * n);
   assert.equal(countMask(baseEdge), 0, 'a torus has no open edge');
 
-  const area = new Uint8Array(n * n);
-  area[idx(3, 3)] = 1;
-  const cut = excludeVertices(graph, area, baseEdge);
+  const roi = new Uint8Array(n * n);
+  roi[idx(3, 3)] = 1;
+  const cut = excludeVertices(graph, roi, baseEdge);
   assert.ok(countMask(cut.openEdge) > 0, 'cutting a hole creates one');
 });
 
-test('a border can be closed against a finished area, on a surface with no cut', () => {
+test('a border can be closed against a finished ROI, on a surface with no cut', () => {
   const grid = makeGrid(N);
   const graph = buildAdjacency(grid.vertices, grid.triangles);
   const baseEdge = findBoundaryVertices(grid.triangles, grid.V);
@@ -119,11 +119,11 @@ test('a border can be closed against a finished area, on a surface with no cut',
   }
 });
 
-test('a fill cannot cross a finished area', () => {
+test('a fill cannot cross a finished ROI', () => {
   const grid = makeGrid(N);
   const graph = buildAdjacency(grid.vertices, grid.triangles);
 
-  // A finished area cutting the grid clean in half.
+  // A finished ROI cutting the grid clean in half.
   const wall = new Uint8Array(grid.V);
   for (let j = 0; j < N; j++) wall[at(N, 5, j)] = 1;
 
@@ -132,11 +132,11 @@ test('a fill cannot cross a finished area', () => {
 
   const cut = excludeVertices(graph, wall, null);
   const after = regionComponents(cut.graph, new Uint8Array(grid.V));
-  assert.equal(after.count, 2, 'cutting the area out separates the two halves');
+  assert.equal(after.count, 2, 'cutting the ROI out separates the two halves');
   assert.deepEqual(after.sizes.slice().sort((x, y) => x - y), [55, 55]);
 });
 
-test('several finished areas combine into one barrier', () => {
+test('several finished ROIs combine into one barrier', () => {
   const V = 16;
   const a = new Uint8Array(V); a[1] = 1; a[2] = 1;
   const b = new Uint8Array(V); b[2] = 1; b[9] = 1;
@@ -161,14 +161,14 @@ test('excluding nothing leaves the surface exactly as it was', () => {
 });
 
 test('the fill guards measure the reachable surface, not the vertex count', () => {
-  // excludeVertices keeps a completed area's vertices and their indices, and
+  // excludeVertices keeps a completed ROI's vertices and their indices, and
   // only strips their edges — so graph.V stops being the size of the surface a
   // flood can reach. Measuring the guards against it makes them blinder as the
   // parcellation fills up.
   const grid = makeGrid(N);
   const graph = buildAdjacency(grid.vertices, grid.triangles);
 
-  // An earlier area already owns the top half.
+  // An earlier ROI already owns the top half.
   const claimed = new Uint8Array(grid.V);
   for (let j = 6; j < N; j++) for (let i = 0; i < N; i++) claimed[at(N, i, j)] = 1;
   const cut = excludeVertices(graph, claimed, null);

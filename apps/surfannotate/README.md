@@ -17,7 +17,7 @@ paths along the surface and close the loop, then *Fill region*. Points are joine
 the order placed**, not by proximity.
 
 **ROIs against the edge of a flat patch.** On a cut surface — an unfolded flat patch,
-or any mesh with an open edge — an area often runs right up to the cut, so its border
+or any mesh with an open edge — an ROI often runs right up to the cut, so its border
 is partly your line and partly the edge of the patch itself. *Close on surface edge*
 draws only the part that crosses the patch: both ends of your line are extended to the
 nearest edge vertex, and the edge closes the region. Two points are enough. The smaller
@@ -49,29 +49,29 @@ expanded here rather than by NiiVue, which has no reader for it: it is a sparse 
 the vertices in a region, so it is scattered into one value per vertex and windowed
 above zero, which is what makes a mask show as a region rather than a flat surface.
 
-**Areas as a parcellation.** Save a filled region and it joins an ordered list of
-areas. Each area is resolved on the surface the areas above it have left, so no vertex
-belongs to two, and each one's border works like the edge of a flat patch: the next area
+**ROIs as a parcellation.** Save a filled region and it joins an ordered list of
+ROIs. Each ROI is resolved on the surface the ROIs above it have left, so no vertex
+belongs to two, and each one's border works like the edge of a flat patch: the next ROI
 can be closed against it with only its own outer border clicked. This works on closed
 surfaces too — `lh.pial` has no edge to begin with, but once V1 is cut out it is a
 sphere with a hole in it.
 
-An area is not stored as a mask. It is a *definition* — its border points, how they were
+An ROI is not stored as a mask. It is a *definition* — its border points, how they were
 closed, and a vertex deep inside the region — and the masks are derived by resolving the
 whole list in order. That is what makes editing work: pull V1's border back and V2 grows
 into the space, because V2 was always defined as "my line, and whatever lies between it
-and the area above me". No unassigned strip is left where the boundary used to be, and
+and the ROI above me". No unassigned strip is left where the boundary used to be, and
 the two never overlap.
 
-Reordering is meaningful, not cosmetic: an area can be squeezed out entirely by one
-promoted above it, and moving it back up takes those vertices straight back. An area
+Reordering is meaningful, not cosmetic: an ROI can be squeezed out entirely by one
+promoted above it, and moving it back up takes those vertices straight back. An ROI
 whose border no longer resolves is struck through and claims nothing, rather than being
 silently dropped.
 
-The pencil reopens an area to adjust its border. It keeps its place in the list, so the
-areas above it constrain the drawing exactly as when it was first drawn, and the areas
+The pencil reopens an ROI to adjust its border. It keeps its place in the list, so the
+ROIs above it constrain the drawing exactly as when it was first drawn, and the ROIs
 below it are re-derived on save. Clicking a name makes the export buttons write that
-area instead of the region being drawn.
+ROI instead of the region being drawn.
 
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 
@@ -100,11 +100,11 @@ inflated; this app tells you instead.
 
 On an inflated or spherical surface only the coordinates are affected — the vertex
 indexing is the native surface's, so loading `lh.white` or `lh.pial` and switching
-brings the areas with you, and the panel names the loaded surface to switch to.
+brings the ROIs with you, and the panel names the loaded surface to switch to.
 
 A flat patch is different: it is a *cut* of the native surface, so it has a different
-number of vertices, and its indices — and the areas drawn on it — belong to the patch
-alone. Switching to a whole hemisphere shows none of them. They are not lost; areas
+number of vertices, and its indices — and the ROIs drawn on it — belong to the patch
+alone. Switching to a whole hemisphere shows none of them. They are not lost; ROIs
 follow the vertex indexing and reappear when you switch back, which the status line
 says when it happens.
 

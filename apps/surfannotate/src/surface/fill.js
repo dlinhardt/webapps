@@ -59,9 +59,9 @@ export function fillClosedRegion(graph, barrier, options = {}) {
   if (barrierCount === 0) return fail('EMPTY_BOUNDARY');
 
   // Every guard below is a fraction of the surface the fill can actually reach,
-  // which is NOT graph.V. `excludeVertices` leaves a completed area's vertices
+  // which is NOT graph.V. `excludeVertices` leaves a completed ROI's vertices
   // in place — they keep their indices, which every label and click depends on —
-  // and merely strips their edges. So once any area is saved, graph.V counts
+  // and merely strips their edges. So once any ROI is saved, graph.V counts
   // vertices no flood can ever touch, and measuring against it makes the guards
   // progressively blinder as the parcellation fills up.
   const walkable = walkableCount(graph);

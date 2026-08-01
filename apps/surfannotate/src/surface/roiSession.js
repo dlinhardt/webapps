@@ -283,7 +283,7 @@ export class RoiSession {
   /**
    * Fill one of the pieces the edge-anchored border cut the surface into.
    *
-   * Smallest first. On a flat patch an area delineated against the cut — V1, MT
+   * Smallest first. On a flat patch an ROI delineated against the cut — V1, MT
    * — is the strip between the drawn line and the nearby stretch of edge, and
    * the rest of the patch is the remainder; the ROI is the smaller piece
    * essentially every time. When it is not, `nextRegion()` steps to the next
@@ -314,7 +314,7 @@ export class RoiSession {
     this.regionIndex = Math.min(Math.max(requested, 0), this.regionOrder.length - 1);
 
     // A vertex known to have been inside this region last time beats the
-    // size ordering, which shifts as neighbouring areas grow and shrink.
+    // size ordering, which shifts as neighbouring ROIs grow and shrink.
     const prefer = options.preferVertex ?? -1;
     if (prefer >= 0 && prefer < regions.labels.length) {
       const component = regions.labels[prefer];

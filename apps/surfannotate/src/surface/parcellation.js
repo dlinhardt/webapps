@@ -1,17 +1,17 @@
-// A parcellation: an ordered list of areas that together partition the surface.
+// A parcellation: an ordered list of ROIs that together partition the surface.
 //
-// Independent masks are the wrong model for delineating adjacent areas. V1 and
+// Independent masks are the wrong model for delineating adjacent ROIs. V1 and
 // V2 share a boundary, so moving it changes both — but with independent masks
 // only the one being edited changes, and the other is left claiming vertices
 // that are no longer its own, or leaving a strip that belongs to nobody.
 //
-// So an area is not a mask. An area is a *definition* — its border points, how
+// So an ROI is not a mask. An ROI is a *definition* — its border points, how
 // they were closed, and which side was filled — and the masks are derived by
-// resolving the whole list in order, each area cut out of the surface before the
+// resolving the whole list in order, each ROI cut out of the surface before the
 // next one is resolved. Disjointness then holds by construction rather than by
-// checking, and editing an area's border re-derives everything after it: shrink
+// checking, and editing an ROI's border re-derives everything after it: shrink
 // V1 and V2 grows into the space, because V2's border was always defined as
-// "my line, and whatever lies between it and the area below me".
+// "my line, and whatever lies between it and the ROI below me".
 //
 // This is the same rule the rest of the app already follows — the clicked
 // vertices are the only authoritative state — applied one level up.
@@ -21,7 +21,7 @@ import { SurfacePathfinder } from './pathfinder.js';
 import { RoiSession, CLOSURE_EDGE } from './roiSession.js';
 
 /**
- * @typedef {object} AreaDefinition
+ * @typedef {object} RoiDefinition
  * @property {number} id
  * @property {string} name
  * @property {number[]} clicks         border points, in the order placed
@@ -32,94 +32,94 @@ import { RoiSession, CLOSURE_EDGE } from './roiSession.js';
  */
 
 /**
- * @typedef {object} ResolvedArea
- * @property {Uint8Array|null} mask  null when the area could not be resolved
+ * @typedef {object} ResolvedRoi
+ * @property {Uint8Array|null} mask  null when the ROI could not be resolved
  * @property {string|null} error
  */
 
 /**
  * Resolve definitions into disjoint regions, in order.
  *
- * Each area is drawn on a surface with every area before it cut away, which is
- * exactly the situation it was drawn in. An area that cannot be resolved — its
- * border points swallowed by an area now in front of it, say — is reported with
+ * Each ROI is drawn on a surface with every ROI before it cut away, which is
+ * exactly the situation it was drawn in. An ROI that cannot be resolved — its
+ * border points swallowed by an ROI now in front of it, say — is reported with
  * an error and claims nothing, rather than being silently dropped.
  *
  * @param {object} base
  * @param {import('./adjacency.js').SurfaceGraph} base.graph
  * @param {Float32Array} base.positions
  * @param {Uint8Array|null} base.openEdge the mesh's own cut, if it has one
- * @param {AreaDefinition[]} areas
- * @returns {{areas: Array<AreaDefinition & ResolvedArea>, owner: Int32Array,
- *   assigned: number}} `owner` holds the id of the area owning each vertex, or
+ * @param {RoiDefinition[]} ROIs
+ * @returns {{ROIs: Array<RoiDefinition & ResolvedRoi>, owner: Int32Array,
+ *   assigned: number}} `owner` holds the id of the ROI owning each vertex, or
  *   -1 where nothing does.
  */
-export function resolveParcellation(base, areas) {
+export function resolveParcellation(base, rois) {
   const V = base.graph.V;
   const owner = new Int32Array(V).fill(-1);
   const claimed = new Uint8Array(V);
   const resolved = [];
   let assigned = 0;
 
-  for (const area of areas) {
-    const result = resolveArea(base, claimed, area);
+  for (const roi of rois) {
+    const result = resolveRoi(base, claimed, roi);
     resolved.push(result);
     if (!result.mask) continue;
     for (let v = 0; v < V; v++) {
       if (!result.mask[v]) continue;
-      owner[v] = area.id;
+      owner[v] = roi.id;
       claimed[v] = 1;
       assigned++;
     }
   }
 
-  return { areas: resolved, owner, assigned };
+  return { rois: resolved, owner, assigned };
 }
 
 /**
- * Resolve one area against a surface with `claimed` already taken.
+ * Resolve one ROI against a surface with `claimed` already taken.
  *
- * Exported because the app needs the same "surface as this area sees it" when
- * the area is being drawn interactively, not only when the list is re-derived.
+ * Exported because the app needs the same "surface as this ROI sees it" when
+ * the ROI is being drawn interactively, not only when the list is re-derived.
  *
  * @param {object} base
- * @param {Uint8Array} claimed vertices already belonging to an earlier area
- * @param {AreaDefinition} area
- * @returns {AreaDefinition & ResolvedArea}
+ * @param {Uint8Array} claimed vertices already belonging to an earlier ROI
+ * @param {RoiDefinition} ROI
+ * @returns {RoiDefinition & ResolvedRoi}
  */
-export function resolveArea(base, claimed, area) {
+export function resolveRoi(base, claimed, roi) {
   const cut = excludeVertices(base.graph, claimed, base.openEdge);
   const finder = new SurfacePathfinder(cut.graph, base.positions);
   const session = new RoiSession(cut.graph, finder, base.positions, {
     openEdge: cut.openEdge
   });
 
-  for (const vertex of area.clicks) session.addClick(vertex);
-  if (session.clicks.length !== area.clicks.length) {
-    return { ...area, mask: null, error: 'LOST_POINTS' };
+  for (const vertex of roi.clicks) session.addClick(vertex);
+  if (session.clicks.length !== roi.clicks.length) {
+    return { ...roi, mask: null, error: 'LOST_POINTS' };
   }
 
-  const closed = area.closure === CLOSURE_EDGE ? session.closeOnEdge() : session.closePath();
+  const closed = roi.closure === CLOSURE_EDGE ? session.closeOnEdge() : session.closePath();
   if (!closed.ok) {
-    return { ...area, mask: null, error: closed.error || 'BROKEN_BOUNDARY' };
+    return { ...roi, mask: null, error: closed.error || 'BROKEN_BOUNDARY' };
   }
 
-  const anchor = usableAnchor(cut.graph, session, area.anchor);
-  const filled = area.closure === CLOSURE_EDGE
+  const anchor = usableAnchor(cut.graph, session, roi.anchor);
+  const filled = roi.closure === CLOSURE_EDGE
     ? session.fill({
-      region: area.regionIndex ?? 0,
+      region: roi.regionIndex ?? 0,
       preferVertex: anchor,
-      includeBoundary: area.includeBoundary
+      includeBoundary: roi.includeBoundary
     })
-    : session.fill({ seed: anchor, includeBoundary: area.includeBoundary });
+    : session.fill({ seed: anchor, includeBoundary: roi.includeBoundary });
 
   if (!filled.ok) {
-    return { ...area, mask: null, error: filled.error };
+    return { ...roi, mask: null, error: filled.error };
   }
-  return { ...area, mask: session.filled, error: null };
+  return { ...roi, mask: session.filled, error: null };
 }
 
-/** The stored anchor, if it is still a vertex this area could be filled from. */
+/** The stored anchor, if it is still a vertex this ROI could be filled from. */
 function usableAnchor(graph, session, anchor) {
   if (anchor === undefined || anchor === null || anchor < 0 || anchor >= graph.V) return -1;
   if (graph.adjOffset[anchor] === graph.adjOffset[anchor + 1]) return -1; // cut away
@@ -132,7 +132,7 @@ function usableAnchor(graph, session, anchor) {
  *
  * The furthest vertex from the border, by hop count, is the one most likely to
  * still be inside after an edit — a vertex near the border is exactly what a
- * neighbouring area takes when it grows.
+ * neighbouring ROI takes when it grows.
  *
  * @param {import('./adjacency.js').SurfaceGraph} graph
  * @param {Uint8Array} mask
@@ -173,9 +173,9 @@ export function anchorVertex(graph, mask, border) {
   return -1;
 }
 
-/** Human-readable text for the states an area can end up in. */
-export const AREA_ERRORS = Object.freeze({
-  LOST_POINTS: 'Some of its border points now belong to an area above it in the list.',
+/** Human-readable text for the states an ROI can end up in. */
+export const ROI_ERRORS = Object.freeze({
+  LOST_POINTS: 'Some of its border points now belong to an ROI above it in the list.',
   BROKEN_BOUNDARY: 'Its border could not be traced on the surface left to it.',
   NO_SEPARATION: 'Its border no longer encloses a region.',
   EMPTY_REGION: 'Its border encloses nothing that is still free.',

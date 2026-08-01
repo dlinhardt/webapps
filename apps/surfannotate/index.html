@@ -30,14 +30,14 @@
         <section class="start-hero">
           <div>
             <p class="start-kicker">Cortical surface annotation in the browser</p>
-            <h2>Delineate areas on a cortical surface, and export them.</h2>
+            <h2>Delineate ROIs on a cortical surface, and export them.</h2>
             <p class="start-intro">
               Load a FreeSurfer or GIfTI surface — folded, inflated, spherical, or an
               unfolded flat — and mark regions by clicking along their border.
               The points are joined by the shortest path across the mesh, so the border
-              follows the surface rather than a straight line through it. Areas are drawn
+              follows the surface rather than a straight line through it. ROIs are drawn
               in sequence and partition the surface: each one's border becomes the edge
-              the next is closed against, so neighbouring areas share a boundary exactly
+              the next is closed against, so neighbouring ROIs share a boundary exactly
               instead of having overlapping vertices.
             </p>
             <div class="start-actions">
@@ -77,7 +77,7 @@
               <h4>Load a surface</h4>
               <p>
                 Pick a file or drop it on the viewer. Load several and switch between
-                them; an area drawn on the inflated surface is still there on the folded
+                them; an ROI drawn on the inflated surface is still there on the folded
                 one.
               </p>
             </article>
@@ -94,7 +94,7 @@
               <div class="start-step-number">3</div>
               <h4>Save and export</h4>
               <p>
-                Saved areas become the edges the next ones are drawn against, and can be
+                Saved ROIs become the edges the next ones are drawn against, and can be
                 reopened to adjust. Export each as a <code>.label</code> or
                 <code>.label.gii</code>.
               </p>
@@ -240,9 +240,9 @@
         </section>
 
         <section class="panel">
-          <h2>Areas</h2>
+          <h2>ROIs</h2>
           <label class="file-field">
-            <span>Area name</span>
+            <span>ROI name</span>
             <input type="text" id="roiName" value="roi" maxlength="64"
                    placeholder="e.g. V1, lh-motor" autocomplete="off" spellcheck="false" />
           </label>
@@ -251,13 +251,13 @@
           </div>
           <ul class="layer-list" id="roiList" aria-label="Completed ROIs"></ul>
           <p class="hint">
-            Areas partition the surface: each is drawn on what the areas above it have
+            ROIs partition the surface: each is drawn on what the ROIs above it have
             left, so no vertex belongs to two. Its border then works like the edge of a
-            flat surface — the next area can be closed against it, on folded surfaces too.
-            <br />Editing one re-derives the areas below it, so moving a shared boundary
+            flat surface — the next ROI can be closed against it, on folded surfaces too.
+            <br />Editing one re-derives the ROIs below it, so moving a shared boundary
             moves both sides.
-            <br /><strong>&#9650;&#9660;</strong> reorder — later areas give way to
-            earlier ones. <strong>&#9998;</strong> reopens an area to adjust its border.
+            <br /><strong>&#9650;&#9660;</strong> reorder — later ROIs give way to
+            earlier ones. <strong>&#9998;</strong> reopens an ROI to adjust its border.
             Click a name to export it instead of the region being drawn.
           </p>
         </section>

@@ -8,7 +8,7 @@ import { registerExtraColormaps } from './niivue/colormaps.js';
 import { buildAdjacency, findBoundaryVertices, isIsolated } from './surface/adjacency.js';
 import { excludeVertices, unionMasks } from './surface/exclude.js';
 import {
-  resolveParcellation, anchorVertex, AREA_ERRORS
+  resolveParcellation, anchorVertex, ROI_ERRORS
 } from './surface/parcellation.js';
 import { SurfacePathfinder } from './surface/pathfinder.js';
 import { buildVertexIndex } from './surface/vertexLookup.js';
@@ -148,20 +148,20 @@ const state = {
 
   // Completed ROIs, each tied to a topology like the sessions. Ticking one as an
   // edge cuts it out of the working graph — see bindSession.
-  // Areas are *definitions* — border points, how they were closed, which side
+  // ROIs are *definitions* — border points, how they were closed, which side
   // was taken. The masks on them are derived by resolveParcellation and are
   // rewritten on every recompute, so the list order is what decides who owns a
-  // vertex when two areas would claim it.
+  // vertex when two ROIs would claim it.
   rois: [],
   selectedRoiId: null,
-  // The area lifted out of the list by the pencil. It lives here, not in
+  // The ROI lifted out of the list by the pencil. It lives here, not in
   // `rois`, until it is saved again — see restoreEdited.
   editing: null,
-  // While an area is being edited, its position in the list. Areas before it
-  // constrain the drawing; areas after it are re-derived when it is saved.
-  // -1 means a new area, which goes on the end.
+  // While an ROI is being edited, its position in the list. ROIs before it
+  // constrain the drawing; ROIs after it are re-derived when it is saved.
+  // -1 means a new ROI, which goes on the end.
   editIndex: -1,
-  // The colour of the area being edited, so re-saving it does not recolour it.
+  // The colour of the ROI being edited, so re-saving it does not recolour it.
   editColor: null,
   parcellationVersion: 0,
   excluded: null,
@@ -203,12 +203,12 @@ function savedRois() {
 function exclusionMask() {
   const entry = activeSurface();
   if (!entry) return null;
-  const areas = savedRois();
-  // Every area above this one in the list is already resolved and owns its
-  // vertices, so the area being drawn sees the surface they have left. That is
+  const rois = savedRois();
+  // Every ROI above this one in the list is already resolved and owns its
+  // vertices, so the ROI being drawn sees the surface they have left. That is
   // the whole of the parcellation rule: order decides ownership.
-  const upto = state.editIndex >= 0 ? state.editIndex : areas.length;
-  const masks = areas.slice(0, upto).map((area) => area.mask).filter(Boolean);
+  const upto = state.editIndex >= 0 ? state.editIndex : rois.length;
+  const masks = rois.slice(0, upto).map((roi) => roi.mask).filter(Boolean);
   if (!masks.length) return null;
   return unionMasks(entry.geometry.vertexCount, masks);
 }
@@ -217,7 +217,7 @@ function exclusionMask() {
  * Point the session at the active surface, with completed ROIs cut out of it.
  *
  * Everything the drawing tools do runs on the graph handed to the session, so
- * cutting the graph here is the whole of the "use a finished area as an edge"
+ * cutting the graph here is the whole of the "use a finished ROI as an edge"
  * feature: paths will not route through it, fills cannot cross it, and its rim
  * is reported as an edge for `closeOnEdge` to anchor to.
  */
@@ -247,89 +247,89 @@ function bindSession(entry, session) {
 }
 
 /**
- * Re-derive every area's region from its border points, in list order.
+ * Re-derive every ROI's region from its border points, in list order.
  *
- * This is what makes the areas a parcellation rather than a pile of masks:
+ * This is what makes the ROIs a parcellation rather than a pile of masks:
  * each is resolved on the surface the ones above it have left, so they cannot
  * overlap, and editing one re-derives everything below it. Move V1's border and
  * V2 follows, because V2 was always defined as "my line, and whatever lies
- * between it and the area above me".
+ * between it and the ROI above me".
  */
 function recomputeParcellation() {
   const entry = activeSurface();
   if (!entry) return;
-  const areas = savedRois();
-  // One uninterruptible task, ~13 ms per area on a 150k-vertex surface. Past a
-  // handful of areas that is long enough to look like a hang, and the status
+  const rois = savedRois();
+  // One uninterruptible task, ~13 ms per ROI on a 150k-vertex surface. Past a
+  // handful of ROIs that is long enough to look like a hang, and the status
   // line would otherwise still be showing whatever it said before.
-  if (areas.length > 3) {
-    setStatus(`Re-resolving ${areas.length} areas…`);
+  if (rois.length > 3) {
+    setStatus(`Re-resolving ${rois.length} ROIs…`);
   }
-  const { areas: resolved } = resolveParcellation({
+  const { rois: resolved } = resolveParcellation({
     graph: entry.graph,
     positions: entry.geometry.positions,
     openEdge: entry.openEdge
-  }, areas);
+  }, rois);
 
   resolved.forEach((result, index) => {
-    areas[index].mask = result.mask;
-      areas[index].error = result.error;
+    rois[index].mask = result.mask;
+      rois[index].error = result.error;
   });
   state.parcellationVersion++;
 
   if (state.session) bindSession(entry, state.session);
   renderLayerLists();
   repaint();
-  return resolved.filter((area) => area.error);
+  return resolved.filter((roi) => roi.error);
 }
 
 /**
- * Put a reopened area back where it came from.
+ * Put a reopened ROI back where it came from.
  *
- * Reopening lifts an area off the list and into the working session, so until it
+ * Reopening lifts an ROI off the list and into the working session, so until it
  * is saved the list is not the whole truth. Anything that walks away from the
- * edit — opening another area, switching surface, clearing — has to put it back,
+ * edit — opening another ROI, switching surface, clearing — has to put it back,
  * or the only copy goes with the session.
  *
- * @returns {object|null} the area that was restored
+ * @returns {object|null} the ROI that was restored
  */
 function restoreEdited() {
-  const area = state.editing;
-  if (!area) return null;
+  const roi = state.editing;
+  if (!roi) return null;
   const at = state.editIndex >= 0 ? state.editIndex : savedRois().length;
-  const areas = savedRois();
-  const anchor = areas[at];
+  const rois = savedRois();
+  const anchor = rois[at];
   const position = anchor ? state.rois.indexOf(anchor) : state.rois.length;
-  state.rois.splice(position, 0, area);
+  state.rois.splice(position, 0, roi);
   state.editing = null;
   state.editIndex = -1;
   state.editColor = null;
   // The list is authoritative again, so the session's copy of the clicks has to
-  // go: leaving it means a later Save appends the same area a second time, with
+  // go: leaving it means a later Save appends the same ROI a second time, with
   // a new id and colour, and the duplicate then resolves as unresolvable
   // because the original already owns the territory.
   state.session?.clearRoi();
-  return area;
+  return roi;
 }
 
-/** The first palette colour no area is using, so neighbours stay distinct. */
+/** The first palette colour no ROI is using, so neighbours stay distinct. */
 function nextColorIndex() {
-  const used = new Set(savedRois().map((area) => area.colorIndex));
+  const used = new Set(savedRois().map((roi) => roi.colorIndex));
   for (let i = 0; i < SAVED_ROI_COLORS.length; i++) {
     if (!used.has(i)) return i;
   }
   return savedRois().length % SAVED_ROI_COLORS.length;
 }
 
-/** One sentence naming any areas the last change left unresolvable. */
+/** One sentence naming any ROIs the last change left unresolvable. */
 function unresolvedNote(failed) {
   if (!failed || !failed.length) return '';
-  const names = failed.map((area) => area.name).join(', ');
-  return ` ${names} could not be resolved: ${AREA_ERRORS[failed[0].error] || failed[0].error}`;
+  const names = failed.map((roi) => roi.name).join(', ');
+  return ` ${names} could not be resolved: ${ROI_ERRORS[failed[0].error] || failed[0].error}`;
 }
 
 /**
- * Move the filled region out of the working session and into the area list.
+ * Move the filled region out of the working session and into the ROI list.
  *
  * The region itself is not what is stored — the border points are, along with
  * how they were closed and a vertex deep inside the region. The mask is derived
@@ -343,7 +343,7 @@ function saveRoi() {
     return;
   }
   const name = roiName();
-  const area = {
+  const roi = {
     id: state.nextId++,
     name,
     topologyKey: entry.topologyKey,
@@ -361,14 +361,14 @@ function saveRoi() {
     error: null
   };
 
-  const areas = savedRois();
-  const at = state.editIndex >= 0 ? Math.min(state.editIndex, areas.length) : areas.length;
-  const anchorArea = areas[at];
+  const rois = savedRois();
+  const at = state.editIndex >= 0 ? Math.min(state.editIndex, rois.length) : rois.length;
+  const anchorArea = rois[at];
   const position = anchorArea ? state.rois.indexOf(anchorArea) : state.rois.length;
-  state.rois.splice(position, 0, area);
+  state.rois.splice(position, 0, roi);
 
   // Deliberately NOT selected. Selecting it would point the export buttons at
-  // this area while the name field goes on naming the next one, so the next
+  // this ROI while the name field goes on naming the next one, so the next
   // export writes these vertices under that name — wrong data under a plausible
   // filename, with a status line confirming it.
   state.selectedRoiId = null;
@@ -378,90 +378,90 @@ function saveRoi() {
   session.clearRoi();
 
   const failed = recomputeParcellation();
-  const size = area.mask ? countMask(area.mask) : 0;
+  const size = roi.mask ? countMask(roi.mask) : 0;
   setStatus(`Saved ${name} — ${size.toLocaleString()} vertices.` + unresolvedNote(failed));
 }
 
 /**
- * Put an area back on the drawing board.
+ * Put an ROI back on the drawing board.
  *
- * Reopening is un-saving, and it keeps the area's position: the areas above it
- * still constrain the border, exactly as when it was drawn, and the areas below
+ * Reopening is un-saving, and it keeps the ROI's position: the ROIs above it
+ * still constrain the border, exactly as when it was drawn, and the ROIs below
  * it are re-derived when it is saved again. That is also why no neighbour has to
- * be released by hand — an area is never blocked by one that came after it.
+ * be released by hand — an ROI is never blocked by one that came after it.
  */
 function reopenRoi(id) {
   const entry = activeSurface();
-  const area = state.rois.find((candidate) => candidate.id === id);
-  if (!entry || !area || area.topologyKey !== entry.topologyKey) return;
+  const roi = state.rois.find((candidate) => candidate.id === id);
+  if (!entry || !roi || roi.topologyKey !== entry.topologyKey) return;
 
-  // Anything already being edited goes back on the list first: the area is held
+  // Anything already being edited goes back on the list first: the ROI is held
   // only by the session while it is open, so reopening a second one, switching
   // surfaces, or clearing would otherwise drop it for good.
   restoreEdited();
-  state.editIndex = savedRois().indexOf(area);
-  state.editColor = area.colorIndex;
-  state.editing = area;
-  state.rois.splice(state.rois.indexOf(area), 1);
+  state.editIndex = savedRois().indexOf(roi);
+  state.editColor = roi.colorIndex;
+  state.editing = roi;
+  state.rois.splice(state.rois.indexOf(roi), 1);
   if (state.selectedRoiId === id) state.selectedRoiId = null;
   recomputeParcellation();
 
   const session = state.session;
   session.clearRoi();
-  for (const vertex of area.clicks) session.addClick(vertex);
-  ui.roiName.value = area.name;
-  ui.includeBoundary.checked = Boolean(area.includeBoundary);
+  for (const vertex of roi.clicks) session.addClick(vertex);
+  ui.roiName.value = roi.name;
+  ui.includeBoundary.checked = Boolean(roi.includeBoundary);
 
-  const closed = area.closure === CLOSURE_EDGE ? session.closeOnEdge() : session.closePath();
+  const closed = roi.closure === CLOSURE_EDGE ? session.closeOnEdge() : session.closePath();
   let filled = { ok: false };
   if (closed.ok) {
-    filled = area.closure === CLOSURE_EDGE
+    filled = roi.closure === CLOSURE_EDGE
       ? session.fill({
-        region: area.regionIndex,
-        preferVertex: area.anchor,
-        includeBoundary: area.includeBoundary
+        region: roi.regionIndex,
+        preferVertex: roi.anchor,
+        includeBoundary: roi.includeBoundary
       })
-      : session.fill({ seed: area.anchor ?? -1, includeBoundary: area.includeBoundary });
+      : session.fill({ seed: roi.anchor ?? -1, includeBoundary: roi.includeBoundary });
   }
 
   renderLayerLists();
   showExportName();
   repaint();
   setStatus(filled.ok
-    ? `Reopened ${area.name} — ${session.clicks.length} border points restored. ` +
-      'Adjust it and save again; the areas below it will follow.'
-    : `Reopened ${area.name} — ${session.clicks.length} border points restored, but the ` +
+    ? `Reopened ${roi.name} — ${session.clicks.length} border points restored. ` +
+      'Adjust it and save again; the ROIs below it will follow.'
+    : `Reopened ${roi.name} — ${session.clicks.length} border points restored, but the ` +
       'border could not be retraced on the surface as it is now. Close it again.');
 }
 
 function removeRoi(id) {
   const position = state.rois.findIndex((roi) => roi.id === id);
   if (position < 0) return;
-  const [area] = state.rois.splice(position, 1);
+  const [roi] = state.rois.splice(position, 1);
   if (state.selectedRoiId === id) state.selectedRoiId = null;
   const failed = recomputeParcellation();
-  setStatus(`Removed ${area.name}.` + unresolvedNote(failed));
+  setStatus(`Removed ${roi.name}.` + unresolvedNote(failed));
 }
 
 /**
- * Move an area up or down the list, which changes who owns the overlap.
+ * Move an ROI up or down the list, which changes who owns the overlap.
  *
- * Order is meaning here, not presentation: an area drawn later can be squeezed
+ * Order is meaning here, not presentation: an ROI drawn later can be squeezed
  * out entirely by one above it, and promoting it takes those vertices back.
  */
 function moveRoi(id, delta) {
-  const areas = savedRois();
-  const from = areas.findIndex((area) => area.id === id);
+  const rois = savedRois();
+  const from = rois.findIndex((roi) => roi.id === id);
   const to = from + delta;
-  if (from < 0 || to < 0 || to >= areas.length) return;
+  if (from < 0 || to < 0 || to >= rois.length) return;
 
-  const moving = state.rois.indexOf(areas[from]);
-  const target = state.rois.indexOf(areas[to]);
-  const [area] = state.rois.splice(moving, 1);
-  state.rois.splice(target, 0, area);
+  const moving = state.rois.indexOf(rois[from]);
+  const target = state.rois.indexOf(rois[to]);
+  const [roi] = state.rois.splice(moving, 1);
+  state.rois.splice(target, 0, roi);
 
   const failed = recomputeParcellation();
-  setStatus(`${area.name} is now ${to + 1} of ${areas.length}.` + unresolvedNote(failed));
+  setStatus(`${roi.name} is now ${to + 1} of ${rois.length}.` + unresolvedNote(failed));
 }
 
 function setRoiVisible(id, visible) {
@@ -471,7 +471,7 @@ function setRoiVisible(id, visible) {
   repaint();
 }
 
-/** Select the area the export buttons act on. */
+/** Select the ROI the export buttons act on. */
 function selectRoi(id) {
   state.selectedRoiId = state.selectedRoiId === id ? null : id;
   const roi = state.rois.find((candidate) => candidate.id === id);
@@ -486,11 +486,11 @@ function selectRoi(id) {
   repaint();
 }
 
-/** The area the export buttons target, or null for the working region. */
+/** The ROI the export buttons target, or null for the working region. */
 function selectedRoi() {
   if (state.selectedRoiId === null) return null;
-  const area = savedRois().find((roi) => roi.id === state.selectedRoiId) || null;
-  return area && area.mask ? area : null;
+  const roi = savedRois().find((roi) => roi.id === state.selectedRoiId) || null;
+  return roi && roi.mask ? roi : null;
 }
 
 function countMask(mask) {
@@ -969,12 +969,12 @@ function activateSurface(id, { announce = false } = {}) {
     const carried = session.clicks.length
       ? ` ${session.clicks.length} border point(s) carried over.`
       : '';
-    // Areas belong to a vertex indexing, so switching to a surface with a
+    // ROIs belong to a vertex indexing, so switching to a surface with a
     // different one hides them rather than losing them — say which, or it looks
     // like the work is gone.
     const elsewhere = state.rois.filter((roi) => roi.topologyKey !== entry.topologyKey);
     const hidden = elsewhere.length
-      ? ` ${elsewhere.length} area(s) on other surfaces are not shown here — they use `
+      ? ` ${elsewhere.length} ROI(s) on other surfaces are not shown here — they use `
         + 'a different vertex indexing, and reappear when you switch back.'
       : '';
     setStatus(`Showing ${entry.name} — ` +
@@ -1231,8 +1231,8 @@ function renderLayerLists() {
   }
 
   ui.roiList.innerHTML = '';
-  const areas = savedRois();
-  areas.forEach((roi, index) => {
+  const rois = savedRois();
+  rois.forEach((roi, index) => {
     const item = document.createElement('li');
     if (roi.id === state.selectedRoiId) item.classList.add('selected');
     if (roi.error) item.classList.add('unresolved');
@@ -1253,14 +1253,14 @@ function renderLayerLists() {
     name.className = 'layer-name';
     name.textContent = roi.name;
     name.title = roi.error
-      ? `${roi.name}: ${AREA_ERRORS[roi.error] || roi.error}`
+      ? `${roi.name}: ${ROI_ERRORS[roi.error] || roi.error}`
       : `Export ${roi.name} instead of the region being drawn`;
     name.addEventListener('click', () => selectRoi(roi.id));
 
     const up = iconButton('\u25b2', `Move ${roi.name} up`, () => moveRoi(roi.id, -1));
     up.disabled = index === 0;
     const down = iconButton('\u25bc', `Move ${roi.name} down`, () => moveRoi(roi.id, 1));
-    down.disabled = index === areas.length - 1;
+    down.disabled = index === rois.length - 1;
     const reopen = iconButton('\u270e', `Reopen ${roi.name} to adjust its border`,
       () => reopenRoi(roi.id));
     reopen.classList.add('layer-edit');
@@ -1353,26 +1353,26 @@ function showCoordinateSource() {
   const flattened = kind === FLAT || isPlanar(entry.geometry.positions);
   // An anatomical surface only helps if it shares the vertex indexing: that is
   // what makes it the same ROI. A different indexing is a different surface as
-  // far as every area, click and label index is concerned.
+  // far as every ROI, click and label index is concerned.
   const donor = state.surfaces.find((other) => other.anatomical
     && other.topologyKey === entry.topologyKey);
 
   let advice;
   if (donor) {
     advice = `Switch to ${donor.name} before exporting — it shares this vertex `
-      + 'indexing, so the areas come with you.';
+      + 'indexing, so the ROIs come with you.';
   } else if (flattened) {
     // A patch is a cut of a surface, renumbered, so it has fewer vertices than
     // the native surface. Sending someone to lh.pial here would hide their work
-    // rather than fix anything — the areas belong to this indexing.
+    // rather than fix anything — the ROIs belong to this indexing.
     advice = 'A flat surface also has a different number of vertices from the '
-      + 'native surface it was cut from, so its vertex indices — and the areas '
+      + 'native surface it was cut from, so its vertex indices — and the ROIs '
       + 'drawn on it — belong to this patch alone.';
   } else {
     advice = 'The vertex indices are correct, and are all freeview and '
       + 'mris_anatomical_stats read. Load the matching lh.white or lh.pial and '
       + 'switch to it if you need the coordinates too — it shares this vertex '
-      + 'indexing, so the areas come with you.';
+      + 'indexing, so the ROIs come with you.';
   }
 
   ui.exportHint.textContent =
@@ -1449,15 +1449,15 @@ function onCanvasClick(event) {
   const vertex = vertexAt(event);
   if (vertex < 0) return; // the ray missed the surface
 
-  // A vertex owned by an area above this one in the list is cut out of the
+  // A vertex owned by an ROI above this one in the list is cut out of the
   // graph, so no path can reach it. Say whose it is, rather than accept the
   // click and fail at "Close ROI" with an unexplained gap.
   if (state.excluded && isIsolated(state.graph, vertex)) {
     const owner = savedRois().find((roi) => roi.mask && roi.mask[vertex]);
     setStatus(owner
       ? `That point belongs to ${owner.name}. Move it below ${owner.name} in the ` +
-        'list, or reopen that area, to draw here.'
-      : 'That point belongs to an area above this one in the list.');
+        'list, or reopen that ROI, to draw here.'
+      : 'That point belongs to an ROI above this one in the list.');
     return;
   }
 

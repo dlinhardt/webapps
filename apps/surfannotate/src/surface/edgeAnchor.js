@@ -1,7 +1,7 @@
 // Closing an ROI against the open edge of a cut surface.
 //
 // A flat patch is topologically a disk: the cortex was cut so it could be
-// unfolded, and the mesh therefore has an open edge. Areas delineated on such a
+// unfolded, and the mesh therefore has an open edge. ROIs delineated on such a
 // patch often run right up to that cut — V1 on an occipital patch, say — so the
 // natural ROI border is partly the line the user draws and partly the edge of
 // the patch itself. Clicking along that edge to close the loop is tedious, and
