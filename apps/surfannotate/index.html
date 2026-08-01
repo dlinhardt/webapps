@@ -69,15 +69,24 @@
             </p>
             <p class="hint note">
               Points are joined <strong>in the order you place them</strong>, not by
-              which are nearest each other. Work consistently around the border in
-              one direction; the last point is joined back to the first.
+              which are nearest each other. Work consistently along the border in
+              one direction. <strong>Close ROI</strong> joins the last point back to
+              the first.
             </p>
             <div class="button-row">
               <button type="button" id="undoPoint" disabled>Undo point</button>
               <button type="button" id="closePath" disabled>Close ROI</button>
             </div>
+            <div class="button-row" id="edgeRow" hidden>
+              <button type="button" id="closeOnEdge" disabled>Close on surface edge</button>
+            </div>
+            <p class="hint" id="edgeHint" hidden>
+              Draw only the part of the border crossing the patch: both ends are extended
+              to the nearest edge, which closes the region. Two points are enough.
+            </p>
             <div class="button-row">
               <button type="button" id="fillRegion" class="primary" disabled>Fill region</button>
+              <button type="button" id="flipRegion" hidden>Other side</button>
               <button type="button" id="clearRoi" disabled>Clear</button>
             </div>
             <label class="check">
@@ -98,8 +107,8 @@
               <span class="readout" id="roiOpacityValue">0.55</span>
             </div>
             <p class="hint" id="fillHint">
-              The interior is detected automatically. If both sides are large you will be asked
-              to click inside the region you want.
+              The interior is detected automatically; if it is ambiguous you are asked to
+              click inside the region you want. Closing on the edge takes the smaller side.
             </p>
           </div>
 

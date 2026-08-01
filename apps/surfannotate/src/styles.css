@@ -4,9 +4,22 @@
 #controls {
   display: flex;
   flex-direction: column;
+  /* MUST stay nowrap. The shared .nd-imaging-controls class on this same element
+     sets flex-wrap: wrap for its own row layout; combined with the column
+     direction here, anything taller than the panel wraps into a SECOND COLUMN
+     to the right — off the 320px panel, invisible, and unreachable, because
+     wrapping absorbs the overflow so overflow-y never has anything to scroll.
+     That silently swallowed the whole tool section once the panel grew. */
+  flex-wrap: nowrap;
   gap: var(--nd-space-4, 1rem);
   padding: var(--nd-space-4, 1rem);
   overflow-y: auto;
+}
+
+/* Sections must keep their natural height rather than being squeezed to fit,
+   or the panel shrinks them instead of scrolling. */
+#controls > .panel {
+  flex: 0 0 auto;
 }
 
 .panel {
@@ -145,9 +158,12 @@
   pointer-events: none;
 }
 
-/* `display: flex` below would otherwise defeat the [hidden] attribute. */
-.drop-hint[hidden] {
-  display: none;
+/* Any author `display` rule outranks the UA stylesheet's `[hidden]`, so an
+   element with both silently stays visible — which is how the drop hint once
+   sat permanently over the canvas. Make the attribute win everywhere rather
+   than patching it per selector. */
+[hidden] {
+  display: none !important;
 }
 
 .drop-hint {

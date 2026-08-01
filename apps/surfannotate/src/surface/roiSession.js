@@ -9,25 +9,36 @@
 // one click invalidates one segment, not the whole boundary.
 
 import { buildChain, validateChain } from './pathfinder.js';
-import { fillClosedRegion, maskToIndices } from './fill.js';
+import { fillClosedRegion, maskToIndices, regionComponents, componentMask } from './fill.js';
+import { buildEdgeAnchor, anchorChainToEdge } from './edgeAnchor.js';
 
 export const MODE_ROI = 'roi';
 export const MODE_POINTS = 'points';
+
+/** How the border was closed. */
+export const CLOSURE_LOOP = 'loop';
+export const CLOSURE_EDGE = 'edge';
 
 export class RoiSession {
   /**
    * @param {import('./adjacency.js').SurfaceGraph} graph
    * @param {import('./pathfinder.js').SurfacePathfinder} finder
    * @param {Float32Array} vertices geometry used for interior detection
+   * @param {object} [options]
+   * @param {Uint8Array} [options.openEdge] vertices on an open edge of the mesh,
+   *   from `findBoundaryVertices`. Present only for cut surfaces such as flat
+   *   patches, and what makes `closeOnEdge` available.
    */
-  constructor(graph, finder, vertices) {
+  constructor(graph, finder, vertices, options = {}) {
     this.graph = graph;
     this.finder = finder;
     this.vertices = vertices;
+    this.openEdge = options.openEdge || null;
 
     this.mode = MODE_ROI;
     this.clicks = [];
     this.closed = false;
+    this.closure = null;
     this.chain = new Int32Array(0);
     this.gaps = [];
     this.filled = null;
@@ -35,7 +46,19 @@ export class RoiSession {
     this.components = 0;
     this.points = [];
 
+    // Candidate regions for an edge closure: component ids ordered smallest
+    // first, and which of them is currently filled.
+    this.regionOrder = [];
+    this.regionIndex = -1;
+
     this._segmentCache = new Map();
+    this._regions = null;
+    this._anchor = null;
+  }
+
+  /** True when this surface is cut, so closing against the edge is possible. */
+  get hasOpenEdge() {
+    return Boolean(this.openEdge);
   }
 
   setMode(mode) {
@@ -80,31 +103,98 @@ export class RoiSession {
       return { ok: false, gaps: [], chainLength: 0 };
     }
     this.closed = true;
+    this.closure = CLOSURE_LOOP;
     this._recompute();
     const validation = validateChain(this.graph, this.chain);
     const ok = this.gaps.length === 0 && validation.ok;
-    if (!ok) this.closed = false;
+    // Keep the partial chain and the gap list on failure — they are what the UI
+    // reports back. Only the "this is closed" claim is retracted.
+    if (!ok) {
+      this.closed = false;
+      this.closure = null;
+    }
     return { ok, gaps: this.gaps, chainLength: this.chain.length };
+  }
+
+  /**
+   * Close the border against the cut edge of the surface instead of looping it
+   * back to the first click.
+   *
+   * The clicks are traced in order as an open line, then each end is run out to
+   * the nearest edge vertex. Nothing is traced *along* the edge: the edge is
+   * already impassable to flood fill, so the line plus the cut enclose a region
+   * between them. That is the whole point of the mode — on a flat patch the ROI
+   * border is often mostly the patch edge, and clicking along it by hand both
+   * takes many clicks and lands the border off the true cut.
+   *
+   * Two clicks are enough here, where a loop needs three.
+   *
+   * @returns {{ok: boolean, error: string|null, gaps: Array<[number, number]>,
+   *   chainLength: number, regions: number}}
+   */
+  closeOnEdge() {
+    const fail = (error, gaps = []) => {
+      this._reopen();
+      this.gaps = gaps;
+      return { ok: false, error, gaps, chainLength: 0, regions: 0 };
+    };
+
+    if (!this.openEdge) return fail('NO_OPEN_EDGE');
+    if (this.clicks.length < 2) return fail('TOO_FEW_CLICKS');
+
+    if (!this._anchor) this._anchor = buildEdgeAnchor(this.graph, this.openEdge);
+
+    const traced = buildChain(this.finder, this.clicks, {
+      closed: false,
+      cache: this._segmentCache
+    });
+    if (traced.gaps.length) return fail('BROKEN_BOUNDARY', traced.gaps);
+
+    const anchored = anchorChainToEdge(this._anchor, traced.chain);
+    if (!anchored.ok) return fail('EDGE_UNREACHABLE');
+
+    if (!validateChain(this.graph, anchored.chain).ok) return fail('BROKEN_BOUNDARY');
+
+    // Unlike a loop, an edge-anchored line is not guaranteed to separate
+    // anything: a line joining two *different* cuts — the outer edge and the rim
+    // of a hole — turns an annulus into a disk without dividing it. Cheaper and
+    // far more reliable to ask the graph than to reason about the topology.
+    const barrier = new Uint8Array(this.graph.V);
+    for (const v of anchored.chain) barrier[v] = 1;
+    const regions = regionComponents(this.graph, barrier);
+    if (regions.count < 2) return fail('NO_SEPARATION');
+
+    this.chain = anchored.chain;
+    this.gaps = [];
+    this.closed = true;
+    this.closure = CLOSURE_EDGE;
+    this._regions = regions;
+    return {
+      ok: true,
+      error: null,
+      gaps: [],
+      chainLength: this.chain.length,
+      regions: regions.count
+    };
   }
 
   /** Editing the clicks invalidates any traced boundary and fill. */
   _reopen() {
     this.closed = false;
+    this.closure = null;
     this.chain = new Int32Array(0);
     this.gaps = [];
     this.filled = null;
     this.fillError = null;
     this.components = 0;
+    this.regionOrder = [];
+    this.regionIndex = -1;
+    this._regions = null;
   }
 
   clearRoi() {
     this.clicks = [];
-    this.closed = false;
-    this.chain = new Int32Array(0);
-    this.gaps = [];
-    this.filled = null;
-    this.fillError = null;
-    this.components = 0;
+    this._reopen();
     this._segmentCache.clear();
   }
 
@@ -119,6 +209,8 @@ export class RoiSession {
    * @param {object} [options]
    * @param {number} [options.seed] interior vertex; omit for automatic detection
    * @param {boolean} [options.includeBoundary]
+   * @param {number} [options.region] for an edge closure, which candidate region
+   *   to take: an index into `regionOrder`. Defaults to the smallest.
    * @returns {{ok: boolean, error: string|null, count: number, components: number}}
    */
   fill(options = {}) {
@@ -132,8 +224,13 @@ export class RoiSession {
       return { ok: false, error: 'BROKEN_BOUNDARY', count: 0, components: 0 };
     }
 
+    const seed = options.seed ?? -1;
+    if (this.closure === CLOSURE_EDGE && seed < 0) {
+      return this._fillEdgeRegion(options);
+    }
+
     const result = fillClosedRegion(this.graph, this.boundaryMask(), {
-      seed: options.seed ?? -1,
+      seed,
       vertices: this.vertices,
       includeBoundary: options.includeBoundary ?? false
     });
@@ -141,12 +238,79 @@ export class RoiSession {
     this.filled = result.inside;
     this.fillError = result.error;
     this.components = result.components;
+    this.regionOrder = [];
+    this.regionIndex = -1;
     return {
       ok: result.error === null,
       error: result.error,
       count: result.count,
       components: result.components
     };
+  }
+
+  /**
+   * Fill one of the pieces the edge-anchored border cut the surface into.
+   *
+   * Smallest first. On a flat patch an area delineated against the cut — V1, MT
+   * — is the strip between the drawn line and the nearby stretch of edge, and
+   * the rest of the patch is the remainder; the ROI is the smaller piece
+   * essentially every time. When it is not, `nextRegion()` steps to the next
+   * one, which is one click rather than a re-draw.
+   *
+   * Note there is no 40%-of-the-surface refusal here, unlike the loop
+   * strategies. That guard exists to catch a fill that leaked through a gap, and
+   * a leak is not possible once the barrier has been shown to separate the graph
+   * — `closeOnEdge` establishes exactly that. Refusing a large region here would
+   * only block the legitimate case of a border that halves the patch.
+   */
+  _fillEdgeRegion(options = {}) {
+    const regions = this._regions || regionComponents(this.graph, this.boundaryMask());
+    this._regions = regions;
+
+    if (regions.count === 0) {
+      this.filled = null;
+      this.fillError = 'EMPTY_REGION';
+      return { ok: false, error: 'EMPTY_REGION', count: 0, components: 0 };
+    }
+
+    this.regionOrder = regions.sizes
+      .map((size, id) => ({ size, id }))
+      .sort((a, b) => a.size - b.size || a.id - b.id)
+      .map((entry) => entry.id);
+
+    const requested = options.region ?? 0;
+    this.regionIndex = Math.min(Math.max(requested, 0), this.regionOrder.length - 1);
+
+    const { mask, count } = componentMask(regions.labels, this.regionOrder[this.regionIndex]);
+    let total = count;
+    if (options.includeBoundary) {
+      for (const v of this.chain) {
+        if (!mask[v]) { mask[v] = 1; total++; }
+      }
+    }
+
+    this.filled = mask;
+    this.fillError = null;
+    this.components = 1;
+    return {
+      ok: true,
+      error: null,
+      count: total,
+      components: 1,
+      region: this.regionIndex,
+      regions: this.regionOrder.length
+    };
+  }
+
+  /**
+   * Take the next candidate region of an edge closure — the "wrong side" undo.
+   * @returns {object|null} the fill result, or null when there is nothing to
+   *   switch to
+   */
+  nextRegion(options = {}) {
+    if (this.closure !== CLOSURE_EDGE || this.regionOrder.length < 2) return null;
+    const next = (this.regionIndex + 1) % this.regionOrder.length;
+    return this._fillEdgeRegion({ ...options, region: next });
   }
 
   /** Vertices in the filled region, or the boundary when nothing is filled. */
@@ -191,5 +355,6 @@ export class RoiSession {
 /** Messages for the states the session can report. */
 export const SESSION_ERRORS = Object.freeze({
   NOT_CLOSED: 'Close the ROI before filling.',
-  BROKEN_BOUNDARY: 'The boundary has a gap — part of it could not be joined across the surface.'
+  BROKEN_BOUNDARY: 'The boundary has a gap — part of it could not be joined across the surface.',
+  TOO_FEW_CLICKS: 'Place at least two border points before closing on the edge.'
 });

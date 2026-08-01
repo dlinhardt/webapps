@@ -467,3 +467,160 @@ test('the surface renders visibly', async ({ page }) => {
   expect(shot.length).toBeGreaterThan(5000);
   await test.info().attach('surface', { body: shot, contentType: 'image/png' });
 });
+
+// -- closing an ROI against the edge of a cut surface -----------------------
+
+async function loadFlatPatch(page) {
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.flat.surf.gii'));
+  await expect(page.locator('#statusText')).toContainText('1,681 vertices', { timeout: 90_000 });
+}
+
+test('the edge-closure control appears only for a cut surface', async ({ page }) => {
+  // A pial surface is closed after topology fixing, so there is no edge to
+  // close against and the control must stay out of the way.
+  await loadSurface(page);
+  await expect(page.locator('#edgeRow')).toBeHidden();
+  await expect(page.locator('#edgeHint')).toBeHidden();
+
+  await loadFlatPatch(page);
+  await expect(page.locator('#statusText')).toContainText('This surface is cut');
+  await expect(page.locator('#edgeRow')).toBeVisible();
+  await expect(page.locator('#edgeHint')).toContainText('Two points are enough');
+  // Two points are enough here, where a loop needs three.
+  await expect(page.locator('#closeOnEdge')).toBeDisabled();
+  await page.evaluate(() => window.__surfannotate.session.addClick(0));
+  await page.evaluate(() => window.__surfannotateUi.repaint());
+  await expect(page.locator('#closeOnEdge')).toBeDisabled();
+  await page.evaluate(() => window.__surfannotate.session.addClick(40));
+  await page.evaluate(() => window.__surfannotateUi.repaint());
+  await expect(page.locator('#closeOnEdge')).toBeEnabled();
+});
+
+test('two clicks on a flat patch close against the edge and fill one side', async ({ page }) => {
+  await loadFlatPatch(page);
+
+  const result = await page.evaluate(() => {
+    const { session, geometry } = window.__surfannotate;
+    const n = Math.round(Math.sqrt(geometry.vertexCount)); // 41x41 grid
+    const at = (i, j) => j * n + i;
+    // A line across the patch two rows up from the bottom edge. Each end is one
+    // step from the side edge and two from the bottom, so both anchor sideways
+    // and the border ends up spanning the full row.
+    session.addClick(at(1, 2));
+    session.addClick(at(n - 2, 2));
+    const closed = session.closeOnEdge();
+    const filled = session.fill();
+    return { n, closed, filled, chain: Array.from(session.chain) };
+  });
+
+  expect(result.closed.ok).toBe(true);
+  expect(result.closed.regions).toBe(2);
+  // The strip below the line: 3 rows of 41, less the line itself.
+  expect(result.filled.ok).toBe(true);
+  expect(result.filled.count).toBe(2 * result.n);
+
+  const onEdge = await page.evaluate((chain) => {
+    const { geometry } = window.__surfannotate;
+    const n = Math.round(Math.sqrt(geometry.vertexCount));
+    const rim = (v) => v % n === 0 || v % n === n - 1 || v < n || v >= n * (n - 1);
+    return { first: rim(chain[0]), last: rim(chain[chain.length - 1]) };
+  }, result.chain);
+  expect(onEdge.first).toBe(true);
+  expect(onEdge.last).toBe(true);
+});
+
+test('the other side of an edge closure is one click away in the UI', async ({ page }) => {
+  await loadFlatPatch(page);
+  await expect(page.locator('#flipRegion')).toBeHidden();
+
+  await page.evaluate(() => {
+    const { session, geometry } = window.__surfannotate;
+    const n = Math.round(Math.sqrt(geometry.vertexCount));
+    session.addClick(2 * n + 1);
+    session.addClick(2 * n + (n - 2));
+    // addClick alone does not touch the DOM; the buttons follow a repaint.
+    window.__surfannotateUi.repaint();
+  });
+  await page.locator('#closeOnEdge').click();
+  await expect(page.locator('#statusText')).toContainText('closed against the surface edge');
+
+  await page.locator('#fillRegion').click();
+  await expect(page.locator('#statusText')).toContainText('Filled 82 vertices');
+  await expect(page.locator('#flipRegion')).toBeVisible();
+
+  await page.locator('#flipRegion').click();
+  await expect(page.locator('#statusText')).toContainText('Region 2 of 2');
+  const swapped = await page.evaluate(() => window.__surfannotate.session.filled
+    .reduce((n, v) => n + v, 0));
+  expect(swapped).toBe(1681 - 82 - 41);
+});
+
+test('an edge closure needs no seed click, unlike a loop on the same patch', async ({ page }) => {
+  await loadFlatPatch(page);
+
+  // A loop on a cut surface still asks the user to point at the region, because
+  // a loop there is not guaranteed to separate anything.
+  await page.evaluate(() => {
+    const { session, geometry } = window.__surfannotate;
+    const n = Math.round(Math.sqrt(geometry.vertexCount));
+    const at = (i, j) => j * n + i;
+    for (const v of [at(10, 10), at(30, 10), at(30, 30), at(10, 30)]) session.addClick(v);
+    window.__surfannotateUi.repaint();
+  });
+  await page.locator('#closePath').click();
+  await page.locator('#fillRegion').click();
+  await expect(page.locator('#statusText')).toContainText('click inside the region you want');
+
+  // The same patch, closed on the edge instead: filled straight away.
+  await page.locator('#clearRoi').click();
+  await page.evaluate(() => {
+    const { session, geometry } = window.__surfannotate;
+    const n = Math.round(Math.sqrt(geometry.vertexCount));
+    session.addClick(2 * n + 1);
+    session.addClick(2 * n + (n - 2));
+    // addClick alone does not touch the DOM; the buttons follow a repaint.
+    window.__surfannotateUi.repaint();
+  });
+  await page.locator('#closeOnEdge').click();
+  await page.locator('#fillRegion').click();
+  await expect(page.locator('#statusText')).toContainText('Filled 82 vertices');
+});
+
+test('the control panel stays one column and scrolls, never wrapping off-screen', async ({ page }) => {
+  // #controls sets flex-direction: column while the shared .nd-imaging-controls
+  // class on the same element sets flex-wrap: wrap. Together those wrap anything
+  // taller than the panel into a second column to the RIGHT of a 320px-wide
+  // panel: invisible, unreachable, and silent, because wrapping absorbs the
+  // overflow so overflow-y has nothing left to scroll. It swallowed the entire
+  // tool section — every annotation button at once.
+  await loadFlatPatch(page);
+
+  const layout = await page.evaluate(() => {
+    const panel = document.getElementById('controls');
+    const rect = panel.getBoundingClientRect();
+    const sections = [...panel.children].map((section) => {
+      const r = section.getBoundingClientRect();
+      return { left: Math.round(r.left), width: Math.round(r.width), heading: section.textContent.trim().slice(0, 12) };
+    });
+    return {
+      wrap: getComputedStyle(panel).flexWrap,
+      panelRight: Math.round(rect.right),
+      scrolls: panel.scrollHeight > panel.clientHeight,
+      sections
+    };
+  });
+
+  expect(layout.wrap).toBe('nowrap');
+  // Every section starts at the same x and fits inside the panel: one column.
+  const lefts = new Set(layout.sections.map((s) => s.left));
+  expect(lefts.size, `sections at differing x = wrapped columns: ${JSON.stringify(layout.sections)}`).toBe(1);
+  for (const section of layout.sections) {
+    expect(section.left + section.width).toBeLessThanOrEqual(layout.panelRight + 1);
+  }
+
+  // And the buttons are genuinely reachable rather than merely present in the DOM.
+  for (const id of ['closePath', 'closeOnEdge', 'fillRegion', 'clearRoi', 'exportLabel']) {
+    await page.locator(`#${id}`).scrollIntoViewIfNeeded();
+    await expect(page.locator(`#${id}`)).toBeInViewport();
+  }
+});

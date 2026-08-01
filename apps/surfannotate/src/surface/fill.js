@@ -135,6 +135,69 @@ function fillByComplement(graph, barrier, vertices, maxFraction) {
   return { inside, count: insideCount, error: null, components };
 }
 
+/**
+ * Label every connected piece the barrier leaves behind.
+ *
+ * This is the third strategy, and the one used when the ROI was closed against
+ * a cut edge rather than looped back on itself. It needs no seed and no
+ * geometric guess about which side is "outside": the barrier either separates
+ * the surface or it does not, and the component count says which. That is a
+ * fact about the graph, so unlike the auto strategy it stays sound on a surface
+ * with an open edge.
+ *
+ * Isolated vertices are left unlabelled so they cannot drift into an ROI.
+ *
+ * @param {import('./adjacency.js').SurfaceGraph} graph
+ * @param {Uint8Array} barrier length V
+ * @returns {{labels: Int32Array, sizes: number[], count: number}} `labels` is
+ *   -1 on barrier, isolated and unreachable vertices, otherwise a component id.
+ */
+export function regionComponents(graph, barrier) {
+  const { V, adjOffset, adjNeighbor } = graph;
+  if (barrier.length !== V) throw new Error('barrier length must equal vertex count');
+
+  const labels = new Int32Array(V).fill(-1);
+  const sizes = [];
+  const stack = new Int32Array(V);
+
+  for (let start = 0; start < V; start++) {
+    if (barrier[start] || labels[start] !== -1 || isIsolated(graph, start)) continue;
+    const id = sizes.length;
+    let size = 0;
+    let top = 0;
+    labels[start] = id;
+    stack[top++] = start;
+    while (top > 0) {
+      const u = stack[--top];
+      size++;
+      for (let e = adjOffset[u]; e < adjOffset[u + 1]; e++) {
+        const w = adjNeighbor[e];
+        if (barrier[w] || labels[w] !== -1) continue;
+        labels[w] = id;
+        stack[top++] = w;
+      }
+    }
+    sizes.push(size);
+  }
+
+  return { labels, sizes, count: sizes.length };
+}
+
+/**
+ * One labelled component as a mask.
+ * @param {Int32Array} labels from regionComponents
+ * @param {number} id
+ * @returns {{mask: Uint8Array, count: number}}
+ */
+export function componentMask(labels, id) {
+  const mask = new Uint8Array(labels.length);
+  let count = 0;
+  for (let v = 0; v < labels.length; v++) {
+    if (labels[v] === id) { mask[v] = 1; count++; }
+  }
+  return { mask, count };
+}
+
 function floodFrom(graph, barrier, start) {
   const { V, adjOffset, adjNeighbor } = graph;
   const visited = new Uint8Array(V);
@@ -223,7 +286,11 @@ export const FILL_ERRORS = Object.freeze({
   FILL_ESCAPED: 'The fill spread across the surface. The boundary is probably not closed.',
   NO_EXTERIOR_VERTEX: 'Could not find a vertex outside the boundary.',
   EMPTY_REGION: 'The boundary encloses no vertices.',
-  AMBIGUOUS_REGION: 'Both sides of the boundary are large — click inside the region you want.'
+  AMBIGUOUS_REGION: 'Both sides of the boundary are large — click inside the region you want.',
+  NO_SEPARATION: 'The border and the surface edge do not enclose a region. Both ends of the ' +
+    'border must reach the same edge of the patch.',
+  NO_OPEN_EDGE: 'This surface has no open edge, so there is nothing to close against.',
+  EDGE_UNREACHABLE: 'No surface edge is reachable from that border point.'
 });
 
 /** Convert a mask to the sorted vertex indices the exporters expect. */

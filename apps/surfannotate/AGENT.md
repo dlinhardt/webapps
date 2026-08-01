@@ -8,6 +8,7 @@ src/
   surface/                  Pure geometry and algorithms — no DOM, no NiiVue, all unit-tested
     adjacency.js            CSR 1-ring vertex graph from (vertices, triangles)
     pathfinder.js           A* shortest path along mesh edges; chain building and validation
+    edgeAnchor.js           Distance-to-cut field; extends a border out to an open edge
     fill.js                 Flood fill inside a closed boundary, seeded or automatic
     roiSession.js           Drawing state: clicks, trace, fill, landmarks
     vertexLookup.js         Uniform-grid nearest-vertex search
@@ -42,7 +43,27 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `writeGiftiShape` in `io/gifti.js` is currently unused — the `.shape.gii` button was
   removed — but is kept and tested because it is a general format writer.
 - **Never trust a fill that covers more than 40% of the surface** — that is a gap in
-  the boundary, not a large ROI. Refuse and tell the user.
+  the boundary, not a large ROI. Refuse and tell the user. The one exception is an
+  edge closure (`closure === 'edge'`): there the barrier has already been *proved* to
+  separate the graph by counting components, so a leak is not possible and the guard
+  would only block a border that legitimately halves a patch.
+- **A closed border is not the only way to enclose a region.** On a cut surface the open
+  edge is itself an impassable barrier to a 1-ring flood fill, so a border running from
+  the cut to the cut encloses a region with no loop at all. That is what `closeOnEdge`
+  builds, and it is why flat patches do not need dozens of clicks along the rim.
+  It does *not* follow that any edge-to-edge line separates the surface — one joining
+  two distinct cuts turns an annulus into a disk without dividing it — so the component
+  count is checked, never assumed.
+- **`#controls` must stay `flex-wrap: nowrap`.** The shared `.nd-imaging-controls` class
+  sits on the same element and sets `flex-wrap: wrap` for its own row layout. With the
+  column direction `styles.css` applies, anything taller than the panel wraps into a
+  second column to the *right* of a 320px panel — invisible and unreachable, and silent,
+  because wrapping absorbs the overflow so `overflow-y` never scrolls. Growing the tool
+  section by ~120px made every annotation button vanish the moment a cut surface was
+  loaded. Covered by an e2e test that asserts one column.
+- **Toggling `[hidden]` needs `display: none !important`** (in `styles.css`). Any author
+  `display` rule outranks the UA stylesheet's `[hidden]`, so an element with both stays
+  stubbornly visible. This shipped once as a drop hint permanently covering the canvas.
 
 ## NiiVue 0.69 traps, all found the hard way
 
@@ -73,7 +94,14 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 | Command | Covers |
 | --- | --- |
 | `pnpm --filter surfannotate test` | `surface/` and `io/` — adjacency, A*, chain validation, fill (including escape and figure-eight cases), hatching, vertex lookup vs brute force, ROI session contract, every file writer |
-| `pnpm --filter surfannotate test:e2e` | Real Chromium with SwiftShader: shell mount, WebGL2, surface load and index, picking, draw→close→fill→export, drag-and-drop, click-vs-drag, overlay window, marker lifecycle, colour map and range, ROI naming |
+| `pnpm --filter surfannotate test:e2e` | Real Chromium with SwiftShader: shell mount, WebGL2, surface load and index, picking, draw→close→fill→export, drag-and-drop, click-vs-drag, overlay window, marker lifecycle, colour map and range, ROI naming, edge closure on a flat patch |
+
+`test/fixtures/lh.flat.surf.gii` is a synthetic flat patch — a disk with one open edge,
+like `mris_flatten` output but a few kB. Regenerate with
+`node test/fixtures/make-flat-patch.mjs`. Its faces are wound to point along -x on
+purpose: a sheet is one-sided, NiiVue does not cull back faces but does shade them by
+the flipped normal, so from the wrong side the patch renders near-black on a dark
+background and looks like a failed load. -x is where the default render view looks from.
 | `pnpm --filter surfannotate lint` | `node --check` over every JS file |
 
 **When adding an e2e test, verify it fails without the fix.** Two drag-and-drop tests

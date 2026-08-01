@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
-    "test:e2e": "playwright test",
+    "test:e2e": "node test/fixtures/make-flat-patch.mjs && playwright test",
     "lint": "node ../../scripts/check-app-js.mjs ."
   },
   "dependencies": {

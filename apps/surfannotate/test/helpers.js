@@ -30,6 +30,37 @@ export function makeGrid(n) {
   return { vertices, triangles, n, V: n * n };
 }
 
+/**
+ * The same grid with a square hole punched through it, so the patch is an
+ * annulus rather than a disk. A line from the outer edge to the rim of the hole
+ * does *not* separate an annulus — you can still walk round the other side —
+ * which is the case edge closure has to detect and refuse.
+ *
+ * @param {number} n vertices per side
+ * @param {number} a low corner of the removed cell block
+ * @param {number} b high corner, exclusive of the last cell's far vertices
+ */
+export function makeGridWithHole(n, a, b) {
+  const grid = makeGrid(n);
+  const kept = [];
+  for (let f = 0; f < grid.triangles.length / 3; f++) {
+    // Cells run two triangles each, in row-major order over (n-1)^2 cells.
+    const cell = Math.floor(f / 2);
+    const i = cell % (n - 1);
+    const j = Math.floor(cell / (n - 1));
+    if (i >= a && i < b && j >= a && j < b) continue;
+    kept.push(grid.triangles[3 * f], grid.triangles[3 * f + 1], grid.triangles[3 * f + 2]);
+  }
+  return { ...grid, triangles: Uint32Array.from(kept) };
+}
+
+/** A closed surface — no open edge anywhere. */
+export function makeTetrahedron() {
+  const vertices = Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const triangles = Uint32Array.from([0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3]);
+  return { vertices, triangles, V: 4 };
+}
+
 /** Index of grid vertex (i, j). */
 export const at = (n, i, j) => j * n + i;
 

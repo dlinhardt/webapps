@@ -16,6 +16,20 @@ click, so you can rotate freely. Press *Close ROI* to join the points with short
 paths along the surface and close the loop, then *Fill region*. Points are joined **in
 the order placed**, not by proximity.
 
+**ROIs against the edge of a flat patch.** On a cut surface — an unfolded flat patch,
+or any mesh with an open edge — an area often runs right up to the cut, so its border
+is partly your line and partly the edge of the patch itself. *Close on surface edge*
+draws only the part that crosses the patch: both ends of your line are extended to the
+nearest edge vertex, and the edge closes the region. Two points are enough. The smaller
+of the two sides is filled, and *Other side* swaps.
+
+Nothing is traced *along* the edge, because nothing needs to be. Flood fill walks the
+mesh's 1-ring graph and no edge of that graph crosses the cut, so the cut is already an
+impassable barrier. A border reaching it at both ends therefore separates the patch on
+its own — and that separation is verified by counting connected components, not assumed.
+A line running between *two different* cuts (the outer rim and the rim of a hole) does
+not separate an annulus, and is refused rather than silently filled.
+
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 
 ## Exports

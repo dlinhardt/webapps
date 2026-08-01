@@ -8,7 +8,9 @@ import { registerExtraColormaps } from './niivue/colormaps.js';
 import { buildAdjacency, findBoundaryVertices } from './surface/adjacency.js';
 import { SurfacePathfinder } from './surface/pathfinder.js';
 import { buildVertexIndex } from './surface/vertexLookup.js';
-import { RoiSession, MODE_ROI, MODE_POINTS, SESSION_ERRORS } from './surface/roiSession.js';
+import {
+  RoiSession, MODE_ROI, MODE_POINTS, SESSION_ERRORS, CLOSURE_EDGE
+} from './surface/roiSession.js';
 import { FILL_ERRORS } from './surface/fill.js';
 import { hatchMask, FILL_STYLES } from './surface/hatch.js';
 import {
@@ -52,7 +54,11 @@ const ui = {
   pointControls: el('pointControls'),
   undoPoint: el('undoPoint'),
   closePath: el('closePath'),
+  closeOnEdge: el('closeOnEdge'),
+  edgeRow: el('edgeRow'),
+  edgeHint: el('edgeHint'),
   fillRegion: el('fillRegion'),
+  flipRegion: el('flipRegion'),
   clearRoi: el('clearRoi'),
   includeBoundary: el('includeBoundary'),
   fillStyle: el('fillStyle'),
@@ -204,7 +210,29 @@ async function init() {
         'closer together, or on the same connected surface.');
     repaint();
   });
+  ui.closeOnEdge.addEventListener('click', () => {
+    const session = state.session;
+    setStatus('Tracing the border to the surface edge…');
+    const result = session.closeOnEdge();
+    if (!result.ok) {
+      setStatus(FILL_ERRORS[result.error] || SESSION_ERRORS[result.error] || result.error);
+      repaint();
+      return;
+    }
+    setStatus(`Border closed against the surface edge — ` +
+      `${result.chainLength.toLocaleString()} boundary vertices, ` +
+      `${result.regions} regions. Now fill the region.`);
+    repaint();
+  });
   ui.fillRegion.addEventListener('click', () => runFill());
+  ui.flipRegion.addEventListener('click', () => {
+    const session = state.session;
+    const result = session.nextRegion({ includeBoundary: ui.includeBoundary.checked });
+    if (!result) return;
+    setStatus(`Region ${session.regionIndex + 1} of ${session.regionOrder.length} — ` +
+      `${result.count.toLocaleString()} vertices.`);
+    repaint();
+  });
   ui.clearRoi.addEventListener('click', () => {
     state.session.clearRoi();
     state.awaitingSeed = false;
@@ -321,7 +349,14 @@ async function loadSurface(file) {
     state.graph = graph;
     state.finder = finder;
     state.index = index;
-    state.session = new RoiSession(graph, finder, geometry.positions);
+    const openBoundary = findBoundaryVertices(geometry.triangles, geometry.vertexCount);
+    let openCount = 0;
+    for (let v = 0; v < openBoundary.length; v++) if (openBoundary[v]) openCount++;
+    state.hasOpenBoundary = openCount > 0;
+
+    state.session = new RoiSession(graph, finder, geometry.positions, {
+      openEdge: state.hasOpenBoundary ? openBoundary : null
+    });
     state.labelValues = new Float32Array(geometry.vertexCount);
     state.layerIndex = attachLabelLayer(mesh, state.labelValues, currentLabelTable());
     state.sourceName = file.name;
@@ -333,11 +368,6 @@ async function loadSurface(file) {
       triangleHash: await hashTriangles(geometry.triangles)
     };
 
-    const openBoundary = findBoundaryVertices(geometry.triangles, geometry.vertexCount);
-    let openCount = 0;
-    for (let v = 0; v < openBoundary.length; v++) if (openBoundary[v]) openCount++;
-    state.hasOpenBoundary = openCount > 0;
-
     commitLayer(state.nv, mesh);
     ui.dropHint.hidden = true;
     showExportName();
@@ -346,7 +376,7 @@ async function loadSurface(file) {
     state.overlayLayer = null;
 
     const note = state.hasOpenBoundary
-      ? ' This surface has an open edge, so automatic interior detection is disabled.'
+      ? ' This surface is cut, so you can close an ROI against its edge.'
       : '';
     setStatus(`${file.name}: ${geometry.vertexCount.toLocaleString()} vertices, ` +
       `${(geometry.triangles.length / 3).toLocaleString()} faces.${note}`);
@@ -511,9 +541,11 @@ function runFill(seed = -1) {
     setStatus(SESSION_ERRORS.NOT_CLOSED);
     return;
   }
-  // A surface with an open edge is not necessarily split in two by a loop, so
-  // automatic interior detection is not safe there.
-  const needsSeed = state.hasOpenBoundary && seed < 0;
+  // A *loop* on a surface with an open edge is not necessarily split in two, so
+  // automatic interior detection is not safe there. An edge closure is different:
+  // closeOnEdge has already proved the border separates the surface, and the
+  // candidate regions are enumerated rather than guessed at.
+  const needsSeed = state.hasOpenBoundary && seed < 0 && session.closure !== CLOSURE_EDGE;
   if (needsSeed) {
     state.awaitingSeed = true;
     setStatus('This surface has an open edge — click inside the region you want.');
@@ -538,7 +570,10 @@ function runFill(seed = -1) {
   const pieces = result.components > 1
     ? ` in ${result.components} separate pieces — the boundary probably crosses itself`
     : '';
-  setStatus(`Filled ${result.count.toLocaleString()} vertices${pieces}.`);
+  const otherSide = session.regionOrder.length > 1
+    ? ' If that is the wrong side of the border, take the other side.'
+    : '';
+  setStatus(`Filled ${result.count.toLocaleString()} vertices${pieces}.${otherSide}`);
   repaint();
 }
 
@@ -602,7 +637,13 @@ function syncControls() {
 
   ui.undoPoint.disabled = !hasClicks;
   ui.closePath.disabled = session.clicks.length < 3;
+  // A cut surface only: the edge is what closes the region, so a closed surface
+  // has nothing to offer here. Two points are enough, unlike a loop.
+  ui.edgeRow.hidden = !session.hasOpenEdge;
+  ui.edgeHint.hidden = !session.hasOpenEdge;
+  ui.closeOnEdge.disabled = session.clicks.length < 2;
   ui.fillRegion.disabled = !session.closed;
+  ui.flipRegion.hidden = !(hasRegion && session.regionOrder.length > 1);
   ui.clearRoi.disabled = !hasClicks;
   ui.undoPointSelection.disabled = !hasPoints;
   ui.clearPoints.disabled = !hasPoints;
