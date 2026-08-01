@@ -10,6 +10,7 @@ src/
     pathfinder.js           A* shortest path along mesh edges; chain building and validation
     edgeAnchor.js           Distance-to-cut field; extends a border out to an open edge
     exclude.js              Cuts a completed ROI out of the graph so its rim is an edge
+    parcellation.js         Resolves ordered area definitions into disjoint regions
     fill.js                 Flood fill inside a closed boundary, seeded or automatic
     roiSession.js           Drawing state: clicks, trace, fill, landmarks
     vertexLookup.js         Uniform-grid nearest-vertex search
@@ -50,13 +51,20 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   flat patch. Vertices keep their indices (labels and clicks refer to them), and
   `isIsolated` is what keeps them out of paths and fills. Resist adding a barrier
   parameter to the algorithms: the graph is the barrier.
-- **Reopening a completed ROI is un-saving it.** It must leave the list *before* the
-  session is restored: an ROI cannot be an edge for its own border, and while it is cut
-  out of the graph its own clicks are isolated and unreachable. **Neighbours have to
-  stand down too**: an ROI's border points routinely lie *inside* the ROI drawn next to
-  it, because the fill excludes the border row by default, so the row V1 was clicked
-  along is claimed by V2 when V2 is drawn against V1's rim. `blocksBorderOf` finds those
-  and unticks them, visibly rather than silently. The border is recomputed
+- **An area is a definition, not a mask.** `state.rois` holds border points, closure
+  mode, region index and an anchor; `mask`/`chain`/`error` on them are *outputs* of
+  `recomputeParcellation` and are overwritten wholesale. Never edit a mask in place —
+  the next recompute discards it.
+- **Order is meaning.** Each area is resolved with the areas above it cut away, so
+  earlier areas win every overlap and editing one re-derives all the ones below it.
+  This is what makes a moved shared boundary move both sides.
+- **Reopening keeps the area's position** (`state.editIndex`). That is what makes it
+  work at all: an area's border points routinely lie *inside* the area drawn next to it,
+  because the fill excludes the border row, so V2 claims the row V1 was clicked along.
+  Editing V1 in place means only the areas above it constrain, and V2 is below.
+- **The anchor is how an area is recognised after its neighbours move.** Component size
+  ordering alone flips as areas grow and shrink; `anchorVertex` picks the vertex furthest
+  from the border by hop count, which is the last one a neighbour would take. The border is recomputed
   from the clicks, not restored from the saved chain, for the same reason the clicks are
   authoritative everywhere else.
 - **The clicked vertices are the only authoritative ROI state.** The traced chain and

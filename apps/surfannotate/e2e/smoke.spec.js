@@ -866,7 +866,7 @@ test('a dropped overlay is recognised as an overlay, not a second surface', asyn
   await expect(overlayRows(page)).toHaveCount(1);
 });
 
-// -- completed ROIs, and using one as an edge for the next ------------------
+// -- areas as a parcellation ------------------------------------------------
 
 const roiRows = (page) => page.locator('#roiList li');
 
@@ -875,8 +875,8 @@ async function loadFlat(page) {
   await expect(page.locator('#statusText')).toContainText('1,681 vertices', { timeout: 60_000 });
 }
 
-/** Cut the strip below row `j` on the flat patch: close it on the edge and fill. */
-async function drawStrip(page, row) {
+/** Define an area by a line across the flat patch at row `j`, and save it. */
+async function saveStrip(page, row, name) {
   await page.evaluate((j) => {
     const { session } = window.__surfannotate;
     const n = 41;
@@ -886,41 +886,36 @@ async function drawStrip(page, row) {
     session.fill();
     window.__surfannotateUi.repaint();
   }, row);
+  await page.fill('#roiName', name);
+  await page.locator('#saveRoi').click();
 }
 
-test('a filled region is saved to the completed list and clears the canvas', async ({ page }) => {
+const areaSizes = (page) => page.evaluate(() => window.__surfannotateUi.savedRois()
+  .map((a) => ({ name: a.name, n: a.mask ? a.mask.reduce((t, v) => t + v, 0) : null })));
+
+test('a filled region is saved as an area and clears the canvas', async ({ page }) => {
   await loadFlat(page);
   await expect(page.locator('#saveRoi')).toBeDisabled();
 
-  await drawStrip(page, 2);
-  await expect(page.locator('#saveRoi')).toBeEnabled();
-  await page.fill('#roiName', 'V1');
-  await page.locator('#saveRoi').click();
-
+  await saveStrip(page, 2, 'V1');
   await expect(roiRows(page)).toHaveCount(1);
   await expect(roiRows(page).first()).toContainText('V1');
   await expect(page.locator('#statusText')).toContainText('Saved V1 — 82 vertices');
 
   const after = await page.evaluate(() => ({
     clicks: window.__surfannotate.session.clicks.length,
-    filled: window.__surfannotate.session.filled,
-    saved: window.__surfannotateUi.savedRois().map((r) => r.name)
+    filled: window.__surfannotate.session.filled
   }));
   expect(after.clicks).toBe(0, 'the working session is cleared for the next area');
   expect(after.filled).toBe(null);
-  expect(after.saved).toEqual(['V1']);
 });
 
-test('a completed ROI ticked as an edge is cut out of the surface', async ({ page }) => {
+test('a saved area is cut out of the surface for the next one', async ({ page }) => {
   await loadFlat(page);
-  await drawStrip(page, 2);
-  await page.fill('#roiName', 'V1');
-  await page.locator('#saveRoi').click();
   expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
+  await saveStrip(page, 2, 'V1');
 
-  await roiRows(page).first().locator('.layer-flag input').check();
-  await expect(page.locator('#statusText')).toContainText('V1 is now an edge');
-
+  // No tick needed: every area above the one being drawn owns its vertices.
   const after = await page.evaluate(() => {
     const s = window.__surfannotate;
     const n = 41;
@@ -929,21 +924,18 @@ test('a completed ROI ticked as an edge is cut out of the surface', async ({ pag
       excludedCount: [...s.excluded].reduce((a, v) => a + v, 0),
       insideIsolated: s.graph.adjOffset[inside + 1] === s.graph.adjOffset[inside],
       rimIsEdge: s.session.openEdge[2 * n + 20] === 1,
-      middleNotEdge: s.session.openEdge[20 * n + 20] === 1
+      middleIsEdge: s.session.openEdge[20 * n + 20] === 1
     };
   });
   expect(after.excludedCount).toBe(82);
   expect(after.insideIsolated).toBe(true);
-  expect(after.rimIsEdge).toBe(true);
-  expect(after.middleNotEdge).toBe(false);
+  expect(after.rimIsEdge).toBe(true, 'V1\'s rim now works as an edge');
+  expect(after.middleIsEdge).toBe(false);
 });
 
-test('the next area can be closed against a completed ROI', async ({ page }) => {
+test('the next area is closed against the one before it', async ({ page }) => {
   await loadFlat(page);
-  await drawStrip(page, 2);
-  await page.fill('#roiName', 'V1');
-  await page.locator('#saveRoi').click();
-  await roiRows(page).first().locator('.layer-flag input').check();
+  await saveStrip(page, 2, 'V1');
 
   // V2 needs two clicks only: its lower border is V1's rim.
   const v2 = await page.evaluate(() => {
@@ -952,47 +944,141 @@ test('the next area can be closed against a completed ROI', async ({ page }) => 
     session.addClick(6 * n + 1);
     session.addClick(6 * n + (n - 2));
     const closed = session.closeOnEdge();
-    const filled = session.fill();
-    return { ok: closed.ok, error: closed.error, count: filled.count };
+    const count = session.fill().count;
+    window.__surfannotateUi.repaint();
+    return { ok: closed.ok, error: closed.error, count };
   });
   expect(v2.ok).toBe(true, v2.error || '');
-  // V1 covers rows 0-1, so V2 is rows 2-5: from V1's rim to the new border.
-  expect(v2.count).toBe(4 * 41);
+  expect(v2.count).toBe(4 * 41, 'rows 2-5, between V1 and the new border');
 
-  const overlap = await page.evaluate(() => {
-    const s = window.__surfannotate;
-    const v1 = window.__surfannotateUi.savedRois()[0].mask;
-    let n = 0;
-    for (let v = 0; v < v1.length; v++) if (v1[v] && s.session.filled[v]) n++;
-    return n;
-  });
-  expect(overlap).toBe(0, 'V2 did not swallow V1');
+  await page.fill('#roiName', 'V2');
+  await page.locator('#saveRoi').click();
+  expect(await areaSizes(page)).toEqual([
+    { name: 'V1', n: 82 }, { name: 'V2', n: 164 }
+  ]);
 });
 
-test('unticking or removing an edge ROI puts its vertices back', async ({ page }) => {
+test('editing an area moves the shared boundary, and the neighbour follows', async ({ page }) => {
+  // The point of the parcellation: V2 was never redefined, but pulling V1's
+  // border back hands it the vertices V1 gave up, with nothing left over.
   await loadFlat(page);
-  await drawStrip(page, 2);
+  await saveStrip(page, 4, 'V1');
+  await saveStrip(page, 9, 'V2');
+  expect(await areaSizes(page)).toEqual([
+    { name: 'V1', n: 4 * 41 }, { name: 'V2', n: 5 * 41 }
+  ]);
+
+  await roiRows(page).first().locator('.layer-edit').click();
+  await expect(page.locator('#statusText')).toContainText('border points restored');
+
+  // Move V1's border from row 4 down to row 2 and save it again.
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41;
+    session.clearRoi();
+    session.addClick(2 * n + 1);
+    session.addClick(2 * n + (n - 2));
+    session.closeOnEdge();
+    session.fill();
+  });
   await page.locator('#saveRoi').click();
 
-  const edge = roiRows(page).first().locator('.layer-flag input');
-  await edge.check();
-  expect(await page.evaluate(() => window.__surfannotate.excluded !== null)).toBe(true);
-  await edge.uncheck();
-  expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
+  expect(await areaSizes(page)).toEqual([
+    { name: 'V1', n: 2 * 41 },
+    { name: 'V2', n: 7 * 41 }
+  ]);
 
-  await edge.check();
+  // Disjoint, and no unclaimed strip where the boundary used to be.
+  const overlap = await page.evaluate(() => {
+    const [v1, v2] = window.__surfannotateUi.savedRois();
+    let both = 0;
+    let neither = 0;
+    for (let v = 0; v < 9 * 41; v++) {
+      if (v1.mask[v] && v2.mask[v]) both++;
+      if (!v1.mask[v] && !v2.mask[v]) neither++;
+    }
+    return { both, neither };
+  });
+  expect(overlap).toEqual({ both: 0, neither: 0 });
+});
+
+test('an area keeps its place in the list while it is being edited', async ({ page }) => {
+  // Reopening V1 while V2 exists used to fail: V1's border points sit inside
+  // V2. Position is what fixes it — V1 is edited where it was, so only the
+  // areas above it constrain, and V2 is below.
+  await loadFlat(page);
+  await saveStrip(page, 2, 'V1');
+  await saveStrip(page, 6, 'V2');
+
+  const claimed = await page.evaluate(() => {
+    const [v1, v2] = window.__surfannotateUi.savedRois();
+    return v1.clicks.filter((v) => v2.mask[v]).length;
+  });
+  expect(claimed).toBe(2, 'V1\'s border points are inside V2');
+
+  await roiRows(page).first().locator('.layer-edit').click();
+  const after = await page.evaluate(() => {
+    const s = window.__surfannotate;
+    return {
+      editIndex: s.editIndex,
+      excluded: s.excluded,
+      closed: s.session.closed,
+      gaps: s.session.gaps.length,
+      filled: s.session.filled ? s.session.filled.reduce((n, v) => n + v, 0) : null
+    };
+  });
+  expect(after.editIndex).toBe(0);
+  expect(after.excluded).toBe(null, 'nothing is above V1, so nothing constrains it');
+  expect(after.closed).toBe(true);
+  expect(after.gaps).toBe(0);
+  expect(after.filled).toBe(82, 'the region comes back as it was');
+});
+
+test('reordering areas changes who owns the overlap', async ({ page }) => {
+  await loadFlat(page);
+  await saveStrip(page, 2, 'V1');
+  await saveStrip(page, 6, 'V2');
+
+  // Push V1 right over V2's border. V2 is below it in the list, so it loses.
+  await roiRows(page).first().locator('.layer-edit').click();
+  await page.evaluate(() => {
+    const { session } = window.__surfannotate;
+    const n = 41;
+    session.clearRoi();
+    session.addClick(8 * n + 1);
+    session.addClick(8 * n + (n - 2));
+    session.closeOnEdge();
+    session.fill();
+    window.__surfannotateUi.repaint();
+  });
+  await page.locator('#saveRoi').click();
+
+  let sizes = await areaSizes(page);
+  expect(sizes[0]).toEqual({ name: 'V1', n: 8 * 41 });
+  expect(sizes[1].n).toBe(null, 'V2 is squeezed out entirely');
+  await expect(roiRows(page).nth(1)).toHaveClass(/unresolved/);
+
+  // Promote V2 and it takes those vertices straight back.
+  await roiRows(page).nth(1).locator('[aria-label^="Move V2 up"]').click();
+  sizes = await areaSizes(page);
+  expect(sizes[0]).toEqual({ name: 'V2', n: 6 * 41 });
+  expect(sizes[1]).toEqual({ name: 'V1', n: 2 * 41 });
+});
+
+test('removing an area gives its vertices back to the surface', async ({ page }) => {
+  await loadFlat(page);
+  await saveStrip(page, 2, 'V1');
+  expect(await page.evaluate(() => window.__surfannotate.excluded !== null)).toBe(true);
+
   await roiRows(page).first().locator('.layer-remove').click();
   await expect(roiRows(page)).toHaveCount(0);
   expect(await page.evaluate(() => window.__surfannotate.excluded)).toBe(null);
 });
 
-test('a selected completed ROI is what the export buttons write', async ({ page }) => {
+test('a selected area is what the export buttons write', async ({ page }) => {
   await loadFlat(page);
-  await drawStrip(page, 2);
-  await page.fill('#roiName', 'V1');
-  await page.locator('#saveRoi').click();
+  await saveStrip(page, 2, 'V1');
 
-  // Nothing is being drawn now, yet the selected completed ROI is exportable.
   await expect(page.locator('#exportLabel')).toBeEnabled();
   const download = page.waitForEvent('download');
   await page.locator('#exportLabel').click();
@@ -1006,10 +1092,9 @@ test('a selected completed ROI is what the export buttons write', async ({ page 
   expect(Number(lines[1])).toBe(82, 'the saved region, not an empty one');
 });
 
-test('completed ROIs follow the topology, like the ROI being drawn', async ({ page }) => {
+test('areas follow the topology, like the ROI being drawn', async ({ page }) => {
   await loadFlat(page);
-  await drawStrip(page, 2);
-  await page.locator('#saveRoi').click();
+  await saveStrip(page, 2, 'V1');
   await expect(roiRows(page)).toHaveCount(1);
 
   await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
@@ -1020,82 +1105,7 @@ test('completed ROIs follow the topology, like the ROI being drawn', async ({ pa
   await expect(roiRows(page)).toHaveCount(1, 'and they come back on the original');
 });
 
-test('a completed ROI can be reopened and its border points adjusted', async ({ page }) => {
-  await loadFlat(page);
-  await drawStrip(page, 4);
-  await page.fill('#roiName', 'V1');
-  await page.locator('#saveRoi').click();
-  await expect(roiRows(page)).toHaveCount(1);
-
-  const saved = await page.evaluate(() => {
-    const roi = window.__surfannotateUi.savedRois()[0];
-    return { clicks: roi.clicks, closure: roi.closure };
-  });
-  expect(saved.clicks).toEqual([4 * 41 + 1, 4 * 41 + 39]);
-  expect(saved.closure).toBe('edge');
-
-  await roiRows(page).first().locator('.layer-edit').click();
-
-  // Reopening is un-saving: it leaves the list and goes back on the canvas,
-  // already closed and filled so it can be adjusted from where it was.
-  await expect(roiRows(page)).toHaveCount(0);
-  await expect(page.locator('#roiName')).toHaveValue('V1');
-  const reopened = await page.evaluate(() => {
-    const { session } = window.__surfannotate;
-    return {
-      clicks: [...session.clicks],
-      closed: session.closed,
-      closure: session.closure,
-      filled: session.filled ? session.filled.reduce((n, v) => n + v, 0) : 0
-    };
-  });
-  expect(reopened.clicks).toEqual(saved.clicks);
-  expect(reopened.closed).toBe(true);
-  expect(reopened.closure).toBe('edge');
-  expect(reopened.filled).toBe(4 * 41, 'the region comes back as it was');
-
-  // Adjust it — one more point — and save again.
-  const adjusted = await page.evaluate(() => {
-    const { session } = window.__surfannotate;
-    session.undoClick();
-    session.addClick(6 * 41 + 39);
-    session.closeOnEdge();
-    return session.fill().count;
-  });
-  expect(adjusted).not.toBe(4 * 41);
-  await page.locator('#saveRoi').click();
-  await expect(roiRows(page)).toHaveCount(1);
-  await expect(roiRows(page).first()).toContainText('V1');
-});
-
-test('reopening an ROI that was an edge frees its own vertices first', async ({ page }) => {
-  // An ROI cannot be an edge for its own border: while it is cut out of the
-  // graph its own clicks are isolated and no path can reach them.
-  await loadFlat(page);
-  await drawStrip(page, 4);
-  await page.fill('#roiName', 'V1');
-  await page.locator('#saveRoi').click();
-  await roiRows(page).first().locator('.layer-flag input').check();
-  expect(await page.evaluate(() => window.__surfannotate.excluded !== null)).toBe(true);
-
-  await roiRows(page).first().locator('.layer-edit').click();
-  const after = await page.evaluate(() => ({
-    excluded: window.__surfannotate.excluded,
-    closed: window.__surfannotate.session.closed,
-    filled: window.__surfannotate.session.filled
-      ? window.__surfannotate.session.filled.reduce((n, v) => n + v, 0) : 0
-  }));
-  expect(after.excluded).toBe(null, 'the surface is whole again');
-  expect(after.closed).toBe(true, 'and the border retraced through its own vertices');
-  expect(after.filled).toBe(4 * 41);
-});
-
-test('reopening a loop ROI refills the side that was saved', async ({ page }) => {
-  // Reopening seeds the refill from a vertex inside the saved region rather than
-  // re-running the automatic inside/outside heuristic, because the saved region
-  // is recorded fact where the heuristic is a geometric guess. NOTE: on this
-  // fixture the two always agree wherever a region can be saved at all, so this
-  // test covers the round trip, not the difference between them.
+test('a loop area is reopened onto the side it was filled on', async ({ page }) => {
   await loadFlat(page);
   await page.evaluate(() => {
     const { session } = window.__surfannotate;
@@ -1107,12 +1117,10 @@ test('reopening a loop ROI refills the side that was saved', async ({ page }) =>
   });
   const before = await page.evaluate(() =>
     window.__surfannotate.session.filled.reduce((n, v) => n + v, 0));
-  expect(before).toBeGreaterThan(0);
-
   await page.fill('#roiName', 'square');
   await page.locator('#saveRoi').click();
-  await roiRows(page).first().locator('.layer-edit').click();
 
+  await roiRows(page).first().locator('.layer-edit').click();
   const after = await page.evaluate(() => ({
     closure: window.__surfannotate.session.closure,
     filled: window.__surfannotate.session.filled
@@ -1122,82 +1130,32 @@ test('reopening a loop ROI refills the side that was saved', async ({ page }) =>
   expect(after.filled).toBe(before, 'the same side, not the complement');
 });
 
-test('reopening an ROI releases neighbours whose region covers its border', async ({ page }) => {
-  // An ROI's border points routinely end up INSIDE the ROI drawn next to it:
-  // the fill excludes the border row by default, so the row V1 was clicked
-  // along is claimed by V2 when V2 is drawn against V1's rim. With V2 cut out
-  // of the graph those vertices are isolated and V1 cannot be retraced.
+test('an area keeps its colour when it is edited', async ({ page }) => {
+  // The palette index came from the list length, so re-saving an edited area
+  // recoloured it — and could give it the same colour as its neighbour.
   await loadFlat(page);
+  await saveStrip(page, 5, 'V1');
+  await saveStrip(page, 11, 'V2');
+  await saveStrip(page, 17, 'V3');
+  const before = await page.evaluate(() =>
+    window.__surfannotateUi.savedRois().map((a) => a.colorIndex));
+  expect(before).toEqual([0, 1, 2]);
 
-  await drawStrip(page, 2);
-  await page.fill('#roiName', 'V1');
-  await page.locator('#saveRoi').click();
-  await roiRows(page).nth(0).locator('.layer-flag input').check();
-
-  await drawStrip(page, 6);
-  await page.fill('#roiName', 'V2');
-  await page.locator('#saveRoi').click();
-  await roiRows(page).nth(1).locator('.layer-flag input').check();
-
-  // V1's border sits on row 2, and V2 owns row 2.
-  const overlap = await page.evaluate(() => {
-    const [v1, v2] = window.__surfannotateUi.savedRois();
-    return {
-      v1Clicks: v1.clicks,
-      claimedByV2: v1.clicks.filter((v) => v2.mask[v]).length
-    };
-  });
-  expect(overlap.v1Clicks).toEqual([2 * 41 + 1, 2 * 41 + 39]);
-  expect(overlap.claimedByV2).toBe(2, 'V1 border points are inside V2');
-
-  await roiRows(page).nth(0).locator('.layer-edit').click();
-
-  await expect(page.locator('#statusText')).toContainText('V2 released as an edge');
-  const after = await page.evaluate(() => {
-    const s = window.__surfannotate;
-    return {
-      closed: s.session.closed,
-      gaps: s.session.gaps.length,
-      filled: s.session.filled ? s.session.filled.reduce((n, v) => n + v, 0) : null,
-      excluded: s.excluded,
-      v2Edge: window.__surfannotateUi.savedRois()[0].asEdge
-    };
-  });
-  expect(after.closed).toBe(true, 'the border retraced');
-  expect(after.gaps).toBe(0);
-  expect(after.filled).toBe(82, 'and the region came back as it was');
-  expect(after.excluded).toBe(null);
-  expect(after.v2Edge).toBe(false, 'V2 is visibly unticked, not silently ignored');
-});
-
-test('reopening leaves neighbours that do not touch its border alone', async ({ page }) => {
-  await loadFlat(page);
-
-  // Two areas far apart, so neither covers the other's border.
-  await drawStrip(page, 2);
-  await page.fill('#roiName', 'near');
-  await page.locator('#saveRoi').click();
-
+  await roiRows(page).first().locator('.layer-edit').click();
   await page.evaluate(() => {
     const { session } = window.__surfannotate;
-    const n = 41, at = (i, j) => j * n + i;
-    for (const v of [at(10, 20), at(30, 20), at(30, 34), at(10, 34)]) session.addClick(v);
-    session.closePath();
-    session.fill({ seed: at(20, 27) });
+    const n = 41;
+    session.clearRoi();
+    session.addClick(2 * n + 1);
+    session.addClick(2 * n + (n - 2));
+    session.closeOnEdge();
+    session.fill();
     window.__surfannotateUi.repaint();
   });
-  await page.fill('#roiName', 'far');
   await page.locator('#saveRoi').click();
-  await roiRows(page).nth(1).locator('.layer-flag input').check();
 
-  await roiRows(page).nth(0).locator('.layer-edit').click();
-  await expect(page.locator('#statusText')).not.toContainText('released as an edge');
-  const after = await page.evaluate(() => ({
-    farStillEdge: window.__surfannotateUi.savedRois()[0].asEdge,
-    stillExcluded: window.__surfannotate.excluded !== null,
-    closed: window.__surfannotate.session.closed
-  }));
-  expect(after.farStillEdge).toBe(true, 'an unrelated edge ROI keeps its tick');
-  expect(after.stillExcluded).toBe(true);
-  expect(after.closed).toBe(true);
+  const after = await page.evaluate(() =>
+    window.__surfannotateUi.savedRois().map((a) => a.colorIndex));
+  expect(after).toEqual([0, 1, 2]);
+  expect(new Set(after).size).toBe(3, 'and no two areas share a colour');
 });

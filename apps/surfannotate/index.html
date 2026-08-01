@@ -132,18 +132,20 @@
         </section>
 
         <section class="panel">
-          <h2>Completed ROIs</h2>
+          <h2>Areas</h2>
           <div class="button-row">
             <button type="button" id="saveRoi" disabled>Save filled region</button>
           </div>
           <ul class="layer-list" id="roiList" aria-label="Completed ROIs"></ul>
           <p class="hint" id="roiListHint">
-            Tick <strong>edge</strong> and a completed ROI is cut out of the surface: its
-            border then works exactly like the edge of a flat patch, so the next area can
-            be closed against it and no fill can cross it. This works on closed surfaces
-            too — once V1 is an edge, V2 can be closed against it.
-            <br />Click a name to export it instead of the region being drawn, or
-            <strong>&#9998;</strong> to put its border points back for adjusting.
+            Areas partition the surface: each is drawn on what the areas above it have
+            left, so no vertex belongs to two. Its border then works like the edge of a
+            flat patch — the next area can be closed against it, on folded surfaces too.
+            <br />Editing one re-derives the areas below it, so moving a shared boundary
+            moves both sides.
+            <br /><strong>&#9650;&#9660;</strong> reorder — later areas give way to
+            earlier ones. <strong>&#9998;</strong> reopens an area to adjust its border.
+            Click a name to export it instead of the region being drawn.
           </p>
         </section>
 

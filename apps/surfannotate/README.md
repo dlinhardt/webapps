@@ -46,26 +46,29 @@ with unrelated topology keep separate, independent ROIs.
 Dropped files are identified by their magic number and name rather than by drop order,
 so a surface and an overlay can be dropped in any sequence.
 
-**Areas drawn in sequence.** Save a filled region to the completed list, and it can
-then be ticked as an **edge**: the ROI is cut out of the surface graph, so its border
-behaves exactly like the cut edge of a flat patch. Draw V1, tick it, and V2 needs only
-the clicks along its own outer border — the V1/V2 boundary is inherited exactly rather
-than re-clicked, so the two areas share a boundary instead of leaving a sliver of
-unassigned cortex between them. No fill can cross an ROI marked as an edge.
+**Areas as a parcellation.** Save a filled region and it joins an ordered list of
+areas. Each area is resolved on the surface the areas above it have left, so no vertex
+belongs to two, and each one's border works like the edge of a flat patch: the next area
+can be closed against it with only its own outer border clicked. This works on closed
+surfaces too — `lh.pial` has no edge to begin with, but once V1 is cut out it is a
+sphere with a hole in it.
 
-This works on closed surfaces too. `lh.pial` has no edge to begin with, but once V1 is
-cut out it is a sphere with a hole in it, and every edge closure applies.
+An area is not stored as a mask. It is a *definition* — its border points, how they were
+closed, and a vertex deep inside the region — and the masks are derived by resolving the
+whole list in order. That is what makes editing work: pull V1's border back and V2 grows
+into the space, because V2 was always defined as "my line, and whatever lies between it
+and the area above me". No unassigned strip is left where the boundary used to be, and
+the two never overlap.
 
-Completed ROIs are listed with their own colour, a visibility tick and a remove button.
-Clicking a name makes the export buttons write it instead of the region being drawn, and
-the pencil reopens it: the ROI leaves the list, its border points go back on the canvas,
-and the border is retraced the way it was closed, so it can be adjusted and saved again.
-Reopening recomputes the border from the points rather than restoring the saved trace,
-because the points are the authoritative state and the surface may have changed since —
-another ROI may have become an edge, and the border should respect it. Any neighbour
-whose region covers part of the border is unticked as an edge first, and named in the
-status line: adjacent areas share a boundary, and the vertices one was drawn along
-usually belong to the other.
+Reordering is meaningful, not cosmetic: an area can be squeezed out entirely by one
+promoted above it, and moving it back up takes those vertices straight back. An area
+whose border no longer resolves is struck through and claims nothing, rather than being
+silently dropped.
+
+The pencil reopens an area to adjust its border. It keeps its place in the list, so the
+areas above it constrain the drawing exactly as when it was first drawn, and the areas
+below it are re-derived on save. Clicking a name makes the export buttons write that
+area instead of the region being drawn.
 
 **Vertex selection.** Point-and-click landmarks, exported as a vertex list.
 

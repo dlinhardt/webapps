@@ -313,6 +313,15 @@ export class RoiSession {
     const requested = options.region ?? 0;
     this.regionIndex = Math.min(Math.max(requested, 0), this.regionOrder.length - 1);
 
+    // A vertex known to have been inside this region last time beats the
+    // size ordering, which shifts as neighbouring areas grow and shrink.
+    const prefer = options.preferVertex ?? -1;
+    if (prefer >= 0 && prefer < regions.labels.length) {
+      const component = regions.labels[prefer];
+      const position = component >= 0 ? this.regionOrder.indexOf(component) : -1;
+      if (position >= 0) this.regionIndex = position;
+    }
+
     const { mask, count } = componentMask(regions.labels, this.regionOrder[this.regionIndex]);
     let total = count;
     if (options.includeBoundary) {

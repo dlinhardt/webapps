@@ -187,16 +187,14 @@
   cursor: pointer;
 }
 
-/* The "edge" tick on a completed ROI. */
-.layer-flag {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  font-size: 0.7rem;
-  opacity: 0.75;
-  cursor: pointer;
-  user-select: none;
+/* An area whose border no longer resolves against the areas above it. */
+.layer-list li.unresolved .layer-name {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.layer-list li.unresolved {
+  border-left: 2px solid rgba(220, 140, 60, 0.8);
 }
 
 .layer-meta {
@@ -207,9 +205,9 @@
 }
 
 .layer-list .layer-remove,
-.layer-list .layer-edit,
+.layer-list .layer-icon,
 .layer-list button.layer-remove,
-.layer-list button.layer-edit {
+.layer-list button.layer-icon {
   flex: 0 0 auto;
   width: 1.3rem;
   height: 1.3rem;
@@ -221,9 +219,19 @@
   border-radius: var(--nd-radius-sm, 4px);
   background: transparent;
   color: inherit;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   opacity: 0.5;
   cursor: pointer;
+}
+
+.layer-list button.layer-icon:disabled {
+  opacity: 0.15;
+  cursor: default;
+}
+
+.layer-list button.layer-icon:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(127, 127, 160, 0.25);
 }
 
 .layer-list button.layer-edit:hover {
