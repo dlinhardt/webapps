@@ -118,6 +118,11 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   it. It mirrors NiiVue's quirks deliberately — `cras` is applied even when the
   footer says `valid = 0`, and GIfTI values are read only from CDATA — because a
   correction that does not match what was applied is worse than none.
+  `showCoordinateSource` distinguishes the two cases, because the advice differs: an
+  inflated or spherical surface shares the native vertex indexing, so switching to a
+  loaded `lh.white` carries the areas over; a flat patch is a *cut* with its own
+  numbering and fewer vertices, so sending the user to a whole hemisphere would hide
+  their work rather than fix anything.
   Drawing on `lh.inflated` or a flat patch still writes *that* surface's coordinates
   — freeview substitutes the white surface (`SurfaceLabel.cpp:408`), this app warns
   instead. `showCoordinateSource` names the surface in the export panel and flags a

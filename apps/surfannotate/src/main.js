@@ -26,7 +26,7 @@ import { writeFreeSurferLabel, labelToValues } from './io/freesurferLabel.js';
 import { writeGiftiLabel, maskToLabelArray } from './io/gifti.js';
 import { writePointsJson, hashTriangles } from './io/points.js';
 import {
-  exportStem as buildExportStem, hasAnatomicalCoordinates, surfaceKind
+  exportStem as buildExportStem, hasAnatomicalCoordinates, surfaceKind, FLAT
 } from './io/naming.js';
 import { classifyFile, SNIFF_BYTES, SURFACE, OVERLAY, UNKNOWN } from './io/classify.js';
 
@@ -973,8 +973,16 @@ function activateSurface(id, { announce = false } = {}) {
     const carried = session.clicks.length
       ? ` ${session.clicks.length} border point(s) carried over.`
       : '';
+    // Areas belong to a vertex indexing, so switching to a surface with a
+    // different one hides them rather than losing them — say which, or it looks
+    // like the work is gone.
+    const elsewhere = state.rois.filter((roi) => roi.topologyKey !== entry.topologyKey);
+    const hidden = elsewhere.length
+      ? ` ${elsewhere.length} area(s) on other surfaces are not shown here — they use `
+        + 'a different vertex indexing, and reappear when you switch back.'
+      : '';
     setStatus(`Showing ${entry.name} — ` +
-      `${entry.geometry.vertexCount.toLocaleString()} vertices.${carried}`);
+      `${entry.geometry.vertexCount.toLocaleString()} vertices.${carried}${hidden}`);
   }
 }
 
@@ -1346,18 +1354,36 @@ function showCoordinateSource() {
     ui.exportHint.classList.remove('warn');
     return;
   }
-  // Same vertex indexing means the same ROI, so a loaded anatomical surface is
-  // one click away rather than a reload.
-  const better = state.surfaces.find((other) => other.anatomical
-    && other.topologyKey === entry.topologyKey);
+
   const kind = surfaceKind(entry.name);
+  const flattened = kind === FLAT || isPlanar(entry.geometry.positions);
+  // An anatomical surface only helps if it shares the vertex indexing: that is
+  // what makes it the same ROI. A different indexing is a different surface as
+  // far as every area, click and label index is concerned.
+  const donor = state.surfaces.find((other) => other.anatomical
+    && other.topologyKey === entry.topologyKey);
+
+  let advice;
+  if (donor) {
+    advice = `Switch to ${donor.name} before exporting — it shares this vertex `
+      + 'indexing, so the areas come with you.';
+  } else if (flattened) {
+    // A patch is a cut of a surface, renumbered, so it has fewer vertices than
+    // the native surface. Sending someone to lh.pial here would hide their work
+    // rather than fix anything — the areas belong to this indexing.
+    advice = 'A flat surface also has a different number of vertices from the '
+      + 'native surface it was cut from, so its vertex indices — and the areas '
+      + 'drawn on it — belong to this patch alone.';
+  } else {
+    advice = 'The vertex indices are correct, and are all freeview and '
+      + 'mris_anatomical_stats read. Load the matching lh.white or lh.pial and '
+      + 'switch to it if you need the coordinates too — it shares this vertex '
+      + 'indexing, so the areas come with you.';
+  }
+
   ui.exportHint.textContent =
-    `${entry.name} is ${kind === 'unknown' ? 'flattened' : kind}, so its x/y/z are not `
-    + 'anatomical. The vertex indices are still correct — which is all freeview and '
-    + 'mris_anatomical_stats read — but the coordinates are not. '
-    + (better
-      ? `Switch to ${better.name} before exporting if they matter.`
-      : 'Load lh.white or lh.pial and switch to it if they matter.');
+    `${entry.name} is ${flattened ? 'flat' : kind}, so its x/y/z are not anatomical. `
+    + advice;
   ui.exportHint.classList.add('warn');
 }
 

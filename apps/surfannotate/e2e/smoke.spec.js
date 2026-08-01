@@ -1523,9 +1523,11 @@ test('the export panel says where the coordinates come from, and warns when they
   await expect(surfaceRows(page)).toHaveCount(2);
   await expect(hint).toHaveClass(/warn/);
   await expect(hint).toContainText('not anatomical');
-  await expect(hint).toContainText('vertex indices are still correct');
-  // Nothing anatomical shares its topology, so it cannot offer one.
-  await expect(hint).toContainText('Load lh.white or lh.pial');
+  // A patch is a cut of a surface, renumbered — so it must NOT send the user to
+  // lh.pial, which would hide their areas rather than fix anything.
+  await expect(hint).toContainText('different number of vertices');
+  await expect(hint).toContainText('belong to this patch alone');
+  await expect(hint).not.toContainText('Switch to');
 
   // Switching back to the anatomical surface clears the warning.
   await surfaceRows(page).first().locator('input[type=radio]').check();
@@ -1551,4 +1553,32 @@ test('the warning names a loaded anatomical surface of the same topology', async
   const hint = page.locator('#exportHint');
   await expect(hint).toHaveClass(/warn/);
   await expect(hint).toContainText('Switch to lh.pial before exporting');
+  await expect(hint).toContainText('the areas come with you');
+});
+
+test('switching to a different vertex indexing says the areas are hidden, not lost', async ({ page }) => {
+  // Areas belong to a vertex indexing. A flat patch is a cut of a surface with
+  // its own numbering, so switching to a whole hemisphere shows none of them —
+  // which looks exactly like the work has been thrown away.
+  await loadFlat(page);
+  await saveStrip(page, 2, 'V1');
+  await saveStrip(page, 9, 'V2');
+  await expect(roiRows(page)).toHaveCount(2);
+
+  await page.setInputFiles('#surfaceInput', join(FIXTURES, 'lh.realflat.surf.gii'));
+  await expect(surfaceRows(page)).toHaveCount(2);
+  // Loading made it active already, so go back and forth to get a real switch —
+  // the announcement only fires when the user picks a surface.
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  await surfaceRows(page).nth(1).locator('input[type=radio]').check();
+
+  await expect(roiRows(page)).toHaveCount(0);
+  await expect(page.locator('#statusText')).toContainText('2 area(s) on other surfaces');
+  await expect(page.locator('#statusText')).toContainText('reappear when you switch back');
+
+  // And they do.
+  await surfaceRows(page).first().locator('input[type=radio]').check();
+  await expect(roiRows(page)).toHaveCount(2);
+  expect(await page.evaluate(() =>
+    window.__surfannotateUi.savedRois().map((a) => a.name))).toEqual(['V1', 'V2']);
 });
