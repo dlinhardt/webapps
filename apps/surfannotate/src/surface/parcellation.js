@@ -34,7 +34,6 @@ import { RoiSession, CLOSURE_EDGE } from './roiSession.js';
 /**
  * @typedef {object} ResolvedArea
  * @property {Uint8Array|null} mask  null when the area could not be resolved
- * @property {Int32Array} chain
  * @property {string|null} error
  */
 
@@ -97,12 +96,12 @@ export function resolveArea(base, claimed, area) {
 
   for (const vertex of area.clicks) session.addClick(vertex);
   if (session.clicks.length !== area.clicks.length) {
-    return { ...area, mask: null, chain: new Int32Array(0), error: 'LOST_POINTS' };
+    return { ...area, mask: null, error: 'LOST_POINTS' };
   }
 
   const closed = area.closure === CLOSURE_EDGE ? session.closeOnEdge() : session.closePath();
   if (!closed.ok) {
-    return { ...area, mask: null, chain: session.chain, error: closed.error || 'BROKEN_BOUNDARY' };
+    return { ...area, mask: null, error: closed.error || 'BROKEN_BOUNDARY' };
   }
 
   const anchor = usableAnchor(cut.graph, session, area.anchor);
@@ -115,9 +114,9 @@ export function resolveArea(base, claimed, area) {
     : session.fill({ seed: anchor, includeBoundary: area.includeBoundary });
 
   if (!filled.ok) {
-    return { ...area, mask: null, chain: session.chain, error: filled.error };
+    return { ...area, mask: null, error: filled.error };
   }
-  return { ...area, mask: session.filled, chain: session.chain, error: null };
+  return { ...area, mask: session.filled, error: null };
 }
 
 /** The stored anchor, if it is still a vertex this area could be filled from. */

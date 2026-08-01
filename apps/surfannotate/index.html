@@ -28,7 +28,7 @@
 
       <main class="start-main">
         <section class="start-hero">
-          <div class="start-hero-copy">
+          <div>
             <p class="start-kicker">Cortical surface annotation in the browser</p>
             <h2>Delineate areas on a cortical surface, and export them.</h2>
             <p class="start-intro">
@@ -128,7 +128,7 @@
             <input type="file" id="surfaceInput" multiple />
           </label>
           <ul class="layer-list" id="surfaceList" aria-label="Loaded surfaces"></ul>
-          <p class="hint" id="surfaceHint">
+          <p class="hint">
             FreeSurfer (lh.pial, lh.white, lh.inflated), GIfTI .surf.gii, .mz3 and more.
             Drop files on the viewer to add them.
           </p>
@@ -223,7 +223,7 @@
               <input type="range" id="roiOpacity" min="0.05" max="1" step="0.05" value="0.55" />
               <span class="readout" id="roiOpacityValue">0.55</span>
             </div>
-            <p class="hint" id="fillHint">
+            <p class="hint">
               The interior is detected automatically; if it is ambiguous you are asked to
               click inside the region you want. Closing on the edge takes the smaller side.
             </p>
@@ -250,7 +250,7 @@
             <button type="button" id="saveRoi" disabled>Save filled region</button>
           </div>
           <ul class="layer-list" id="roiList" aria-label="Completed ROIs"></ul>
-          <p class="hint" id="roiListHint">
+          <p class="hint">
             Areas partition the surface: each is drawn on what the areas above it have
             left, so no vertex belongs to two. Its border then works like the edge of a
             flat surface — the next area can be closed against it, on folded surfaces too.

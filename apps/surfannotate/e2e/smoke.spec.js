@@ -196,7 +196,6 @@ test('a gap in the boundary is refused rather than flooding the surface', async 
 
   const outcome = await page.evaluate(() => {
     const { graph, session, geometry } = window.__surfannotate;
-    const { fillClosedRegion } = window.__surfannotateFill || {};
     session.clearRoi();
 
     // Build a closed ring, then punch a hole in it.

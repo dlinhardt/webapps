@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { hatchMask, haloMask } from '../src/surface/hatch.js';
+import { hatchMask } from '../src/surface/hatch.js';
 import { buildAdjacency } from '../src/surface/adjacency.js';
 import { makeGrid, at, countMask } from './helpers.js';
 
@@ -65,14 +65,6 @@ test('spacing controls the number of distinct stripes', () => {
   assert.ok(runs(2) > runs(8), 'tighter spacing produces more stripes');
 });
 
-test('cross-hatching inks at least as much as single-direction hatching', () => {
-  const { vertices, V } = makeGrid(40);
-  const region = new Uint8Array(V).fill(1);
-
-  const single = countMask(hatchMask(vertices, region, { cross: false }));
-  const crossed = countMask(hatchMask(vertices, region, { cross: true }));
-  assert.ok(crossed >= single);
-});
 
 test('hatching handles negative coordinates without a seam', () => {
   // Cortical surfaces straddle the origin, so a naive modulo would flip the
@@ -106,25 +98,3 @@ test('hatching rejects nonsense parameters', () => {
   assert.throws(() => hatchMask(vertices, region, { direction: [0, 0, 0] }), /non-zero/);
 });
 
-test('the halo surrounds the boundary without overlapping it', () => {
-  const { vertices, triangles, n } = makeGrid(21);
-  const graph = buildAdjacency(vertices, triangles);
-
-  const chain = [];
-  for (let i = 5; i <= 15; i++) chain.push(at(n, i, 10));
-
-  const halo = haloMask(graph, chain);
-  for (const v of chain) assert.equal(halo[v], 0, 'boundary vertices are not in their own halo');
-  assert.ok(countMask(halo) > 0, 'the halo is not empty');
-
-  // Every halo vertex must touch the boundary.
-  const onChain = new Set(chain);
-  for (let v = 0; v < halo.length; v++) {
-    if (!halo[v]) continue;
-    let touches = false;
-    for (let e = graph.adjOffset[v]; e < graph.adjOffset[v + 1]; e++) {
-      if (onChain.has(graph.adjNeighbor[e])) { touches = true; break; }
-    }
-    assert.ok(touches, `halo vertex ${v} does not touch the boundary`);
-  }
-});

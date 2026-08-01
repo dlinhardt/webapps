@@ -132,8 +132,6 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
 - **Exports are named `<hemisphere>.<roi>`, never after the source surface.** See
   `io/naming.js`. An ROI drawn on `lh.sphere.reg` is valid on any surface sharing that
   vertex indexing, so `lh.sphere.reg.surf.V1.label` would misrepresent it.
-  `writeGiftiShape` in `io/gifti.js` is currently unused — the `.shape.gii` button was
-  removed — but is kept and tested because it is a general format writer.
 - **Never trust a fill that covers more than 40% of the surface** — that is a gap in
   the boundary, not a large ROI. Refuse and tell the user. The one exception is an
   edge closure (`closure === 'edge'`): there the barrier has already been *proved* to

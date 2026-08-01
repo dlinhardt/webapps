@@ -67,39 +67,6 @@ export function writePointsJson(points, vertices, mesh, options = {}) {
 }
 
 /**
- * @param {SurfacePoint[]} points
- * @param {Float32Array} vertices
- * @returns {string}
- */
-export function writePointsCsv(points, vertices) {
-  const rows = ['vertex,name,x,y,z'];
-  for (const point of points) {
-    const v = point.vertex;
-    rows.push([
-      v,
-      csvEscape(point.name || ''),
-      round3(vertices[3 * v]),
-      round3(vertices[3 * v + 1]),
-      round3(vertices[3 * v + 2])
-    ].join(','));
-  }
-  return rows.join('\n') + '\n';
-}
-
-/**
- * @param {string} text
- * @returns {{format: string, mesh: MeshIdentity, points: SurfacePoint[]}}
- */
-export function readPointsJson(text) {
-  const parsed = JSON.parse(text);
-  if (parsed.format !== POINTS_FORMAT) {
-    throw new Error(`unsupported point file format "${parsed.format}"`);
-  }
-  if (!Array.isArray(parsed.points)) throw new Error('point file has no points array');
-  return parsed;
-}
-
-/**
  * Fingerprint the mesh topology so a point set can refuse to load onto a
  * different surface. Topology, not geometry — this is deliberately stable
  * across white/pial/inflated, which all share a triangle list.
@@ -116,28 +83,6 @@ export async function hashTriangles(triangles) {
   return `sha256:${hex}`;
 }
 
-/**
- * @param {MeshIdentity} expected
- * @param {MeshIdentity} actual
- * @returns {{ok: boolean, reason: string|null}}
- */
-export function checkMeshIdentity(expected, actual) {
-  if (expected.numVertices !== actual.numVertices) {
-    return {
-      ok: false,
-      reason: `vertex count differs (file ${expected.numVertices}, surface ${actual.numVertices})`
-    };
-  }
-  if (expected.triangleHash && actual.triangleHash && expected.triangleHash !== actual.triangleHash) {
-    return { ok: false, reason: 'the file was made on a surface with different topology' };
-  }
-  return { ok: true, reason: null };
-}
-
 function round3(value) {
   return Math.round(value * 1000) / 1000;
-}
-
-function csvEscape(value) {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }

@@ -17,11 +17,12 @@
  * @param {Int32Array|number[]} vertexIndices
  * @param {Float32Array} anatomicalVertices 3*V xyz in tkreg RAS (white/pial)
  * @param {object} [options]
+ * @param {Float32Array|number[]} [options.stat] FreeSurfer's fifth column, a
+ *   per-vertex statistic; zero when omitted, which is what a plain region has
  * @param {number[]} [options.offset] subtracted from every coordinate, undoing
  *   the volume-geometry translation the loader applied on the way in
  * @param {string} [options.name] label name recorded in the header
  * @param {string} [options.subject] subject id recorded in the header
- * @param {Float32Array|number[]} [options.stat] per-entry scalar, default 0
  * @returns {string}
  */
 export function writeFreeSurferLabel(vertexIndices, anatomicalVertices, options = {}) {

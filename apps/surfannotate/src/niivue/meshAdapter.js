@@ -160,7 +160,6 @@ export function attachLabelLayer(mesh, values, entries) {
     colorbarVisible: false,
     showLegend: false
   });
-  return mesh.layers.length - 1;
 }
 
 /**
@@ -189,30 +188,6 @@ export function makeLabelLut(entries) {
  */
 export function commitLayer(nv, mesh) {
   mesh.updateMesh(nv.gl);
-  nv.drawScene();
-}
-
-/**
- * Interactive path: patch only the touched vertices' colours straight into the
- * interleaved VBO. ~0.4 ms for a couple of hundred vertices.
- *
- * Any later `commitLayer` discards these patches and recomputes from `values`,
- * which is the intended relationship — `values` stays the source of truth.
- *
- * @param {import('@niivue/niivue').Niivue} nv
- * @param {object} mesh
- * @param {Iterable<number>} vertexIndices
- * @param {Uint8Array} rgba 4 bytes
- */
-export function patchVertexColors(nv, mesh, vertexIndices, rgba) {
-  const gl = nv.gl;
-  const stride = mesh.f32PerVertex === 7 ? 28 : 20;
-  const rgbaOffset = mesh.f32PerVertex === 7 ? 24 : 16;
-
-  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
-  for (const v of vertexIndices) {
-    gl.bufferSubData(gl.ARRAY_BUFFER, v * stride + rgbaOffset, rgba);
-  }
   nv.drawScene();
 }
 

@@ -176,7 +176,6 @@ const state = {
   index: null,
   session: null,
   labelValues: null,
-  layerIndex: -1,
   meshIdentity: null,
   sourceName: '',
   hasOpenBoundary: false,
@@ -274,8 +273,7 @@ function recomputeParcellation() {
 
   resolved.forEach((result, index) => {
     areas[index].mask = result.mask;
-    areas[index].chain = result.chain;
-    areas[index].error = result.error;
+      areas[index].error = result.error;
   });
   state.parcellationVersion++;
 
@@ -869,7 +867,6 @@ async function loadSurface(file) {
       // mean anything if this surface sits in the subject's anatomy.
       anatomical: hasAnatomicalCoordinates(file.name, isPlanar(geometry.positions)),
       labelValues: new Float32Array(geometry.vertexCount),
-      layerIndex: -1,
       overlays: [],
       activeOverlayId: null,
       identity: {
@@ -883,7 +880,7 @@ async function loadSurface(file) {
       topologyKey: `${geometry.vertexCount}:${triangleHash}`
     };
 
-    entry.layerIndex = attachLabelLayer(mesh, entry.labelValues, currentLabelTable());
+    attachLabelLayer(mesh, entry.labelValues, currentLabelTable());
     state.surfaces.push(entry);
     activateSurface(entry.id);
 
@@ -950,7 +947,6 @@ function activateSurface(id, { announce = false } = {}) {
   state.index = entry.index;
   state.session = session;
   state.labelValues = entry.labelValues;
-  state.layerIndex = entry.layerIndex;
   state.meshIdentity = entry.identity;
   state.sourceName = entry.name;
   state.hasOpenBoundary = Boolean(entry.openEdge);
@@ -1015,7 +1011,6 @@ function removeSurface(id) {
     'labelValues', 'meshIdentity', 'overlayLayer', 'overlayAutoRange']) {
     state[key] = null;
   }
-  state.layerIndex = -1;
   state.sourceName = '';
   state.hasOpenBoundary = false;
   ui.dropHint.hidden = false;
@@ -1170,8 +1165,7 @@ function reattachRoiLayer() {
   if (!entry) return;
   const existing = entry.mesh.layers.findIndex((layer) => layer.name === 'surfannotate-roi');
   if (existing >= 0) entry.mesh.layers.splice(existing, 1);
-  entry.layerIndex = attachLabelLayer(entry.mesh, entry.labelValues, currentLabelTable());
-  state.layerIndex = entry.layerIndex;
+  attachLabelLayer(entry.mesh, entry.labelValues, currentLabelTable());
 }
 
 // -- the layer lists ------------------------------------------------------
