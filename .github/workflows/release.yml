@@ -82,16 +82,16 @@ jobs:
         run: pnpm --filter ${{ matrix.app }} test
       - name: Build standalone app bundle
         run: pnpm --filter ${{ matrix.app }} build
-      - name: Apply Neurodesk app theme
-        run: node scripts/theme-app-dist.mjs --app ${{ matrix.app }}
-      - name: Enforce standalone artifact budgets
-        run: node scripts/audit-artifacts.mjs --app ${{ matrix.app }}
       - name: Install browser
         if: matrix.shared_runtime
         run: pnpm exec playwright install --with-deps chromium
       - name: Test shared runtime in a browser
         if: matrix.shared_runtime
         run: pnpm --filter ${{ matrix.app }} test:e2e
+      - name: Apply Neurodesk app theme
+        run: node scripts/theme-app-dist.mjs --app ${{ matrix.app }}
+      - name: Enforce standalone artifact budgets
+        run: node scripts/audit-artifacts.mjs --app ${{ matrix.app }}
       - name: Package standalone app bundle
         env:
           APP: ${{ matrix.app }}
