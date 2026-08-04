@@ -10,6 +10,19 @@ test('app-local changes select only that webapp', async () => {
   assert.deepEqual(plan.sharedApps.include, []);
 });
 
+test('app registration and lockfile updates stay scoped to that webapp', async () => {
+  const registry = await loadAppsRegistry();
+  const plan = createAppPlan(registry, [
+    'LICENSES.md',
+    'apps/surfannotate/package.json',
+    'pnpm-lock.yaml',
+    'registry/apps.yml',
+  ]);
+  assert.deepEqual(plan.selected.map((app) => app.id), ['surfannotate']);
+  assert.deepEqual(plan.sharedApps.include.map(({ app }) => app), ['surfannotate']);
+  assert.equal(plan.allApps, false);
+});
+
 test('shared module changes select the complete app catalog', async () => {
   const registry = await loadAppsRegistry();
   const plan = createAppPlan(registry, ['packages/components/src/ui/ProgressManager.js']);

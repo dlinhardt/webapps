@@ -1,7 +1,14 @@
 import { execFileSync } from 'node:child_process';
 
 const NON_CODE_PREFIXES = ['docs/', '.changeset/'];
-const NON_CODE_FILES = new Set(['README.md', 'LICENSES.md']);
+const NON_CODE_FILES = new Set([
+  'README.md',
+  'LICENSES.md',
+  // App additions and dependency changes update these shared manifests, but
+  // the corresponding apps/<id>/ paths already identify the unit-test scope.
+  'pnpm-lock.yaml',
+  'registry/apps.yml',
+]);
 
 function matrixEntry(app) {
   const toolchains = new Set(app.ci.toolchains);
