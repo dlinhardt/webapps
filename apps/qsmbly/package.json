@@ -1,6 +1,6 @@
 {
   "name": "qsmbly",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "description": "Quantitative Susceptibility Mapping in WebAssembly",
   "type": "module",
   "scripts": {
@@ -21,7 +21,17 @@
   },
   "neurodeskWebapp": {
     "static": {
-      "include": ["index.html", "css", "js", "dcm2niix", "nifti-js", "niivue", "wasm", "QSMbly.png", "favicon.ico"]
+      "include": [
+        "index.html",
+        "css",
+        "js",
+        "dcm2niix",
+        "nifti-js",
+        "niivue",
+        "wasm",
+        "QSMbly.png",
+        "favicon.ico"
+      ]
     }
   },
   "private": true,
