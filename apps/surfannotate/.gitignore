@@ -1,0 +1,6 @@
+# Real subject surfaces and overlays are large and not ours to redistribute, so
+# the fixtures directory stays out of git. The synthetic flat patch is the
+# exception: its generator is committed, and `test:e2e` runs it.
+test/fixtures/*
+!test/fixtures/make-flat-patch.mjs
+!test/fixtures/make-real-patch.mjs

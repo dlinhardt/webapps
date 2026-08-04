@@ -1,0 +1,736 @@
+/* App-specific styling. Layout, colour tokens and the imaging-workspace grid
+   come from @neurodesk/webapp-components/styles/base.css. */
+
+#controls {
+  display: flex;
+  flex-direction: column;
+  /* MUST stay nowrap. The shared .nd-imaging-controls class on this same element
+     sets flex-wrap: wrap for its own row layout; combined with the column
+     direction here, anything taller than the panel wraps into a SECOND COLUMN
+     to the right — off the 320px panel, invisible, and unreachable, because
+     wrapping absorbs the overflow so overflow-y never has anything to scroll.
+     That silently swallowed the whole tool section once the panel grew. */
+  flex-wrap: nowrap;
+  gap: var(--nd-space-4, 1rem);
+  padding: var(--nd-space-4, 1rem);
+  overflow-y: auto;
+}
+
+/* Sections must keep their natural height rather than being squeezed to fit,
+   or the panel shrinks them instead of scrolling. */
+#controls > .panel {
+  flex: 0 0 auto;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nd-space-2, 0.5rem);
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+
+.file-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.file-field input[type='file'] {
+  font-size: 0.8rem;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  opacity: 0.65;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.row input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.segmented {
+  display: flex;
+  border: 1px solid var(--nd-color-border, #3a3f4b);
+  border-radius: var(--nd-radius-md, 6px);
+  overflow: hidden;
+}
+
+.segmented button {
+  flex: 1 1 0;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: var(--nd-color-accent, #4f7cff);
+  color: #fff;
+}
+
+.button-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.button-row button {
+  flex: 1 1 0;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.82rem;
+  border-radius: var(--nd-radius-md, 6px);
+  border: 1px solid var(--nd-color-border, #3a3f4b);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.button-row button:hover:not(:disabled) {
+  border-color: var(--nd-color-accent, #4f7cff);
+}
+
+.button-row button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.button-row button.primary {
+  background: var(--nd-color-accent, #4f7cff);
+  border-color: var(--nd-color-accent, #4f7cff);
+  color: #fff;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+}
+
+/* Loaded surfaces and overlays. The list is the record of what is loaded —
+   a native file input can only ever show the last file chosen through it, and
+   shows nothing at all for a drag-and-drop. */
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.layer-list:empty {
+  display: none;
+}
+
+.layer-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: var(--nd-radius-sm, 4px);
+  font-size: 0.8rem;
+}
+
+.layer-list li.selected {
+  background: rgba(127, 127, 160, 0.14);
+}
+
+.layer-list input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+/* The shell styles bare buttons inside the controls panel, so these need to be
+   specific enough to win — otherwise a layer name renders as a boxed control
+   rather than as the row's label. */
+.layer-list .layer-name,
+.layer-list button.layer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* An area whose border no longer resolves against the areas above it. */
+.layer-list li.unresolved .layer-name {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.layer-list li.unresolved {
+  border-left: 2px solid rgba(220, 140, 60, 0.8);
+}
+
+.layer-meta {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-list .layer-remove,
+.layer-list .layer-icon,
+.layer-list button.layer-remove,
+.layer-list button.layer-icon {
+  flex: 0 0 auto;
+  width: 1.3rem;
+  height: 1.3rem;
+  line-height: 1;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  border-radius: var(--nd-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+.layer-list button.layer-icon:disabled {
+  opacity: 0.15;
+  cursor: default;
+}
+
+.layer-list button.layer-icon:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(127, 127, 160, 0.25);
+}
+
+.layer-list button.layer-edit:hover {
+  opacity: 1;
+  background: rgba(80, 140, 220, 0.28);
+}
+
+.layer-list .layer-remove:hover {
+  opacity: 1;
+  background: rgba(220, 80, 80, 0.25);
+}
+
+.point-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+#viewer {
+  position: relative;
+  min-height: 0;
+}
+
+#viewer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#viewer.dragging::after {
+  content: '';
+  position: absolute;
+  inset: 0.5rem;
+  border: 2px dashed var(--nd-color-accent, #4f7cff);
+  border-radius: var(--nd-radius-md, 6px);
+  pointer-events: none;
+}
+
+/* Any author `display` rule outranks the UA stylesheet's `[hidden]`, so an
+   element with both silently stays visible — which is how the drop hint once
+   sat permanently over the canvas. Make the attribute win everywhere rather
+   than patching it per selector. */
+[hidden] {
+  display: none !important;
+}
+
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  text-align: center;
+  padding: 1rem;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.drop-hint strong {
+  font-size: 1rem;
+}
+
+.drop-hint span {
+  font-size: 0.8rem;
+  max-width: 28rem;
+}
+
+#status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.readout {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+.range-row {
+  gap: 0.35rem;
+}
+
+.range-row input[type='number'] {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  padding: 0.2rem 0.3rem;
+  font: inherit;
+  font-size: 0.78rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--nd-color-border, #3a3f4b);
+  border-radius: var(--nd-radius-sm, 4px);
+}
+
+.range-sep {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+button.mini {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.45rem;
+  font: inherit;
+  font-size: 0.72rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--nd-color-border, #3a3f4b);
+  border-radius: var(--nd-radius-sm, 4px);
+  cursor: pointer;
+}
+
+button.mini:hover:not(:disabled) {
+  border-color: var(--nd-color-accent, #4f7cff);
+}
+
+button.mini:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.hint.note {
+  padding: 0.4rem 0.5rem;
+  border-left: 2px solid var(--nd-color-accent, #4f7cff);
+  background: rgba(127, 127, 160, 0.08);
+  border-radius: 0 var(--nd-radius-sm, 4px) var(--nd-radius-sm, 4px) 0;
+  opacity: 0.85;
+}
+
+/* -- start page ---------------------------------------------------------- */
+
+/* The other Neurodesk webapps show a short explanation before the tool, so the
+   app is not the first thing a visitor meets. It is a section over the app
+   rather than a separate document: the bundle, the shell and the composite-site
+   path all stay exactly as they were. */
+.start-page {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--nd-color-bg, #0f1419);
+  color: var(--nd-color-text, #e8edf4);
+  /* The shell sets its font on .nd-imaging-workspace, and this sits outside it,
+     so without this the start page renders in the browser's default serif. */
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.start-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nd-space-md, 1rem);
+  padding: var(--nd-space-md, 1rem) clamp(1rem, 4vw, 2.5rem);
+  background: var(--nd-color-surface, #1a2332);
+  border-bottom: 1px solid var(--nd-color-border, #2d3f5a);
+}
+
+.start-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--nd-space-sm, 0.5rem);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.start-brand strong { font-size: 1.05rem; font-weight: 700; }
+.start-brand span { color: var(--nd-color-text-muted, #8b99ad); font-size: 0.88rem; }
+
+.start-link {
+  flex: 0 0 auto;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.start-link:hover { color: var(--nd-color-text, #e8edf4); }
+
+.start-main {
+  flex: 1 1 auto;
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vh, 3rem) clamp(1rem, 4vw, 2.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(1.5rem, 5vh, 3rem);
+}
+
+.start-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: clamp(1.5rem, 4vw, 3rem);
+  align-items: start;
+}
+
+.start-kicker {
+  margin: 0 0 var(--nd-space-sm, 0.5rem);
+  color: var(--nd-color-success, #10b981);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.start-hero h2 {
+  margin: 0;
+  font-size: clamp(1.7rem, 3vw, 2.6rem);
+  line-height: 1.12;
+  font-weight: 700;
+}
+
+.start-intro {
+  max-width: 62ch;
+  margin: var(--nd-space-md, 1rem) 0 0;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.start-actions { margin-top: var(--nd-space-lg, 1.5rem); }
+
+.start-primary {
+  min-height: 44px;
+  padding: 0 1.6rem;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--nd-color-primary, #3b82f6);
+  border: 1px solid var(--nd-color-primary, #3b82f6);
+  border-radius: var(--nd-radius-md, 8px);
+  cursor: pointer;
+  transition: background var(--nd-transition-fast, 150ms ease);
+}
+
+.start-primary:hover { background: var(--nd-color-primary-hover, #2563eb); }
+
+.start-local-badge {
+  display: inline-block;
+  max-width: 62ch;
+  margin: var(--nd-space-lg, 1.5rem) 0 0;
+  padding: var(--nd-space-sm, 0.5rem) var(--nd-space-md, 1rem);
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: var(--nd-radius-md, 8px);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.start-local-panel {
+  padding: var(--nd-space-md, 1rem);
+  background: var(--nd-color-surface, #1a2332);
+  border: 1px solid var(--nd-color-border, #2d3f5a);
+  border-radius: var(--nd-radius-md, 8px);
+}
+
+.start-local-panel h3 {
+  margin: 0 0 var(--nd-space-sm, 0.5rem);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nd-color-text-dim, #5c6b7f);
+}
+
+.start-local-panel h3 + ul { margin-bottom: var(--nd-space-md, 1rem); }
+.start-local-panel ul:last-child { margin-bottom: 0; }
+
+.start-local-panel ul {
+  display: grid;
+  gap: var(--nd-space-sm, 0.5rem);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.start-local-panel li { position: relative; padding-left: 16px; }
+
+.start-local-panel li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nd-color-primary, #3b82f6);
+}
+
+.start-page code {
+  font-size: 0.94em;
+  color: var(--nd-color-text, #e8edf4);
+}
+
+.start-how h3 {
+  margin: 0 0 var(--nd-space-md, 1rem);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nd-color-text-dim, #5c6b7f);
+}
+
+.start-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: clamp(1rem, 3vw, 2rem);
+}
+
+.start-step {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  column-gap: var(--nd-space-sm, 0.5rem);
+  align-items: start;
+}
+
+.start-step-number {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--nd-color-primary, #3b82f6);
+  background: var(--nd-color-primary-glow, rgba(59, 130, 246, 0.25));
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.start-step h4 { grid-column: 2; margin: 0.35rem 0 0.25rem; font-size: 0.9rem; }
+
+.start-step p {
+  grid-column: 2;
+  margin: 0;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.start-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nd-space-md, 1rem);
+  flex-wrap: wrap;
+  padding: var(--nd-space-md, 1rem) clamp(1rem, 4vw, 2.5rem);
+  border-top: 1px solid var(--nd-color-border, #2d3f5a);
+  color: var(--nd-color-text-dim, #5c6b7f);
+  font-size: 0.78rem;
+}
+
+.start-footer a { color: inherit; }
+
+@media (max-width: 760px) {
+  .start-hero { grid-template-columns: 1fr; }
+}
+
+/* The shared shell always draws a one-glyph badge beside the title, and offers no
+   way to omit it. The other imaging-workspace apps keep theirs (deface 'D',
+   niimath 'N', browserqc 'Q'); this one follows calmar and spinalcordtoolbox,
+   which build their own headers and show the name alone. Hidden here rather than
+   changed in the component, which every app shares. */
+.nd-imaging-mark {
+  display: none;
+}
+
+/* -- citations ----------------------------------------------------------- */
+
+.start-links {
+  display: flex;
+  align-items: center;
+  gap: var(--nd-space-md, 1rem);
+}
+
+button.start-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.cite-dialog {
+  width: min(640px, calc(100vw - 2rem));
+  max-height: min(80vh, 640px);
+  padding: 0;
+  color: var(--nd-color-text, #e8edf4);
+  background: var(--nd-color-surface, #1a2332);
+  border: 1px solid var(--nd-color-border, #2d3f5a);
+  border-radius: var(--nd-radius-md, 8px);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.cite-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.cite-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nd-space-md, 1rem);
+  padding: var(--nd-space-md, 1rem);
+  border-bottom: 1px solid var(--nd-color-border, #2d3f5a);
+}
+
+.cite-header h3 { margin: 0; font-size: 0.95rem; }
+
+.cite-close {
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--nd-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.cite-close:hover { opacity: 1; background: rgba(127, 127, 160, 0.2); }
+
+.cite-body {
+  padding: var(--nd-space-md, 1rem);
+  overflow-y: auto;
+}
+
+.cite-intro {
+  margin: 0 0 var(--nd-space-md, 1rem);
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.cite-section + .cite-section { margin-top: var(--nd-space-lg, 1.5rem); }
+
+.cite-section h4 {
+  margin: 0 0 var(--nd-space-sm, 0.5rem);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--nd-color-text-dim, #5c6b7f);
+}
+
+.cite-item {
+  padding: var(--nd-space-sm, 0.5rem) var(--nd-space-md, 1rem);
+  background: var(--nd-color-bg, #0f1419);
+  border: 1px solid var(--nd-color-border, #2d3f5a);
+  border-radius: var(--nd-radius-sm, 4px);
+}
+
+.cite-item + .cite-item { margin-top: var(--nd-space-sm, 0.5rem); }
+.cite-item strong { font-size: 0.88rem; }
+
+.cite-item p {
+  margin: 0.3rem 0;
+  color: var(--nd-color-text-muted, #8b99ad);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.cite-item a {
+  font-size: 0.8rem;
+  color: var(--nd-color-primary, #3b82f6);
+  overflow-wrap: anywhere;
+}
+
+/* The shell's .nd-header-link rule sets colour but not type, so a <button>
+   keeps the user agent's smaller default and sits oddly beside the anchor. */
+.nd-imaging-navigation button.nd-header-link {
+  font: inherit;
+  padding: 0;
+}
+
+/* The export hint turns into a warning when the surface being drawn on is not
+   anatomical, so its coordinates do not mean what the label header says. */
+.hint.warn {
+  padding: 0.4rem 0.5rem;
+  border-left: 2px solid var(--nd-color-warning, #f59e0b);
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 0 var(--nd-radius-sm, 4px) var(--nd-radius-sm, 4px) 0;
+  opacity: 0.95;
+}

@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" sizes="32x32" href="%BASE_URL%favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="%BASE_URL%favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="256x256" href="%BASE_URL%favicon-256.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="%BASE_URL%favicon-180.png" />
+    <title>SurfAnnotate — Neurodesk</title>
+    <meta name="description" content="Cortical surface viewer with manual ROI delineation and vertex selection. Runs entirely in your browser." />
+  </head>
+  <body>
+    <!-- Shown first, then hidden by "Start annotating". The app is behind it the
+         whole time rather than on a second page, matching the other Neurodesk
+         webapps and keeping the single-bundle build. -->
+    <section class="start-page" id="startPage" aria-label="SurfAnnotate start page">
+      <header class="start-header">
+        <div class="start-brand">
+          <strong>SurfAnnotate</strong>
+          <span>Surface ROIs and vertex selection</span>
+        </div>
+        <div class="start-links">
+          <button type="button" class="start-link" data-cite-open title="How to cite">Cite</button>
+          <a href="../" class="start-link" title="More Neurodesk web apps">More Apps</a>
+        </div>
+      </header>
+
+      <main class="start-main">
+        <section class="start-hero">
+          <div>
+            <p class="start-kicker">Cortical surface annotation in the browser</p>
+            <h2>Delineate ROIs on a cortical surface, and export them.</h2>
+            <p class="start-intro">
+              Load a FreeSurfer or GIfTI surface — folded, inflated, spherical, or an
+              unfolded flat — and mark regions by clicking along their border.
+              The points are joined by the shortest path across the mesh, so the border
+              follows the surface rather than a straight line through it. ROIs are drawn
+              in sequence and partition the surface: each one's border becomes the edge
+              the next is closed against, so neighbouring ROIs share a boundary exactly
+              instead of having overlapping vertices.
+            </p>
+            <div class="start-actions">
+              <button class="start-primary" id="enterAppButton" type="button">
+                Start annotating
+              </button>
+            </div>
+            <p class="start-local-badge">
+              Your surfaces, overlays and labels never leave this machine — there is no
+              server to send them to.
+            </p>
+          </div>
+
+          <aside class="start-local-panel" aria-label="What it reads and writes">
+            <h3>Reads</h3>
+            <ul>
+              <li>FreeSurfer surfaces: <code>lh.pial</code>, <code>lh.white</code>,
+                <code>lh.inflated</code>, flat surfaces</li>
+              <li>GIfTI <code>.surf.gii</code>, <code>.mz3</code>, and more</li>
+              <li>Overlays: curvature, thickness, <code>.annot</code>,
+                <code>.label</code>, <code>.label.gii</code>, CIFTI <code>.dscalar.nii</code></li>
+            </ul>
+            <h3>Writes</h3>
+            <ul>
+              <li>FreeSurfer <code>.label</code></li>
+              <li>GIfTI <code>.label.gii</code></li>
+              <li>Vertex lists as JSON</li>
+            </ul>
+          </aside>
+        </section>
+
+        <section class="start-how" aria-labelledby="startHowHeading">
+          <h3 id="startHowHeading">How it works</h3>
+          <div class="start-steps">
+            <article class="start-step">
+              <div class="start-step-number">1</div>
+              <h4>Load a surface</h4>
+              <p>
+                Pick a file or drop it on the viewer. Load several and switch between
+                them; an ROI drawn on the inflated surface is still there on the folded
+                one.
+              </p>
+            </article>
+            <article class="start-step">
+              <div class="start-step-number">2</div>
+              <h4>Click the border</h4>
+              <p>
+                Nothing is traced while you click, hold and hover around the surface, so you can rotate freely. Close the
+                border and fill it. On a cut surface the edge of the flat surface closes it for
+                you — two points can be enough.
+              </p>
+            </article>
+            <article class="start-step">
+              <div class="start-step-number">3</div>
+              <h4>Save and export</h4>
+              <p>
+                Saved ROIs become the edges the next ones are drawn against, and can be
+                reopened to adjust. Export each as a <code>.label</code> or
+                <code>.label.gii</code>.
+              </p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="start-footer">
+        <span>
+          Everything runs in this browser tab — no upload, no account, no server.
+        </span>
+        <span>
+          MIT licensed &middot; rendering by
+          <a href="https://github.com/niivue/niivue" target="_blank"
+             rel="noopener noreferrer">NiiVue</a>
+        </span>
+      </footer>
+    </section>
+
+    <div id="app">
+      <div id="controls">
+        <section class="panel">
+          <h2>Surfaces</h2>
+          <label class="file-field">
+            <span>Add surface</span>
+            <!-- Deliberately unfiltered: FreeSurfer surfaces have irregular
+                 names (lh.pial, lh.white, lh.pial.T1, surf.gii.gz), and an
+                 accept list greys out exactly the files people want. The
+                 loader validates instead. -->
+            <input type="file" id="surfaceInput" multiple />
+          </label>
+          <ul class="layer-list" id="surfaceList" aria-label="Loaded surfaces"></ul>
+          <p class="hint">
+            FreeSurfer (lh.pial, lh.white, lh.inflated), GIfTI .surf.gii, .mz3 and more.
+            Drop files on the viewer to add them.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Overlays</h2>
+          <label class="file-field">
+            <span>Add overlay</span>
+            <input type="file" id="overlayInput" multiple disabled />
+          </label>
+          <ul class="layer-list" id="overlayList" aria-label="Overlays on the shown surface"></ul>
+          <p class="hint">Curvature, thickness, .annot, .label.gii, .shape.gii, CIFTI .dscalar.nii.</p>
+
+          <p class="hint" id="overlaySelectedHint" hidden></p>
+          <div class="row">
+            <label for="overlayColormap">Colour map</label>
+            <select id="overlayColormap" disabled>
+              <option value="gray">gray</option>
+              <option value="bone">bone</option>
+              <option value="viridis">viridis</option>
+              <option value="plasma">plasma</option>
+              <option value="warm">warm</option>
+              <option value="cool">cool</option>
+              <option value="hot">hot</option>
+              <option value="jet">jet</option>
+              <option value="gist_rainbow">gist_rainbow</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="overlayOpacity">Overlay opacity</label>
+            <input type="range" id="overlayOpacity" min="0" max="1" step="0.05" value="1" disabled />
+          </div>
+          <div class="row range-row">
+            <label for="overlayMin">Range</label>
+            <input type="number" id="overlayMin" step="any" disabled aria-label="Colour range minimum" />
+            <span class="range-sep">to</span>
+            <input type="number" id="overlayMax" step="any" disabled aria-label="Colour range maximum" />
+            <button type="button" id="overlayRangeReset" class="mini" disabled
+                    title="Back to the 2nd-98th percentile of the data">Auto</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Tool</h2>
+          <div class="segmented" role="radiogroup" aria-label="Drawing tool">
+            <button type="button" id="modeRoi" class="active" role="radio" aria-checked="true">Closed ROI</button>
+            <button type="button" id="modePoints" role="radio" aria-checked="false">Points</button>
+          </div>
+
+          <div id="roiControls">
+            <p class="hint">
+              Click to place border points around the region. Nothing is traced
+              until you close the ROI, so you can rotate freely while placing them.
+            </p>
+            <p class="hint note">
+              Points are joined <strong>in the order you place them</strong>, not by
+              which are nearest each other. Work consistently along the border in
+              one direction. <strong>Close ROI</strong> joins the last point back to
+              the first.
+            </p>
+            <div class="button-row">
+              <button type="button" id="undoPoint" disabled>Undo point</button>
+              <button type="button" id="closePath" disabled>Close ROI</button>
+            </div>
+            <div class="button-row" id="edgeRow" hidden>
+              <button type="button" id="closeOnEdge" disabled>Close on surface edge</button>
+            </div>
+            <p class="hint" id="edgeHint" hidden>
+              Draw only the part of the border crossing the flat surface: both ends are extended
+              to the nearest edge, which closes the region. Two points are enough.
+            </p>
+            <div class="button-row">
+              <button type="button" id="fillRegion" class="primary" disabled>Fill region</button>
+              <button type="button" id="flipRegion" hidden>Other side</button>
+              <button type="button" id="clearRoi" disabled>Clear</button>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="includeBoundary" />
+              <span>Include boundary vertices</span>
+            </label>
+            <div class="row">
+              <label for="fillStyle">Fill style</label>
+              <select id="fillStyle">
+                <option value="solid">Solid</option>
+                <option value="hatched">Hatched</option>
+                <option value="outline">Outline only</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="roiOpacity">ROI opacity</label>
+              <input type="range" id="roiOpacity" min="0.05" max="1" step="0.05" value="0.55" />
+              <span class="readout" id="roiOpacityValue">0.55</span>
+            </div>
+            <p class="hint">
+              The interior is detected automatically; if it is ambiguous you are asked to
+              click inside the region you want. Closing on the edge takes the smaller side.
+            </p>
+          </div>
+
+          <div id="pointControls" hidden>
+            <p class="hint">Click to place a landmark. Click an existing one to remove it.</p>
+            <div class="button-row">
+              <button type="button" id="undoPointSelection" disabled>Undo</button>
+              <button type="button" id="clearPoints" disabled>Clear all</button>
+            </div>
+            <ol id="pointList" class="point-list"></ol>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>ROIs</h2>
+          <label class="file-field">
+            <span>ROI name</span>
+            <input type="text" id="roiName" value="roi" maxlength="64"
+                   placeholder="e.g. V1, lh-motor" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="button-row">
+            <button type="button" id="saveRoi" disabled>Save filled region</button>
+          </div>
+          <ul class="layer-list" id="roiList" aria-label="Completed ROIs"></ul>
+          <p class="hint">
+            ROIs partition the surface: each is drawn on what the ROIs above it have
+            left, so no vertex belongs to two. Its border then works like the edge of a
+            flat surface — the next ROI can be closed against it, on folded surfaces too.
+            <br />Editing one re-derives the ROIs below it, so moving a shared boundary
+            moves both sides.
+            <br /><strong>&#9650;&#9660;</strong> reorder — later ROIs give way to
+            earlier ones. <strong>&#9998;</strong> reopens an ROI to adjust its border.
+            Click a name to export it instead of the region being drawn.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Export</h2>
+          <p class="hint" id="exportNameHint">Used in the file name and inside the file.</p>
+          <div class="button-row">
+            <button type="button" id="exportLabel" disabled>FreeSurfer .label</button>
+            <button type="button" id="exportGifti" disabled>GIfTI .label.gii</button>
+          </div>
+          <div class="button-row">
+            <button type="button" id="exportPoints" disabled>Points JSON</button>
+          </div>
+          <p class="hint" id="exportHint">Coordinates are written in the loaded surface's space.</p>
+        </section>
+      </div>
+
+      <div id="viewer">
+        <canvas id="gl"></canvas>
+        <div id="dropHint" class="drop-hint">
+          <strong>Drop a surface here</strong>
+          <span>or use the file picker. Nothing is uploaded — everything runs in this browser.</span>
+        </div>
+      </div>
+
+      <div id="status">
+        <span id="statusText">Load a surface to begin.</span>
+        <span id="vertexReadout" class="readout"></span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+    <dialog id="citationsDialog" class="cite-dialog" aria-labelledby="citeHeading">
+      <div class="cite-header">
+        <h3 id="citeHeading">Citations</h3>
+        <button type="button" class="cite-close" id="closeCitations" aria-label="Close">&times;</button>
+      </div>
+      <div class="cite-body">
+        <p class="cite-intro">
+          SurfAnnotate delineates regions in your browser; the rendering and mesh
+          parsing are NiiVue's. Please cite it if the figures or labels reach a paper.
+        </p>
+        <section class="cite-section">
+          <h4>Visualization</h4>
+          <div class="cite-item">
+            <strong>NiiVue</strong>
+            <p>NiiVue Contributors. NiiVue: a WebGL2 medical image viewer.</p>
+            <a href="https://github.com/niivue/niivue" target="_blank"
+               rel="noopener noreferrer">https://github.com/niivue/niivue</a>
+          </div>
+        </section>
+      </div>
+    </dialog>
+  </body>
+</html>
