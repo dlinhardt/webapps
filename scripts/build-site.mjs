@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadAppsRegistry, repoRoot } from './lib/apps-registry.mjs';
+import { injectCompositeTheme } from './lib/composite-theme.mjs';
 import { renderLandingPage } from './lib/landing-page.mjs';
 import { assembleRuntimeAssetStore } from './lib/runtime-assets.mjs';
 
@@ -14,6 +15,10 @@ for (const app of registry.apps) {
   const source = join(repoRoot, 'apps', app.id, 'dist');
   const destination = join(siteDist, app.path);
   await cp(source, destination, { recursive: true });
+
+  const indexPath = join(destination, 'index.html');
+  const indexHtml = await readFile(indexPath, 'utf8');
+  await writeFile(indexPath, injectCompositeTheme(indexHtml, { appId: app.id }));
 }
 
 await assembleRuntimeAssetStore({ repoRoot, siteDist, registry });
@@ -21,6 +26,8 @@ await assembleRuntimeAssetStore({ repoRoot, siteDist, registry });
 await writeFile(join(siteDist, 'index.html'), renderLandingPage(registry));
 await cp(join(repoRoot, 'site', 'landing.css'), join(siteDist, 'landing.css'));
 await cp(join(repoRoot, 'site', 'landing.js'), join(siteDist, 'landing.js'));
+await cp(join(repoRoot, 'site', 'neurodesk-logo.svg'), join(siteDist, 'neurodesk-logo.svg'));
+await cp(join(repoRoot, 'site', 'app-theme.css'), join(siteDist, 'app-theme.css'));
 await writeFile(join(siteDist, '.nojekyll'), '');
 await writeFile(join(siteDist, '_headers'), `/*\n  Cross-Origin-Opener-Policy: same-origin\n  Cross-Origin-Embedder-Policy: credentialless\n  X-Content-Type-Options: nosniff\n`);
 console.log(`Assembled ${registry.apps.length} apps at ${siteDist}`);

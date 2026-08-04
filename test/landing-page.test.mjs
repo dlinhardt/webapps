@@ -12,4 +12,7 @@ test('landing page renders categorized, searchable app cards', async () => {
   assert.match(html, /id="app-search" type="search"/);
   assert.match(html, /data-search="[^"]*dicom[^"]*"/i);
   assert.match(html, /id="no-results"/);
+  assert.match(html, /src="\.\/neurodesk-logo\.svg" alt="Neurodesk"/);
+  assert.ok(!html.includes('https://neurodesk.org/overview/'));
+  assert.ok(!html.includes('https://neurodesk.org/getting-started/'));
 });

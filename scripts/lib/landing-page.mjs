@@ -67,22 +67,22 @@ export function renderLandingPage(registry) {
   <script type="module" src="./landing.js"></script>
 </head>
 <body>
-  <div class="page-glow page-glow--one" aria-hidden="true"></div>
-  <div class="page-glow page-glow--two" aria-hidden="true"></div>
   <header class="site-header">
-    <a class="brand" href="https://neurodesk.org/" aria-label="Neurodesk home">
-      <span class="brand__mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span>NEURODESK</span>
-    </a>
-    <p>Browser tools</p>
+    <div class="site-header__inner">
+      <a class="brand" href="https://neurodesk.org/" aria-label="Neurodesk home"><img src="./neurodesk-logo.svg" alt="Neurodesk"></a>
+      <nav class="site-nav" aria-label="Neurodesk navigation">
+        <a href="https://github.com/neurodesk">GitHub</a>
+        <span aria-current="page">Webapps</span>
+      </nav>
+    </div>
   </header>
 
   <main>
     <section class="hero" aria-labelledby="page-title">
       <div class="hero__copy">
-        <p class="eyebrow"><span></span> Process locally. Explore instantly.</p>
-        <h1 id="page-title">Neuroimaging tools,<br><em>right in your browser.</em></h1>
-        <p class="hero__lede">Open practical tools for segmentation, quantitative imaging, quality control, and data preparation—without installing software or uploading your imaging data.</p>
+        <p class="eyebrow">Neurodesk Webapps</p>
+        <h1 id="page-title">Run Neuroimaging Tools in Your Browser</h1>
+        <p class="hero__lede">Use practical tools for segmentation, quantitative imaging, quality control, and data preparation—without installing software or uploading your imaging data.</p>
       </div>
       <aside class="privacy-card" aria-label="Privacy information">
         <div class="privacy-card__icon" aria-hidden="true">
@@ -120,12 +120,14 @@ export function renderLandingPage(registry) {
     </section>
   </main>
 
-  <footer>
-    <p><strong>Neurodesk Webapps</strong><span>Open, local-first tools for neuroimaging.</span></p>
-    <nav aria-label="Footer navigation">
-      <a href="https://neurodesk.org/">About Neurodesk</a>
-      <a href="https://github.com/neurodesk/webapps">View source</a>
-    </nav>
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <p><strong>Neurodesk Webapps</strong><span>Open, local-first tools for neuroimaging.</span></p>
+      <nav aria-label="Footer navigation">
+        <a href="https://neurodesk.org/">About Neurodesk</a>
+        <a href="https://github.com/neurodesk/webapps">View source</a>
+      </nav>
+    </div>
   </footer>
 </body>
 </html>`;

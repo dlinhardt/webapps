@@ -116,6 +116,7 @@ try {
       const url = new URL(request.url());
       if (url.origin !== origin || url.pathname === `/favicon.ico`) return;
       if (url.pathname.startsWith('/_runtime/')) return;
+      if (url.pathname === '/app-theme.css') return;
       if (returningHome && url.pathname === '/') return;
       if (url.pathname !== `/${app.path}/` && !url.pathname.startsWith(`/${app.path}/`)) {
         subpathLeaks.push(url.pathname);
@@ -126,10 +127,18 @@ try {
     await page.waitForTimeout(app.id === 'seedseg' ? 4_000 : 1_000);
     const title = await page.title();
     const bodyText = await page.locator('body').innerText();
+    const themeLinks = await page.locator('link[data-neurodesk-app-theme]').count();
+    const themeState = await page.evaluate(() => ({
+      appId: document.documentElement.dataset.neurodeskApp,
+      brandPrimary: getComputedStyle(document.documentElement).getPropertyValue('--nd-brand-primary').trim(),
+    }));
 
     if (!response?.ok()) failures.push(`${app.id}: document returned ${response?.status() ?? 'no response'}`);
     if (!title.trim()) failures.push(`${app.id}: empty document title`);
     if (!bodyText.trim()) failures.push(`${app.id}: empty rendered body`);
+    if (themeLinks !== 1) failures.push(`${app.id}: found ${themeLinks} hosted theme links, expected 1`);
+    if (themeState.appId !== app.id) failures.push(`${app.id}: document theme identity is ${themeState.appId ?? 'missing'}`);
+    if (themeState.brandPrimary !== '#6aa329') failures.push(`${app.id}: Neurodesk brand tokens were not applied`);
     if (pageErrors.length) failures.push(`${app.id}: page errors: ${[...new Set(pageErrors)].join(' | ')}`);
     if (responseErrors.length) failures.push(`${app.id}: failed same-origin responses: ${[...new Set(responseErrors)].join(' | ')}`);
     if (subpathLeaks.length) failures.push(`${app.id}: assets escaped app subpath: ${[...new Set(subpathLeaks)].join(', ')}`);

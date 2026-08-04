@@ -82,6 +82,8 @@ jobs:
         run: pnpm --filter ${{ matrix.app }} test
       - name: Build standalone app bundle
         run: pnpm --filter ${{ matrix.app }} build
+      - name: Apply Neurodesk app theme
+        run: node scripts/theme-app-dist.mjs --app ${{ matrix.app }}
       - name: Enforce standalone artifact budgets
         run: node scripts/audit-artifacts.mjs --app ${{ matrix.app }}
       - name: Install browser
