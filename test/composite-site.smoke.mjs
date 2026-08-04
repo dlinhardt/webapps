@@ -74,12 +74,28 @@ const failures = [];
 try {
   const landing = await browser.newPage();
   await landing.goto(`${origin}/`, { waitUntil: 'domcontentloaded' });
-  const cards = await landing.locator('a.app').count();
+  const cards = await landing.locator('a.app-card').count();
   const landingText = await landing.locator('body').innerText();
   if (cards !== registry.apps.length) failures.push(`landing page has ${cards} app cards, expected ${registry.apps.length}`);
   if (landingText.includes('Models and large scientific assets are delivered from Hugging Face')) {
     failures.push('landing page still contains the removed scientific-assets message');
   }
+
+  await landing.locator('#app-search').fill('DICOM');
+  const dicomMatches = await landing.locator('[data-app-card]:not([hidden])').count();
+  if (dicomMatches !== 2) failures.push(`landing search found ${dicomMatches} DICOM apps, expected 2`);
+
+  await landing.locator('#clear-search').click();
+  await landing.locator('[data-category-filter="quality-annotation"]').click();
+  const qualityMatches = await landing.locator('[data-app-card]:not([hidden])').count();
+  if (qualityMatches !== 2) failures.push(`quality category has ${qualityMatches} visible apps, expected 2`);
+
+  await landing.locator('[data-category-filter="all"]').click();
+  await landing.locator('#app-search').fill('no-such-neurodesk-app');
+  if (!(await landing.locator('#no-results').isVisible())) failures.push('landing search does not show its empty state');
+  await landing.locator('#reset-filters').click();
+  const resetMatches = await landing.locator('[data-app-card]:not([hidden])').count();
+  if (resetMatches !== registry.apps.length) failures.push(`landing reset shows ${resetMatches} apps, expected ${registry.apps.length}`);
   await landing.close();
 
   for (const app of registry.apps) {

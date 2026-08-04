@@ -27,6 +27,16 @@ test('every catalog entry has a workspace and declared manifest', async () => {
   }
 });
 
+test('every app has searchable category metadata', async () => {
+  const registry = await loadAppsRegistry();
+  const categoryIds = new Set(registry.site.categories.map(({ id }) => id));
+  assert.equal(categoryIds.size, registry.site.categories.length);
+  for (const app of registry.apps) {
+    assert.ok(categoryIds.has(app.category), `${app.id} must use a declared category`);
+    assert.ok(app.keywords.length >= 3, `${app.id} must provide useful search keywords`);
+  }
+});
+
 test('BrowserQC scientific assets are pinned to Hugging Face and not embedded', async () => {
   const manifest = JSON.parse(
     await readFile(join(repoRoot, 'models', 'browserqc.manifest.json'), 'utf8'),

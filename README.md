@@ -6,7 +6,8 @@ Imaging data is processed locally in the browser and is not uploaded.
 
 The complete catalog is generated from `registry/apps.yml`. It is the operational
 source of truth for exact upstream commits, licences, maintainers, support status,
-public paths, app shells, CI toolchains, release eligibility, and scientific assets.
+public paths, catalog categories and search keywords, app shells, CI toolchains,
+release eligibility, and scientific assets.
 
 ## Architecture
 

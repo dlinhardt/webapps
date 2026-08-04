@@ -26,9 +26,21 @@ export async function loadAppsRegistry(path = registryPath) {
   const errors = [];
   const ids = new Set();
   const paths = new Set();
+  const categoryIds = new Set();
 
   if (!registry?.site?.domain) errors.push('site.domain is required');
   if (!registry?.site?.cloudflare_project) errors.push('site.cloudflare_project is required');
+  if (!Array.isArray(registry?.site?.categories) || registry.site.categories.length === 0) {
+    errors.push('site.categories must be a non-empty array');
+  }
+  for (const category of registry?.site?.categories ?? []) {
+    if (!ID.test(category.id ?? '')) errors.push(`invalid category id: ${category.id}`);
+    if (categoryIds.has(category.id)) errors.push(`duplicate category id: ${category.id}`);
+    if (!category.title || !category.description) {
+      errors.push(`incomplete category entry: ${category.id}`);
+    }
+    categoryIds.add(category.id);
+  }
   if (!Array.isArray(registry?.apps) || registry.apps.length === 0) {
     errors.push('apps must be a non-empty array');
   }
@@ -38,6 +50,13 @@ export async function loadAppsRegistry(path = registryPath) {
     if (!ID.test(app.path ?? '')) errors.push(`invalid app path for ${app.id}: ${app.path}`);
     if (ids.has(app.id)) errors.push(`duplicate app id: ${app.id}`);
     if (paths.has(app.path)) errors.push(`duplicate app path: ${app.path}`);
+    if (!categoryIds.has(app.category)) {
+      errors.push(`invalid category for ${app.id}: ${app.category}`);
+    }
+    if (!Array.isArray(app.keywords) || app.keywords.length === 0
+      || app.keywords.some((keyword) => typeof keyword !== 'string' || !keyword.trim())) {
+      errors.push(`keywords must be a non-empty string array for ${app.id}`);
+    }
     if (!RUNTIMES.has(app.runtime)) errors.push(`invalid runtime for ${app.id}: ${app.runtime}`);
     if (!SHELLS.has(app.shell)) errors.push(`invalid shell for ${app.id}: ${app.shell}`);
     if (!SUPPORT_STATUSES.has(app.support_status)) {
@@ -77,8 +96,14 @@ export async function loadAppsRegistry(path = registryPath) {
 
   if (errors.length) throw new Error(`Invalid app registry:\n- ${errors.join('\n- ')}`);
   return Object.freeze({
-    site: Object.freeze({ ...registry.site }),
-    apps: Object.freeze(registry.apps.map((app) => Object.freeze({ ...app }))),
+    site: Object.freeze({
+      ...registry.site,
+      categories: Object.freeze(registry.site.categories.map((category) => Object.freeze({ ...category }))),
+    }),
+    apps: Object.freeze(registry.apps.map((app) => Object.freeze({
+      ...app,
+      keywords: Object.freeze([...app.keywords]),
+    }))),
   });
 }
 

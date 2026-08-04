@@ -76,6 +76,8 @@ const entry =
   `    path: ${name}\n` +
   `    title: ${name}\n` +
   `    description: TODO describe ${name}.\n` +
+  `    category: data-preparation\n` +
+  `    keywords: [TODO]\n` +
   `    legacy_domain: null\n` +
   `    runtime: react-vite\n` +
   `    model_manifest: null\n` +

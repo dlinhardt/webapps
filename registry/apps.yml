@@ -3,12 +3,27 @@
 site:
   domain: webapps.neurodesk.org
   cloudflare_project: neurodesk-webapps
+  categories:
+    - id: segmentation-analysis
+      title: Segmentation & Analysis
+      description: Identify anatomy and pathology, then turn images into useful measurements.
+    - id: quantitative-imaging
+      title: Quantitative Imaging
+      description: Create maps, derived images, and reproducible quantitative results.
+    - id: data-preparation
+      title: Data Preparation & Privacy
+      description: Convert, compare, and prepare imaging data safely in your browser.
+    - id: quality-annotation
+      title: Quality Control & Annotation
+      description: Review image quality and annotate anatomy with interactive tools.
 
 apps:
   - id: musclemap
     path: musclemap
     title: MuscleMap
     description: Browser-based muscle segmentation and fat metrics.
+    category: segmentation-analysis
+    keywords: [muscle, MRI, segmentation, fat, Dixon, IMF, body composition]
     legacy_domain: musclemap.neurodesk.org
     runtime: static-esm
     model_manifest: models/musclemap.manifest.json
@@ -26,6 +41,8 @@ apps:
     path: vesselboost
     title: VesselBoost
     description: Browser-based blood-vessel segmentation.
+    category: segmentation-analysis
+    keywords: [blood vessels, vasculature, MRI, segmentation, vessel enhancement]
     legacy_domain: vesselboost.neurodesk.org
     runtime: static-esm-rust
     model_manifest: models/vesselboost.manifest.json
@@ -43,6 +60,8 @@ apps:
     path: sct
     title: Spinal Cord Toolbox
     description: Browser-native spinal cord MRI segmentation workflows.
+    category: segmentation-analysis
+    keywords: [spinal cord, MRI, segmentation, anatomy, SCT]
     legacy_domain: sct.neurodesk.org
     runtime: static-esm
     model_manifest: models/spinalcordtoolbox.manifest.json
@@ -60,6 +79,8 @@ apps:
     path: calmar
     title: CALMaR
     description: Co-designed Automated Lesion Mapping and Reporting.
+    category: segmentation-analysis
+    keywords: [lesion, mapping, reporting, MRI, segmentation]
     legacy_domain: calmar.neurodesk.org
     runtime: static-esm
     model_manifest: apps/calmar/web/models/manifest.json
@@ -77,6 +98,8 @@ apps:
     path: qsmbly
     title: QSMbly
     description: Quantitative Susceptibility Mapping in the browser.
+    category: quantitative-imaging
+    keywords: [QSM, susceptibility, phase, MRI, quantitative mapping]
     legacy_domain: qsmbly.neurodesk.org
     runtime: rust-wasm
     model_manifest: models/qsmbly.manifest.json
@@ -94,6 +117,8 @@ apps:
     path: seedseg
     title: SeedSeg
     description: Prostate fiducial-marker segmentation in the browser.
+    category: segmentation-analysis
+    keywords: [prostate, fiducial marker, segmentation, MRI, radiotherapy]
     legacy_domain: seedseg.neurodesk.org
     runtime: static-esm
     model_manifest: models/seedseg.manifest.json
@@ -111,6 +136,8 @@ apps:
     path: dicompare
     title: dicompare
     description: DICOM protocol comparison, validation, and schema tooling.
+    category: data-preparation
+    keywords: [DICOM, protocol, comparison, validation, schema, metadata]
     legacy_domain: dicompare.neurodesk.org
     runtime: react-vite
     model_manifest: null
@@ -128,6 +155,8 @@ apps:
     path: deface
     title: Deface
     description: Privacy-preserving MRI defacing entirely in the browser.
+    category: data-preparation
+    keywords: [defacing, anonymisation, anonymization, privacy, MRI, de-identification]
     legacy_domain: niivue.github.io/deface
     runtime: vite-webgpu
     model_manifest: models/deface.manifest.json
@@ -145,6 +174,8 @@ apps:
     path: easy-mp2rage
     title: Easy MP2RAGE T1 Map
     description: Browser-native MP2RAGE T1 mapping, B1 correction, and UNI denoising.
+    category: quantitative-imaging
+    keywords: [MP2RAGE, T1 mapping, B1 correction, UNI, denoising, MRI]
     legacy_domain: thomshaw92.github.io/Easy-MP2RAGE-T1-Map
     runtime: rust-wasm
     model_manifest: null
@@ -162,6 +193,8 @@ apps:
     path: niimath
     title: NiiMath
     description: Interactive browser-native neuroimaging maths and visualization.
+    category: quantitative-imaging
+    keywords: [NIfTI, image maths, image processing, visualization, MRI, statistics]
     legacy_domain: niivue.github.io/niivue-niimath
     runtime: vite-wasm
     model_manifest: models/niimath.manifest.json
@@ -179,6 +212,8 @@ apps:
     path: dicom2vid
     title: DICOM2Vid
     description: Convert DICOM, NIfTI, or MGZ volumes into scrolling videos in the browser.
+    category: data-preparation
+    keywords: [DICOM, NIfTI, MGZ, video, conversion, volume]
     legacy_domain: thomshaw92.github.io/DICOM2Vid
     runtime: static-esm
     model_manifest: null
@@ -196,6 +231,8 @@ apps:
     path: browserqc
     title: BrowserQC
     description: Automated browser-native MRI segmentation and image-quality metrics.
+    category: quality-annotation
+    keywords: [quality control, QC, MRI, segmentation, metrics, review]
     legacy_domain: neurolabusc.github.io/BrowserQC
     runtime: vite-webgpu
     model_manifest: models/browserqc.manifest.json
@@ -213,6 +250,8 @@ apps:
     path: surfannotate
     title: SurfAnnotate
     description: Cortical surface viewer with manual ROI delineation and vertex selection.
+    category: quality-annotation
+    keywords: [cortical surface, annotation, ROI, mesh, vertex, FreeSurfer]
     legacy_domain: null
     runtime: vite-webgpu
     model_manifest: null
