@@ -1,5 +1,11 @@
 # dicompare
 
+## 0.11.4
+
+### Patch Changes
+
+- Align the application interfaces with the Neurodesk design system and point app source links at the webapps monorepo.
+
 ## 0.11.3
 
 ### Patch Changes

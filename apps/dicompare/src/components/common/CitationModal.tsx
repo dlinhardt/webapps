@@ -14,7 +14,7 @@ interface CitationModalProps {
   };
 }
 
-const CITATION_TEXT = `Ashley Wilton Stewart, Gabriele Amorosino, Jelle Veraart, Anibal S. Heinsfeld, Steffen Bollmann, Franco Pestilli. dicompare v${VERSION} [Computer software]. https://github.com/astewartau/dicompare-web`;
+const CITATION_TEXT = `Ashley Wilton Stewart, Gabriele Amorosino, Jelle Veraart, Anibal S. Heinsfeld, Steffen Bollmann, Franco Pestilli. dicompare v${VERSION} [Computer software]. https://github.com/neurodesk/webapps/tree/main/apps/dicompare`;
 
 const copyText = async (text: string, setCopied: (v: boolean) => void) => {
   try {
@@ -143,12 +143,12 @@ const CitationModal: React.FC<CitationModalProps> = ({ isOpen, onClose, schema }
             <div className="mt-2 text-sm text-content-secondary space-y-1">
               <p>
                 <a
-                  href="https://github.com/astewartau/dicompare-web"
+                  href="https://github.com/neurodesk/webapps/tree/main/apps/dicompare"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-brand-600 hover:text-brand-700 underline"
                 >
-                  github.com/astewartau/dicompare-web
+                  github.com/neurodesk/webapps/tree/main/apps/dicompare
                 </a>
                 <span className="text-content-tertiary"> — web application</span>
               </p>

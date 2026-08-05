@@ -11,10 +11,11 @@ Try out [this repository in a live demo](https://niivue.github.io/niivue-niimath
 You can host your own instance locally, allowing you to tume this distribution.
 
 ```
-git clone https://github.com/niivue/niivue-niimath
-cd niivue-niimath
-npm install
-npm run dev
+git clone https://github.com/neurodesk/webapps.git
+cd webapps
+corepack enable
+pnpm install
+pnpm --filter niimath dev
 ```
 
 ### Commands

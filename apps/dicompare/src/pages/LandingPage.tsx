@@ -46,7 +46,7 @@ const LandingPage: React.FC = () => {
               <span>More Apps</span>
             </a>
             <a
-              href="https://github.com/astewartau/dicompare-web"
+              href="https://github.com/neurodesk/webapps/tree/main/apps/dicompare"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 px-2 py-2 rounded-lg text-sm text-content-secondary hover:text-content-primary hover:bg-surface-secondary transition-colors"
@@ -165,7 +165,7 @@ const LandingPage: React.FC = () => {
             </div>
             <div className="flex items-center gap-6 text-sm">
               <a
-                href="https://github.com/astewartau/dicompare-web"
+                href="https://github.com/neurodesk/webapps/tree/main/apps/dicompare"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-content-secondary hover:text-content-primary transition-colors"
@@ -173,7 +173,7 @@ const LandingPage: React.FC = () => {
                 GitHub
               </a>
               <a
-                href="https://github.com/astewartau/dicompare-web/issues"
+                href="https://github.com/neurodesk/webapps/issues"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-content-secondary hover:text-content-primary transition-colors"

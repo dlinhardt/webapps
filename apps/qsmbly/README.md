@@ -31,9 +31,11 @@ QSMbly's QSM algorithms are provided by [QSM.rs](https://github.com/astewartau/Q
 
 ### Option 2: Run Locally
 ```bash
-git clone https://github.com/astewartau/qsmbly.git
-cd qsmbly
-./run.sh
+git clone https://github.com/neurodesk/webapps.git
+cd webapps
+corepack enable
+pnpm install
+pnpm --filter qsmbly dev
 # Open http://localhost:8080
 ```
 
@@ -117,5 +119,5 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 ## Issues & Support
 
-- **Bug Reports**: [GitHub Issues](https://github.com/astewartau/qsmbly/issues)
-- **Feature Requests**: [GitHub Discussions](https://github.com/astewartau/qsmbly/discussions)
+- **Bug Reports**: [GitHub Issues](https://github.com/neurodesk/webapps/issues)
+- **Feature Requests**: [GitHub Discussions](https://github.com/neurodesk/webapps/discussions)

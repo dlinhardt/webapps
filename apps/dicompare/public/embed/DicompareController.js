@@ -2,7 +2,7 @@
  * DicompareController - Manages DICOM validation via dicompare/Pyodide.
  *
  * Provided by dicompare-web for embedding in third-party tools.
- * See: https://github.com/astewartau/dicompare-web
+ * See: https://github.com/neurodesk/webapps/tree/main/apps/dicompare
  *
  * Usage:
  *   import { DicompareController } from 'https://dicompare.neurodesk.org/embed/DicompareController.js';

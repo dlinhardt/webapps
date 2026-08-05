@@ -33,7 +33,7 @@ For the command-line interface (CLI) or Python API, see the [`dicompare` pip pac
 
 ## Desktop App
 
-For offline use or better performance, download the desktop app from [GitHub Releases](https://github.com/astewartau/dicompare-web/releases):
+For offline use or better performance, download the desktop app from [GitHub Releases](https://github.com/neurodesk/webapps/releases):
 
 - **Windows**: `.exe` installer or portable version
 - **macOS**: `.dmg` disk image
@@ -239,4 +239,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 - [dicompare Python Package](https://github.com/astewartau/dicompare-pip) — Core engine, CLI, and Python API
 - [Live App (Neurodesk)](https://dicompare.neurodesk.org/)
 - [Live App (Brainlife)](https://brainlife.io/dicompare)
-- [Report Issues](https://github.com/astewartau/dicompare-web/issues)
+- [Report Issues](https://github.com/neurodesk/webapps/issues)

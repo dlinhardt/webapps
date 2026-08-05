@@ -25,7 +25,7 @@ qc = ["matplotlib>=3.4"]
 easy-mp2rage-t1map = "mp2rage_t1.cli:main"
 
 [project.urls]
-"Repository" = "https://github.com/thomshaw92/Easy-MP2RAGE-T1-Map"
+"Repository" = "https://github.com/neurodesk/webapps/tree/main/apps/easy-mp2rage"
 "Original MATLAB" = "https://github.com/JosePMarques/MP2RAGE-related-scripts"
 
 [tool.setuptools]

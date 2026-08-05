@@ -7,7 +7,7 @@ authors:
     email: t.shaw@uq.edu.au
     affiliation: University of Queensland
 license: GPL-3.0-or-later
-repository-code: "https://github.com/thomshaw92/Easy-MP2RAGE-T1-Map"
+repository-code: "https://github.com/neurodesk/webapps/tree/main/apps/easy-mp2rage"
 references:
   - type: article
     authors:

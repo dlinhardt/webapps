@@ -1,5 +1,11 @@
 # musclemap
 
+## 1.2.40
+
+### Patch Changes
+
+- Align the application interfaces with the Neurodesk design system and point app source links at the webapps monorepo.
+
 ## 1.2.39
 
 ### Patch Changes

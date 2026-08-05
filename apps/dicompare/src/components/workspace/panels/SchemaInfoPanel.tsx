@@ -368,7 +368,7 @@ const SchemaInfoPanel: React.FC<SchemaInfoPanelProps> = ({
       '*Submitted via [dicompare](https://dicompare.neurodesk.org)*',
     ].join('\n');
 
-    const url = `https://github.com/astewartau/dicompare-web/issues/new?` +
+    const url = `https://github.com/neurodesk/webapps/issues/new?` +
       `title=${encodeURIComponent(title)}` +
       `&body=${encodeURIComponent(body)}` +
       `&labels=${encodeURIComponent('schema-submission')}`;

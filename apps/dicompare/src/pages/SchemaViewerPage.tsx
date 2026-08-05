@@ -366,7 +366,7 @@ const SchemaViewerPage: React.FC = () => {
               <span className="hidden sm:inline">More Apps</span>
             </a>
             <a
-              href="https://github.com/astewartau/dicompare-web"
+              href="https://github.com/neurodesk/webapps/tree/main/apps/dicompare"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 px-2 py-2 rounded-lg text-sm text-content-secondary hover:text-content-primary hover:bg-surface-secondary transition-colors"

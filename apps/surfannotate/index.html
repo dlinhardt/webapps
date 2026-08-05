@@ -117,15 +117,30 @@
 
     <div id="app">
       <div id="controls">
-        <section class="panel">
-          <h2>Surfaces</h2>
-          <label class="file-field">
-            <span>Add surface</span>
+        <section class="panel workflow-panel surface-panel">
+          <div class="panel-heading">
+            <span class="panel-step" aria-hidden="true">01</span>
+            <div>
+              <h2>Surfaces</h2>
+              <p>Load the geometry you want to annotate.</p>
+            </div>
+          </div>
+          <label class="file-field upload-field">
             <!-- Deliberately unfiltered: FreeSurfer surfaces have irregular
                  names (lh.pial, lh.white, lh.pial.T1, surf.gii.gz), and an
                  accept list greys out exactly the files people want. The
                  loader validates instead. -->
             <input type="file" id="surfaceInput" multiple />
+            <span class="upload-visual">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+              </svg>
+              <span class="upload-copy">
+                <strong>Choose surface files</strong>
+                <small>or drop them onto the viewer</small>
+              </span>
+              <span class="upload-action">Browse</span>
+            </span>
           </label>
           <ul class="layer-list" id="surfaceList" aria-label="Loaded surfaces"></ul>
           <p class="hint">
@@ -134,11 +149,26 @@
           </p>
         </section>
 
-        <section class="panel">
-          <h2>Overlays</h2>
-          <label class="file-field">
-            <span>Add overlay</span>
+        <section class="panel workflow-panel overlay-panel">
+          <div class="panel-heading">
+            <span class="panel-step" aria-hidden="true">02</span>
+            <div>
+              <h2>Overlays</h2>
+              <p>Add scalar or label data to the active surface.</p>
+            </div>
+          </div>
+          <label class="file-field upload-field">
             <input type="file" id="overlayInput" multiple disabled />
+            <span class="upload-visual">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+              </svg>
+              <span class="upload-copy">
+                <strong>Choose overlay files</strong>
+                <small>available after a surface is loaded</small>
+              </span>
+              <span class="upload-action">Browse</span>
+            </span>
           </label>
           <ul class="layer-list" id="overlayList" aria-label="Overlays on the shown surface"></ul>
           <p class="hint">Curvature, thickness, .annot, .label.gii, .shape.gii, CIFTI .dscalar.nii.</p>
@@ -172,8 +202,14 @@
           </div>
         </section>
 
-        <section class="panel">
-          <h2>Tool</h2>
+        <section class="panel workflow-panel tool-panel">
+          <div class="panel-heading">
+            <span class="panel-step" aria-hidden="true">03</span>
+            <div>
+              <h2>Annotate</h2>
+              <p>Trace a closed region or mark individual vertices.</p>
+            </div>
+          </div>
           <div class="segmented" role="radiogroup" aria-label="Drawing tool">
             <button type="button" id="modeRoi" class="active" role="radio" aria-checked="true">Closed ROI</button>
             <button type="button" id="modePoints" role="radio" aria-checked="false">Points</button>
@@ -184,7 +220,7 @@
               Click to place border points around the region. Nothing is traced
               until you close the ROI, so you can rotate freely while placing them.
             </p>
-            <p class="hint note">
+            <p class="hint note instruction-note">
               Points are joined <strong>in the order you place them</strong>, not by
               which are nearest each other. Work consistently along the border in
               one direction. <strong>Close ROI</strong> joins the last point back to
@@ -239,8 +275,14 @@
           </div>
         </section>
 
-        <section class="panel">
-          <h2>ROIs</h2>
+        <section class="panel workflow-panel roi-panel">
+          <div class="panel-heading">
+            <span class="panel-step" aria-hidden="true">04</span>
+            <div>
+              <h2>Saved ROIs</h2>
+              <p>Name, organise and revisit completed regions.</p>
+            </div>
+          </div>
           <label class="file-field">
             <span>ROI name</span>
             <input type="text" id="roiName" value="roi" maxlength="64"
@@ -250,20 +292,25 @@
             <button type="button" id="saveRoi" disabled>Save filled region</button>
           </div>
           <ul class="layer-list" id="roiList" aria-label="Completed ROIs"></ul>
-          <p class="hint">
-            ROIs partition the surface: each is drawn on what the ROIs above it have
-            left, so no vertex belongs to two. Its border then works like the edge of a
-            flat surface — the next ROI can be closed against it, on folded surfaces too.
-            <br />Editing one re-derives the ROIs below it, so moving a shared boundary
-            moves both sides.
-            <br /><strong>&#9650;&#9660;</strong> reorder — later ROIs give way to
-            earlier ones. <strong>&#9998;</strong> reopens an ROI to adjust its border.
-            Click a name to export it instead of the region being drawn.
-          </p>
+          <details class="workflow-help">
+            <summary>How ROI partitioning works</summary>
+            <p>
+              Each ROI is drawn on the vertices left by the ROIs above it, so no vertex
+              belongs to two regions. Editing one re-derives the regions below it.
+              Use <strong>&#9650;&#9660;</strong> to set priority, <strong>&#9998;</strong> to
+              reopen a border, or select a name to export that ROI.
+            </p>
+          </details>
         </section>
 
-        <section class="panel">
-          <h2>Export</h2>
+        <section class="panel workflow-panel export-panel">
+          <div class="panel-heading">
+            <span class="panel-step" aria-hidden="true">05</span>
+            <div>
+              <h2>Export</h2>
+              <p>Download the active region in your preferred format.</p>
+            </div>
+          </div>
           <p class="hint" id="exportNameHint">Used in the file name and inside the file.</p>
           <div class="button-row">
             <button type="button" id="exportLabel" disabled>FreeSurfer .label</button>
@@ -279,8 +326,14 @@
       <div id="viewer">
         <canvas id="gl"></canvas>
         <div id="dropHint" class="drop-hint">
-          <strong>Drop a surface here</strong>
-          <span>or use the file picker. Nothing is uploaded — everything runs in this browser.</span>
+          <span class="drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48">
+              <path d="M24 31V11m0 0-7 7m7-7 7 7M12 27v7a4 4 0 0 0 4 4h16a4 4 0 0 0 4-4v-7" />
+            </svg>
+          </span>
+          <strong>Drop a cortical surface here</strong>
+          <span>FreeSurfer, GIfTI and MZ3 files are supported.</span>
+          <small>Processed locally in this browser — nothing is uploaded.</small>
         </div>
       </div>
 

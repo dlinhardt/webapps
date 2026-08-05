@@ -7,7 +7,7 @@
  * via importScripts() from CDN when there's no bundler.
  *
  * Provided by dicompare-web for embedding in third-party tools.
- * See: https://github.com/astewartau/dicompare-web
+ * See: https://github.com/neurodesk/webapps/tree/main/apps/dicompare
  */
 
 const PYODIDE_CDN = 'https://cdn.jsdelivr.net/pyodide/v0.27.0/full/';

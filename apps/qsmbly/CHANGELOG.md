@@ -1,5 +1,11 @@
 # qsmbly
 
+## 0.18.3
+
+### Patch Changes
+
+- Align the application interfaces with the Neurodesk design system and point app source links at the webapps monorepo.
+
 ## 0.18.2
 
 ### Patch Changes

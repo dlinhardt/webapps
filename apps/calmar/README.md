@@ -71,7 +71,7 @@ Drop a structural T1; the app:
    Model: manifest asset `lnm-synthstrip`, an ONNX FP32 export of
    [FreeSurfer SynthStrip](https://surfer.nmr.mgh.harvard.edu/docs/synthstrip/)
    (`SynthStrip-Hoopes2022-Apache-2.0`) ported from
-   [`neurodesk/vesselboost-webapp`](https://github.com/neurodesk/vesselboost-webapp).
+   [`apps/vesselboost`](https://github.com/neurodesk/webapps/tree/main/apps/vesselboost).
    See [Brain extraction model provenance](#brain-extraction-model-provenance)
    for the exact hosted asset, checksum, and browser wrapper contract.
 2. On click of "Run lesion segmentation", runs **SynthStroke baseline**
@@ -611,7 +611,7 @@ mask + summary stay in sync with the controls.
 
 The browser scaffolding (NiiVue viewer integration, ONNX Runtime Web worker
 pipeline, NIfTI/DICOM I/O, GitHub Pages deploy workflow) is adapted from
-[`neurodesk/spinalcordtoolbox-webapp`](https://github.com/neurodesk/spinalcordtoolbox-webapp).
+[`apps/spinalcordtoolbox`](https://github.com/neurodesk/webapps/tree/main/apps/spinalcordtoolbox).
 See `THIRD_PARTY_NOTICES.md` (added in Phase 1) for full credit.
 
 Pipeline-specific dependencies (added incrementally):

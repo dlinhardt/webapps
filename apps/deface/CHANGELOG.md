@@ -1,5 +1,11 @@
 # deface
 
+## 1.0.3
+
+### Patch Changes
+
+- Align the application interfaces with the Neurodesk design system and point app source links at the webapps monorepo.
+
 ## 1.0.2
 
 ### Patch Changes

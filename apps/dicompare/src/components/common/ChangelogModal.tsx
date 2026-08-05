@@ -17,8 +17,8 @@ interface Release {
   html_url: string;
 }
 
-const RELEASES_API = 'https://api.github.com/repos/astewartau/dicompare-web/releases?per_page=30';
-const RELEASES_PAGE = 'https://github.com/astewartau/dicompare-web/releases';
+const RELEASES_API = 'https://api.github.com/repos/neurodesk/webapps/releases?per_page=100';
+const RELEASES_PAGE = 'https://github.com/neurodesk/webapps/releases';
 
 // Cache across opens within a session so we don't refetch (GitHub's anonymous
 // API is rate-limited to 60 requests/hour per IP).
@@ -58,8 +58,9 @@ const ChangelogModal: React.FC<ChangelogModalProps> = ({ isOpen, onClose }) => {
       })
       .then((data: Release[]) => {
         if (cancelled) return;
-        cachedReleases = data;
-        setReleases(data);
+        const appReleases = data.filter(({ tag_name }) => tag_name.startsWith('dicompare-v'));
+        cachedReleases = appReleases;
+        setReleases(appReleases);
       })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load changelog.'); })
       .finally(() => { if (!cancelled) setLoading(false); });

@@ -34,6 +34,40 @@ test('the shell mounts with the shared workspace and a link back to the catalog'
   await expect(moreApps).toHaveAttribute('href', '../');
 });
 
+test('the workspace uses the Neurodesk palette and accessible custom upload controls', async ({ page }) => {
+  await expect(page.locator('.workflow-panel')).toHaveCount(5);
+  await expect(page.locator('.upload-visual')).toHaveCount(2);
+
+  const design = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const header = getComputedStyle(document.querySelector('.nd-imaging-app-header'));
+    const viewerHint = getComputedStyle(document.querySelector('.drop-hint'));
+    const fileInput = document.getElementById('surfaceInput');
+    const fileStyle = getComputedStyle(fileInput);
+    return {
+      primary: root.getPropertyValue('--nd-brand-primary').trim(),
+      menu: root.getPropertyValue('--nd-brand-menu').trim(),
+      headerBackground: header.backgroundColor,
+      headerText: header.color,
+      viewerHintText: viewerHint.color,
+      fileInputWidth: fileInput.getBoundingClientRect().width,
+      fileInputClip: fileStyle.clipPath
+    };
+  });
+
+  expect(design.primary).toBe('#6aa329');
+  expect(design.menu).toBe('#0c0e0a');
+  expect(design.headerBackground).toBe('rgb(12, 14, 10)');
+  expect(design.headerText).toBe('rgb(255, 255, 255)');
+  expect(design.viewerHintText).toBe('rgb(255, 255, 255)');
+  expect(design.fileInputWidth).toBeLessThanOrEqual(1);
+  expect(design.fileInputClip).toBe('inset(50%)');
+
+  // The styled label remains a native file-input activation target.
+  await expect(page.locator('#surfaceInput')).toBeEnabled();
+  await expect(page.locator('#overlayInput')).toBeDisabled();
+});
+
 test('the empty canvas shows no phantom loading text', async ({ page }) => {
   // NiiVue paints "loading ..." over an empty canvas unless the option is cleared.
   expect(await page.evaluate(() => window.__surfannotate.nv.opts.loadingText)).toBe('');
