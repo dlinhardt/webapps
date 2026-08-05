@@ -1,6 +1,6 @@
 {
   "name": "qsmbly",
-  "version": "0.18.4",
+  "version": "0.23.0",
   "description": "Quantitative Susceptibility Mapping in WebAssembly",
   "type": "module",
   "scripts": {
@@ -30,6 +30,7 @@
         "niivue",
         "wasm",
         "QSMbly.png",
+        "icon.svg",
         "favicon.ico"
       ]
     }

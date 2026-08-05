@@ -1,5 +1,11 @@
 # qsmbly
 
+## 0.23.0
+
+### Minor Changes
+
+- Sync with upstream QSMbly v0.23.0: adopt the QSMxT ecosystem landing flow, update QSM.rs to v0.23.0 and qsmxt-config to v9.11.0, add six FANSI-family dipole inversions, and add TFI reconstruction.
+
 ## 0.18.4
 
 ### Patch Changes

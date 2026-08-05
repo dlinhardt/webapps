@@ -339,22 +339,18 @@ pub fn tikhonov_wasm(
 // WASM Exports: Background Field Removal
 // ============================================================================
 
-/// Build `VsharpParams` from an explicit list of mm radii (the wasm API still
-/// takes radii; qsm-core now derives them from radius *factors*).
+/// Build `VsharpParams` from an explicit list of mm radii.
 ///
-/// qsm-core regenerates the radii as: `start = max_radius_factor * min_voxel`,
-/// stepping down by `step = min_radius_factor * max_voxel`. So we map the
-/// largest radius to `max_radius_factor` and the list's spacing (V-SHARP radii
-/// are uniformly spaced) to `min_radius_factor`.
+/// qsm-core takes absolute mm radii directly: `max_radius` is the largest
+/// radius and `min_radius` is the step between successive radii (V-SHARP radii
+/// are uniformly spaced), which is also the smallest kernel.
 fn vsharp_params_from_radii(
-    radii: &[f64], threshold: f64, vsx: f64, vsy: f64, vsz: f64,
+    radii: &[f64], threshold: f64, _vsx: f64, _vsy: f64, _vsz: f64,
 ) -> qsm_core::bgremove::VsharpParams {
     let d = qsm_core::bgremove::VsharpParams::default();
     if radii.is_empty() {
         return qsm_core::bgremove::VsharpParams { threshold, ..d };
     }
-    let min_v = vsx.min(vsy).min(vsz);
-    let max_v = vsx.max(vsy).max(vsz);
     let max_r = radii.iter().cloned().fold(f64::MIN, f64::max);
     // Recover the step from the two largest radii; a single-radius list has no
     // step, so fall back to the radius itself (one-shot SMV).
@@ -367,8 +363,8 @@ fn vsharp_params_from_radii(
     };
     qsm_core::bgremove::VsharpParams {
         threshold,
-        max_radius_factor: max_r / min_v,
-        min_radius_factor: step / max_v,
+        max_radius: max_r,
+        min_radius: step,
     }
 }
 
@@ -401,10 +397,9 @@ pub fn sharp_wasm(
 
     let grid = qsm_core::Grid::new(nx, ny, nz, vsx, vsy, vsz);
     let field_norm: Vec<f64> = field.iter().map(|&v| v * scale).collect();
-    let radius_factor = radius / vsx.min(vsy).min(vsz);
     let (local_field, eroded_mask) = qsm_core::bgremove::sharp(
         &field_norm, mask, &grid,
-        &qsm_core::bgremove::SharpParams { threshold, radius_factor },
+        &qsm_core::bgremove::SharpParams { threshold, radius },
     );
 
     // Convert back and combine into single output
@@ -1252,7 +1247,7 @@ pub fn ismv_wasm(
     let grid = qsm_core::Grid::new(nx, ny, nz, vsx, vsy, vsz);
     let field_norm: Vec<f64> = field.iter().map(|&v| v * scale).collect();
     let ismv_params = qsm_core::bgremove::IsmvParams {
-        tol, max_iter, radius_factor: radius / vsx.max(vsy).max(vsz),
+        tol, max_iter, radius,
     };
     let (local_field, eroded_mask) = qsm_core::bgremove::ismv(
         &field_norm, mask, &grid, &ismv_params, |_, _| {}
@@ -1286,7 +1281,7 @@ pub fn ismv_wasm_with_progress(
     let field_norm: Vec<f64> = field.iter().map(|&v| v * scale).collect();
     let callback = progress_callback.clone();
     let ismv_params = qsm_core::bgremove::IsmvParams {
-        tol, max_iter, radius_factor: radius / vsx.max(vsy).max(vsz),
+        tol, max_iter, radius,
     };
     let (local_field, eroded_mask) = qsm_core::bgremove::ismv(
         &field_norm, mask, &grid, &ismv_params,
@@ -2742,6 +2737,173 @@ pub fn r2star_arlo_wasm(
 // Algorithm Default Parameters
 // ============================================================================
 
+// ============================================================================
+// FANSI-family dipole inversions (NDI, FANSI nlTV/nlTGV, L1-QSM, WH-QSM, HD-QSM)
+//
+// Same convention as the other inversions: Hz->ppm normalize the input field via
+// hz_to_ppm_scale(field_strength), run in ppm (phase_scale stays at the qsm-core
+// default of 1.0), then convert the result back. Only the `_with_progress` variant
+// is exposed (the worker always uses it).
+// ============================================================================
+
+/// NDI (Nonlinear Dipole Inversion) with progress callback.
+#[wasm_bindgen]
+pub fn ndi_wasm_with_progress(
+    local_field: &[f64],
+    mask: &[u8],
+    nx: usize, ny: usize, nz: usize,
+    vsx: f64, vsy: f64, vsz: f64,
+    bx: f64, by: f64, bz: f64,
+    tau: f64,
+    alpha: f64,
+    max_iter: usize,
+    field_strength: f64,
+    progress_callback: &js_sys::Function,
+) -> Vec<f64> {
+    let scale = hz_to_ppm_scale(field_strength);
+    console_log!("WASM NDI: {}x{}x{}, tau={:.3}, alpha={:.2e}, max_iter={}", nx, ny, nz, tau, alpha, max_iter);
+    let grid = qsm_core::Grid::new(nx, ny, nz, vsx, vsy, vsz);
+    let params = qsm_core::inversion::NdiParams { tau, alpha, max_iter, ..Default::default() };
+    let field_norm: Vec<f64> = local_field.iter().map(|&v| v * scale).collect();
+    let cb = progress_callback.clone();
+    let chi = qsm_core::inversion::ndi(&field_norm, mask, &grid, (bx, by, bz), &params, |c, t| {
+        let _ = cb.call2(&JsValue::null(), &JsValue::from(c as u32), &JsValue::from(t as u32));
+    });
+    chi.iter().map(|&v| v / scale).collect()
+}
+
+/// FANSI nonlinear TV / TGV with progress callback (`is_tgv` selects nlTGV).
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn fansi_wasm_with_progress(
+    local_field: &[f64],
+    mask: &[u8],
+    nx: usize, ny: usize, nz: usize,
+    vsx: f64, vsy: f64, vsz: f64,
+    bx: f64, by: f64, bz: f64,
+    alpha1: f64,
+    mu1: f64,
+    mu2: f64,
+    alpha0: f64,
+    mu0: f64,
+    max_iter: usize,
+    tol_update: f64,
+    is_tgv: bool,
+    field_strength: f64,
+    progress_callback: &js_sys::Function,
+) -> Vec<f64> {
+    let scale = hz_to_ppm_scale(field_strength);
+    console_log!("WASM FANSI (tgv={}): {}x{}x{}, alpha1={:.2e}, max_iter={}", is_tgv, nx, ny, nz, alpha1, max_iter);
+    let grid = qsm_core::Grid::new(nx, ny, nz, vsx, vsy, vsz);
+    let params = qsm_core::inversion::FansiParams {
+        alpha1, mu1, mu2, alpha0, mu0, max_iter, tol_update, is_tgv, ..Default::default()
+    };
+    let field_norm: Vec<f64> = local_field.iter().map(|&v| v * scale).collect();
+    let cb = progress_callback.clone();
+    let chi = qsm_core::inversion::fansi(&field_norm, mask, &grid, (bx, by, bz), &params, |c, t| {
+        let _ = cb.call2(&JsValue::null(), &JsValue::from(c as u32), &JsValue::from(t as u32));
+    });
+    chi.iter().map(|&v| v / scale).collect()
+}
+
+/// L1-QSM (L1 data-fidelity) with progress callback.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn l1qsm_wasm_with_progress(
+    local_field: &[f64],
+    mask: &[u8],
+    nx: usize, ny: usize, nz: usize,
+    vsx: f64, vsy: f64, vsz: f64,
+    bx: f64, by: f64, bz: f64,
+    alpha1: f64,
+    mu1: f64,
+    mu2: f64,
+    mu3: f64,
+    lambda: f64,
+    max_iter: usize,
+    tol_update: f64,
+    field_strength: f64,
+    progress_callback: &js_sys::Function,
+) -> Vec<f64> {
+    let scale = hz_to_ppm_scale(field_strength);
+    console_log!("WASM L1-QSM: {}x{}x{}, alpha1={:.2e}, lambda={:.3}, max_iter={}", nx, ny, nz, alpha1, lambda, max_iter);
+    let grid = qsm_core::Grid::new(nx, ny, nz, vsx, vsy, vsz);
+    let params = qsm_core::inversion::L1QsmParams {
+        alpha1, mu1, mu2, mu3, lambda, max_iter, tol_update, ..Default::default()
+    };
+    let field_norm: Vec<f64> = local_field.iter().map(|&v| v * scale).collect();
+    let cb = progress_callback.clone();
+    let chi = qsm_core::inversion::l1qsm(&field_norm, mask, &grid, (bx, by, bz), &params, |c, t| {
+        let _ = cb.call2(&JsValue::null(), &JsValue::from(c as u32), &JsValue::from(t as u32));
+    });
+    chi.iter().map(|&v| v / scale).collect()
+}
+
+/// WH-QSM (Weak-Harmonic) with progress callback.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn whqsm_wasm_with_progress(
+    local_field: &[f64],
+    mask: &[u8],
+    nx: usize, ny: usize, nz: usize,
+    vsx: f64, vsy: f64, vsz: f64,
+    bx: f64, by: f64, bz: f64,
+    alpha1: f64,
+    mu1: f64,
+    mu2: f64,
+    beta: f64,
+    muh: f64,
+    max_iter: usize,
+    tol_update: f64,
+    field_strength: f64,
+    progress_callback: &js_sys::Function,
+) -> Vec<f64> {
+    let scale = hz_to_ppm_scale(field_strength);
+    console_log!("WASM WH-QSM: {}x{}x{}, alpha1={:.2e}, beta={}, max_iter={}", nx, ny, nz, alpha1, beta, max_iter);
+    let grid = qsm_core::Grid::new(nx, ny, nz, vsx, vsy, vsz);
+    let params = qsm_core::inversion::WhQsmParams {
+        alpha1, mu1, mu2, beta, muh, max_iter, tol_update, ..Default::default()
+    };
+    let field_norm: Vec<f64> = local_field.iter().map(|&v| v * scale).collect();
+    let cb = progress_callback.clone();
+    let chi = qsm_core::inversion::whqsm(&field_norm, mask, &grid, (bx, by, bz), &params, |c, t| {
+        let _ = cb.call2(&JsValue::null(), &JsValue::from(c as u32), &JsValue::from(t as u32));
+    });
+    chi.iter().map(|&v| v / scale).collect()
+}
+
+/// HD-QSM (Hybrid two-stage L1->L2) with progress callback.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn hdqsm_wasm_with_progress(
+    local_field: &[f64],
+    mask: &[u8],
+    nx: usize, ny: usize, nz: usize,
+    vsx: f64, vsy: f64, vsz: f64,
+    bx: f64, by: f64, bz: f64,
+    alpha_l2: f64,
+    mu1_l2: f64,
+    mu2: f64,
+    max_iter_l1: usize,
+    max_iter_l2: usize,
+    tol_update: f64,
+    field_strength: f64,
+    progress_callback: &js_sys::Function,
+) -> Vec<f64> {
+    let scale = hz_to_ppm_scale(field_strength);
+    console_log!("WASM HD-QSM: {}x{}x{}, alphaL2={:.2e}, L1={}, L2={}", nx, ny, nz, alpha_l2, max_iter_l1, max_iter_l2);
+    let grid = qsm_core::Grid::new(nx, ny, nz, vsx, vsy, vsz);
+    let params = qsm_core::inversion::HdQsmParams {
+        alpha_l2, mu1_l2, mu2, max_iter_l1, max_iter_l2, tol_update,
+    };
+    let field_norm: Vec<f64> = local_field.iter().map(|&v| v * scale).collect();
+    let cb = progress_callback.clone();
+    let chi = qsm_core::inversion::hdqsm(&field_norm, mask, &grid, (bx, by, bz), &params, |c, t| {
+        let _ = cb.call2(&JsValue::null(), &JsValue::from(c as u32), &JsValue::from(t as u32));
+    });
+    chi.iter().map(|&v| v / scale).collect()
+}
+
 // Each get_*_defaults() serializes the matching qsmxt-config config struct, whose
 // Default impl sources its values from qsm-core. qsmxt-config is the single source of
 // truth for the parameter set (field names + defaults); these bindings just hand it to
@@ -2771,7 +2933,13 @@ config_defaults!(get_resharp_defaults, qsmxt_config::config::ResharpConfig);
 config_defaults!(get_harperella_defaults, qsmxt_config::config::HarperellaConfig);
 config_defaults!(get_tikhonov_defaults, qsmxt_config::config::TikhonovConfig);
 config_defaults!(get_nltv_defaults, qsmxt_config::config::NltvConfig);
+config_defaults!(get_ndi_defaults, qsmxt_config::config::NdiConfig);
+config_defaults!(get_fansi_defaults, qsmxt_config::config::FansiConfig);
+config_defaults!(get_l1qsm_defaults, qsmxt_config::config::L1qsmConfig);
+config_defaults!(get_whqsm_defaults, qsmxt_config::config::WhqsmConfig);
+config_defaults!(get_hdqsm_defaults, qsmxt_config::config::HdqsmConfig);
 config_defaults!(get_medi_defaults, qsmxt_config::config::MediConfig);
+config_defaults!(get_tfi_defaults, qsmxt_config::config::TfiConfig);
 config_defaults!(get_qsmart_defaults, qsmxt_config::config::QsmartConfig);
 config_defaults!(get_romeo_defaults, qsmxt_config::config::RomeoConfig);
 config_defaults!(get_mcpc3ds_defaults, qsmxt_config::config::Mcpc3dsConfig);
