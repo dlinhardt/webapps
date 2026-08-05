@@ -15,6 +15,7 @@ const { ensureHostedAsset } = require('./hosted-assets.cjs');
 const ROOT = path.resolve(__dirname, '..');
 const vertebraeTask = manifest.tasks.find(task => task.id === 'vertebrae');
 const pam50LevelsAsset = vertebraeTask?.templateAssets?.find(asset => asset.id === 'pam50-levels');
+const unitOnly = process.argv.includes('--unit-only');
 
 {
   const modelText = fs.readFileSync(path.join(ROOT, 'web/models/c2c3_disc_models/t2_model.yml'), 'utf8');
@@ -40,6 +41,11 @@ const pam50LevelsAsset = vertebraeTask?.templateAssets?.find(asset => asset.id =
 }
 
 (async () => {
+  if (unitOnly) {
+    console.log('Vertebrae unit tests passed (batch fixture parity skipped)');
+    return;
+  }
+
   await ensureSctBatchFixtures(ROOT);
   const { path: pam50LevelsPath } = await ensureHostedAsset(ROOT, pam50LevelsAsset);
   const browserOutputPath = path.join(ROOT, 'test_data/batch_t2_label_vertebrae/browser_output.nii.gz');

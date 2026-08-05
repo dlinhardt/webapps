@@ -79,7 +79,10 @@ jobs:
         if: matrix.python_reference
         run: pip install -r apps/${{ matrix.app }}/requirements.txt nibabel
       - name: Test app
-        run: pnpm --filter ${{ matrix.app }} test
+        env:
+          APP: ${{ matrix.app }}
+          RELEASE_TEST: ${{ matrix.release_test }}
+        run: pnpm --filter "$APP" run "$RELEASE_TEST"
       - name: Build standalone app bundle
         run: pnpm --filter ${{ matrix.app }} build
       - name: Install browser

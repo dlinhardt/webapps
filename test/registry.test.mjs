@@ -69,6 +69,34 @@ test('CI app-test matrix covers the complete catalog', async () => {
   assert.match(workflow.jobs['app-tests'].strategy.matrix, /fromJSON\(needs\.app-plan\.outputs\.apps\)/);
 });
 
+test('release workflow runs each app\'s declared release test script', async () => {
+  const registry = await loadAppsRegistry();
+  for (const app of registry.apps) {
+    const packageJson = JSON.parse(
+      await readFile(join(repoRoot, 'apps', app.id, 'package.json'), 'utf8'),
+    );
+    const releaseTest = app.ci.release_test ?? 'test';
+    assert.ok(packageJson.scripts?.[releaseTest], `${app.id} must define ${releaseTest}`);
+  }
+
+  const workflow = parse(await readFile(join(repoRoot, '.github/workflows/release.yml'), 'utf8'));
+  const step = workflow.jobs.verify.steps.find(({ name }) => name === 'Test app');
+  assert.equal(step.env.RELEASE_TEST, '${{ matrix.release_test }}');
+  assert.match(step.run, /run \"\$RELEASE_TEST\"/);
+});
+
+test('SpinalCordToolbox routine releases exclude generated batch parity and worker inference', async () => {
+  const packageJson = JSON.parse(
+    await readFile(join(repoRoot, 'apps', 'spinalcordtoolbox', 'package.json'), 'utf8'),
+  );
+  const releaseTest = packageJson.scripts['test:release'];
+  assert.match(releaseTest, /test:vertebrae:unit/);
+  assert.match(releaseTest, /test:batch:webapp/);
+  assert.doesNotMatch(releaseTest, /test:fixtures(?:\s|$)/);
+  assert.doesNotMatch(releaseTest, /test:inference:e2e/);
+  assert.doesNotMatch(releaseTest, /test:worker:protocol/);
+});
+
 test('every declared scientific asset manifest satisfies its selected schema', async () => {
   const registry = await loadAppsRegistry();
   const errors = [];

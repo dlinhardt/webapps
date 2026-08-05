@@ -19,6 +19,7 @@ function matrixEntry(app) {
     rust_wasm: toolchains.has('rust-wasm'),
     python_reference: toolchains.has('python-reference'),
     shared_runtime: app.ci.shared_runtime,
+    release_test: app.ci.release_test ?? 'test',
   };
 }
 

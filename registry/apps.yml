@@ -78,6 +78,7 @@ apps:
       toolchains: [node]
       shared_runtime: true
       release: true
+      release_test: test:release
   - id: calmar
     path: calmar
     title: CALMaR

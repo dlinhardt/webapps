@@ -21,6 +21,7 @@ const TOOLCHAINS = new Set(['node', 'rust-wasm', 'python-reference']);
 const ASSET_MANIFEST_SCHEMAS = new Set(['scientific-assets-v1', 'pipeline-assets-v1']);
 const PINNED_SOURCE = /^[^/\s]+\/[^@\s]+@[0-9a-f]{40}$/;
 const GA4_MEASUREMENT_ID = /^G-[A-Z0-9]+$/;
+const PACKAGE_SCRIPT = /^[a-z][a-z0-9:-]*$/;
 
 export async function loadAppsRegistry(path = registryPath) {
   const registry = parse(await readFile(path, 'utf8'));
@@ -86,6 +87,9 @@ export async function loadAppsRegistry(path = registryPath) {
     }
     if (typeof app.ci?.shared_runtime !== 'boolean' || typeof app.ci?.release !== 'boolean') {
       errors.push(`ci.shared_runtime and ci.release must be booleans for ${app.id}`);
+    }
+    if (app.ci?.release_test !== undefined && !PACKAGE_SCRIPT.test(app.ci.release_test)) {
+      errors.push(`invalid ci.release_test for ${app.id}: ${app.ci.release_test}`);
     }
     if (app.model_manifest === null && app.asset_manifest_schema !== null) {
       errors.push(`asset_manifest_schema must be null when ${app.id} has no model_manifest`);

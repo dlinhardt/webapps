@@ -20,7 +20,7 @@ if (only && only !== 'affected') {
   changedPaths = [...ids].map((id) => `apps/${id}/package.json`);
 }
 const plan = createAppPlan(registry, changedPaths);
-const emptyMatrix = { include: [{ app: '__none__', path: '', runtime: '', rust_wasm: false, python_reference: false, shared_runtime: false }] };
+const emptyMatrix = { include: [{ app: '__none__', path: '', runtime: '', rust_wasm: false, python_reference: false, shared_runtime: false, release_test: 'test' }] };
 const outputs = {
   apps: JSON.stringify(plan.apps.include.length ? plan.apps : emptyMatrix),
   shared_apps: JSON.stringify(plan.sharedApps.include.length ? plan.sharedApps : emptyMatrix),

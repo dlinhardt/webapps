@@ -43,7 +43,15 @@ test('toolchain facts are carried into generated matrices', async () => {
     rust_wasm: true,
     python_reference: false,
     shared_runtime: false,
+    release_test: 'test',
   }]);
+});
+
+test('release matrix carries an app-specific release test script', async () => {
+  const registry = await loadAppsRegistry();
+  const plan = createAppPlan(registry, ['apps/spinalcordtoolbox/package.json']);
+  assert.equal(plan.releaseApps.include[0].app, 'spinalcordtoolbox');
+  assert.equal(plan.releaseApps.include[0].release_test, 'test:release');
 });
 
 test('documentation-only changes do not spend an app-test matrix', async () => {

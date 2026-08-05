@@ -93,6 +93,7 @@ Common issues it catches:
 | `npm run test:viewer` | `ViewerController` overlay lifecycle against a fake NiiVue |
 | `npm run test:processing` | `sct-processing.js` pure-function unit tests (signal processing, segmentation utilities) |
 | `npm run test:vertebrae` | Vertebral labeling unit and fixture-focused checks: OpenCV HOG/SVM YAML parsing, PAM50 distance propagation, and multilabel Dice on `batch_t2_label_vertebrae` |
+| `npm run test:vertebrae:unit` | Fast vertebral labeling unit checks only; skips downloading/generating SCT batch fixtures and multilabel parity. |
 | `npm run test:totalspineseg` | TotalSpineSeg step-1 browser post-processing: largest-component cleanup, canal filling, landmark-based disc sequence mapping, SCT disc-point extraction, and rejected landmark guards |
 | `npm run test:totalspineseg:worker` | Heavy TotalSpineSeg worker smoke test with the real 538 MB ONNX model; verifies the browser worker emits non-empty `spine_step1` and viewer-visible `spine_discs` marker stages, but is intentionally excluded from `test:fast` |
 | `npm run test:lesion-analysis` | Browser lesion morphometry/tissue-bridge unit tests and CSV column stability |
@@ -108,11 +109,12 @@ Common issues it catches:
 | `npm run test:worker:protocol` | Worker postMessage protocol invariants (progress order, monotonicity, terminal-message uniqueness, error path) — slow |
 | `npm run test:server` | Dev server graceful restart and idle-connection concurrency |
 | `npm run test:fast` | Lint + manifest consistency + UI + compatibility + viewer + processing + vertebrae + TotalSpineSeg + lesion-analysis + inference post-processing + batch + fixtures + controllers + UI modules (no worker e2e/protocol tests) |
+| `npm run test:release` | Routine release gate: fast static/unit/runtime checks plus SCT command-mapping coverage; excludes generated batch-fixture parity and real worker inference/protocol tests. |
 | `npm test` | Full suite: `test:fast` + `test:inference:e2e` + `test:worker:protocol` + `test:server` |
 
 ## CI/CD
 
-- **Release workflow** (`.github/workflows/release.yml`): manual-only promotion that bumps version, creates the release tag, and creates/updates the GitHub release. It does not run the full `npm test` suite.
+- **Release workflow** (`../../.github/workflows/release.yml`): manual-only promotion that uses the registry-declared `test:release` gate for this app, then creates the release tag and GitHub release. Generated SCT batch parity and real worker inference remain outside routine releases.
 - **Full Test Suite workflow** (`.github/workflows/full-test-suite.yml`): manual-only test workflow that runs the full `npm test` suite (including heavy ONNX-inference tests) and publishes failed-test details in the Actions step summary.
 - **Deploy workflow** (`.github/workflows/deploy-pages.yml`): deploys staging from `main` immediately on pushes to `main`, and deploys production from the latest release tag after the manual release workflow completes successfully. It downloads ONNX Runtime WASM files and verifies model assets before deploying to GitHub Pages; tests are run by the manual Full Test Suite workflow, not by release or deploy.
 - GitHub Pages deploys must verify hosted `downloadUrl` assets by pinned URL and still tolerate older release tags that contain local Git LFS assets by checking any local `web/models/*.onnx` or template `.nii.gz` files are real binaries, not pointer files.
