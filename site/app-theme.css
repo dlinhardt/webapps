@@ -6,13 +6,68 @@
   src: url("https://fonts.gstatic.com/s/pontanosans/v19/qFdD35GdgYR8EzR6oBLDHa3axT8N.woff2") format("woff2");
 }
 
-/* Neurodesk's hosted-app theme. The official palette is intentionally used
-   by role: pale and white working surfaces, black menu bars, and green actions.
-   The shared adapter is loaded after each app's own styles. */
+/* Neurodesk's hosted-app theme, matched to the Neurocontainers Builder dark
+   palette. The shared adapter is loaded after each app's own styles. */
 :root[data-neurodesk-app] {
-  color-scheme: light;
+  color-scheme: dark;
 
-  /* neurodesk.org/developers/designer */
+  --nd-brand-page: #0a0c08;
+  --nd-brand-primary: #91c84a;
+  --nd-brand-menu: #0a0c08;
+  --nd-brand-selection: #1f2e18;
+  --nd-brand-accent-background: #10140d;
+  --nd-brand-selected: #527435;
+  --nd-brand-hover: #a8d65c;
+  --nd-brand-light: #c4e382;
+  --nd-brand-unselected: #1f2e18;
+  --nd-brand-pale: #10140d;
+  --nd-brand-surface: #161a0e;
+  --nd-brand-text: #e8f5d0;
+  --nd-brand-text-muted: #d1d5db;
+  --nd-brand-text-dim: #9ca3af;
+  --nd-brand-action-text: #0a0c08;
+  --nd-brand-menu-text: #e8f5d0;
+  --nd-brand-border: #2d4222;
+  --nd-brand-border-strong: #3f5b2e;
+  --nd-brand-console-surface: #0a0c08;
+  --nd-brand-console-header: #10140d;
+  --nd-brand-console-text: #d1d5db;
+  --nd-brand-console-time: #91c84a;
+  --nd-brand-success: #75b580;
+
+  /* Shared imaging-workspace tokens. */
+  --nd-color-bg: var(--nd-brand-pale);
+  --nd-color-surface: var(--nd-brand-surface);
+  --nd-color-surface-elevated: var(--nd-brand-unselected);
+  --nd-color-border: var(--nd-brand-border);
+  --nd-color-border-light: var(--nd-brand-border-strong);
+  --nd-color-text: var(--nd-brand-text);
+  --nd-color-text-muted: var(--nd-brand-text-muted);
+  --nd-color-text-dim: var(--nd-brand-text-dim);
+  --nd-color-primary: var(--nd-brand-primary);
+  --nd-color-primary-hover: var(--nd-brand-hover);
+  --nd-color-primary-glow: rgb(145 200 74 / 18%);
+  --nd-color-success: var(--nd-brand-success);
+  --nd-color-accent: var(--nd-brand-selected);
+
+  /* Compact single-page app tokens. */
+  --bg: var(--nd-brand-pale);
+  --bg2: var(--nd-brand-pale);
+  --panel: var(--nd-brand-surface);
+  --panel2: var(--nd-brand-unselected);
+  --line: var(--nd-brand-border);
+  --border: var(--nd-brand-border);
+  --ink: var(--nd-brand-text);
+  --text: var(--nd-brand-text);
+  --dim: var(--nd-brand-text-muted);
+  --accent: var(--nd-brand-primary);
+  --accent2: var(--nd-brand-selected);
+  --good: var(--nd-brand-success);
+}
+
+:root[data-neurodesk-app][data-neurodesk-theme="light"] {
+  color-scheme: light;
+  --nd-brand-page: #ffffff;
   --nd-brand-primary: #6aa329;
   --nd-brand-menu: #0c0e0a;
   --nd-brand-selection: #161c10;
@@ -34,35 +89,8 @@
   --nd-brand-console-header: #e6f1d6;
   --nd-brand-console-text: #161c10;
   --nd-brand-console-time: #4f7b38;
-
-  /* Shared imaging-workspace tokens. */
-  --nd-color-bg: var(--nd-brand-pale);
-  --nd-color-surface: var(--nd-brand-surface);
-  --nd-color-surface-elevated: var(--nd-brand-unselected);
-  --nd-color-border: var(--nd-brand-border);
-  --nd-color-border-light: var(--nd-brand-border-strong);
-  --nd-color-text: var(--nd-brand-text);
-  --nd-color-text-muted: var(--nd-brand-text-muted);
-  --nd-color-text-dim: var(--nd-brand-text-dim);
-  --nd-color-primary: var(--nd-brand-primary);
-  --nd-color-primary-hover: var(--nd-brand-hover);
+  --nd-brand-success: #217738;
   --nd-color-primary-glow: rgb(106 163 41 / 18%);
-  --nd-color-success: var(--nd-brand-selection);
-  --nd-color-accent: var(--nd-brand-selected);
-
-  /* Compact single-page app tokens. */
-  --bg: var(--nd-brand-pale);
-  --bg2: var(--nd-brand-pale);
-  --panel: var(--nd-brand-surface);
-  --panel2: var(--nd-brand-unselected);
-  --line: var(--nd-brand-border);
-  --border: var(--nd-brand-border);
-  --ink: var(--nd-brand-text);
-  --text: var(--nd-brand-text);
-  --dim: var(--nd-brand-text-muted);
-  --accent: var(--nd-brand-primary);
-  --accent2: var(--nd-brand-selected);
-  --good: var(--nd-brand-selection);
 }
 
 /* Most apps use complete CSS colors. Dicompare uses RGB triplets and has a
@@ -78,14 +106,40 @@
   --color-text-dim: var(--nd-brand-text-dim);
   --color-primary: var(--nd-brand-primary);
   --color-primary-hover: var(--nd-brand-hover);
-  --color-primary-glow: rgb(106 163 41 / 18%);
-  --color-success: var(--nd-brand-selection);
-  --color-success-bg: rgb(240 247 231 / 90%);
+  --color-primary-glow: rgb(145 200 74 / 18%);
+  --color-success: var(--nd-brand-success);
+  --color-success-bg: rgb(63 91 46 / 45%);
   --color-accent: var(--nd-brand-selected);
+}
+
+:root[data-neurodesk-app][data-neurodesk-theme="light"]:not([data-neurodesk-app="dicompare"]) {
+  --color-primary-glow: rgb(106 163 41 / 18%);
+  --color-success-bg: rgb(240 247 231 / 90%);
 }
 
 /* Dicompare's Tailwind theme consumes raw RGB triplets. */
 :root[data-neurodesk-app="dicompare"] {
+  color-scheme: dark;
+  --color-surface: 10 12 8;
+  --color-surface-primary: 22 26 14;
+  --color-surface-secondary: 31 46 24;
+  --color-surface-hover: 63 91 46;
+  --color-surface-alt: 16 20 13;
+  --color-text-primary: 232 245 208;
+  --color-text-secondary: 209 213 219;
+  --color-text-tertiary: 196 227 130;
+  --color-text-muted: 156 163 175;
+  --color-text-inverted: 10 12 8;
+  --color-border: 45 66 34;
+  --color-border-secondary: 63 91 46;
+  --color-brand-50: 16 20 13;
+  --color-brand-100: 31 46 24;
+  --color-brand-500: 145 200 74;
+  --color-brand-600: 82 116 53;
+  --color-brand-700: 45 66 34;
+}
+
+:root[data-neurodesk-app="dicompare"][data-neurodesk-theme="light"] {
   color-scheme: light;
   --color-surface: 240 247 231;
   --color-surface-primary: 255 255 255;
@@ -106,25 +160,98 @@
   --color-brand-700: 22 28 16;
 }
 
-:root[data-neurodesk-app="dicompare"].dark {
-  color-scheme: dark;
-  --color-surface: 12 14 10;
-  --color-surface-primary: 22 28 16;
-  --color-surface-secondary: 30 42 22;
-  --color-surface-hover: 79 123 56;
-  --color-surface-alt: 22 28 16;
-  --color-text-primary: 255 255 255;
-  --color-text-secondary: 211 231 182;
-  --color-text-tertiary: 183 216 134;
-  --color-text-muted: 183 216 134;
-  --color-text-inverted: 12 14 10;
-  --color-border: 79 123 56;
-  --color-border-secondary: 106 163 41;
-  --color-brand-50: 22 28 16;
-  --color-brand-100: 30 42 22;
-  --color-brand-500: 106 163 41;
-  --color-brand-600: 79 123 56;
-  --color-brand-700: 22 28 16;
+/* SurfAnnotate predates the shared surface/text tokens and names its light
+   surface token "white". Bridge those legacy roles into the dark palette. */
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] {
+  --nd-brand-white: var(--nd-brand-surface);
+  --nd-ink-muted: var(--nd-brand-text-muted);
+  --nd-line-neutral: var(--nd-brand-border);
+}
+
+:root[data-neurodesk-app],
+[data-neurodesk-app] body {
+  color: var(--nd-brand-text);
+  background: var(--nd-brand-pale);
+}
+
+[data-neurodesk-app] :is(input:not([type="range"]), select, textarea) {
+  color: var(--nd-brand-text);
+  background-color: var(--nd-brand-unselected);
+  border-color: var(--nd-brand-border);
+}
+
+[data-neurodesk-app] :is(input, textarea)::placeholder {
+  color: var(--nd-brand-text-dim);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"]
+  :is(.start-page, .nd-imaging-workspace, #controls, .workflow-panel, #status, .cite-dialog) {
+  color: var(--nd-brand-text);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"]
+  :is(.start-kicker, .start-how > h3, .panel-step, .workflow-help summary, .readout) {
+  color: var(--nd-brand-primary);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"]
+  :is(.start-hero h2, .start-step h4, .panel-heading h2, .row, .check, .instruction-note, .hint strong, .layer-list li, .point-list) {
+  color: var(--nd-brand-text);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] .start-intro {
+  color: var(--nd-brand-text-muted);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"]
+  :is(.start-local-badge, .start-local-panel) {
+  color: var(--nd-brand-text-muted);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"]
+  :is(.workflow-help, .layer-list li, .start-footer) {
+  color: var(--nd-brand-text-muted);
+  background: var(--nd-brand-pale);
+  border-color: var(--nd-brand-border);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls
+  :is(select, input[type="text"], input[type="number"]) {
+  color: var(--nd-brand-text);
+  background: var(--nd-brand-unselected);
+  border-color: var(--nd-brand-border);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls button {
+  color: var(--nd-brand-text);
+  background: var(--nd-brand-pale);
+  border-color: var(--nd-brand-border);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls
+  :is(button, select, input):disabled {
+  color: var(--nd-brand-text-dim);
+  background: var(--nd-brand-unselected);
+  border-color: var(--nd-brand-border);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls
+  input:disabled:not([type="checkbox"]):not([type="range"]):not([type="file"]) {
+  color: var(--nd-brand-text-dim);
+  background: var(--nd-brand-unselected);
+  border-color: var(--nd-brand-border);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls button.primary {
+  color: var(--nd-brand-action-text);
+  background: var(--nd-brand-primary);
+  border-color: var(--nd-brand-primary);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls .segmented button.active {
+  color: var(--nd-brand-menu-text);
+  background: var(--nd-brand-selected);
+  border-color: var(--nd-brand-selected);
 }
 
 [data-neurodesk-app] body,
@@ -145,8 +272,8 @@
   accent-color: var(--nd-brand-primary);
 }
 
-/* The guide assigns black to menu bars. Local token overrides keep all header
-   copy and icons readable without changing the apps' existing markup. */
+/* Local token overrides keep all header copy and icons readable without
+   changing the apps' existing markup. */
 [data-neurodesk-app] :is(.app-header, .start-header, .nd-imaging-app-header) {
   --color-text: var(--nd-brand-menu-text);
   --color-text-muted: var(--nd-brand-light);
@@ -163,11 +290,11 @@
   color: var(--nd-brand-menu-text);
 }
 
-/* Seafoam is an action fill, not a text colour. The guide assigns dark olive
-   to hyperlinks, which also clears AA contrast on white and pale surfaces. */
+/* Bright green is an action fill; lighter green remains readable as dark-theme
+   link text. */
 :root[data-neurodesk-app]:not([data-neurodesk-app="dicompare"])
   :is(.modal-body a, .modal-body h4) {
-  color: var(--nd-brand-selected);
+  color: var(--nd-brand-light);
 }
 
 :root[data-neurodesk-app]:not([data-neurodesk-app="dicompare"])
@@ -177,11 +304,15 @@
 
 :root[data-neurodesk-app]:not([data-neurodesk-app="dicompare"])
   :is(.about-highlight strong, .privacy-highlight strong, .citation-primary strong) {
-  color: var(--nd-brand-selection);
+  color: var(--nd-brand-light);
 }
 
-/* Primary actions use seafoam with black text (6.36:1). Selected controls use
-   dark olive with white text (4.97:1). */
+:root[data-neurodesk-app][data-neurodesk-theme="light"]:not([data-neurodesk-app="dicompare"])
+  :is(.modal-body a, .modal-body h4, .about-highlight strong, .privacy-highlight strong, .citation-primary strong) {
+  color: var(--nd-brand-selected);
+}
+
+/* Primary actions use vivid green with near-black text. */
 [data-neurodesk-app] :is(.btn-primary, .nd-btn-primary) {
   color: var(--nd-brand-action-text);
   background: var(--nd-brand-primary);
@@ -195,9 +326,9 @@
 }
 
 [data-neurodesk-app] :is(.view-tab.active, .modebtn.active, .volume-toggle .view-btn.active) {
-  color: var(--nd-brand-menu-text);
-  background: var(--nd-brand-selected);
-  border-color: var(--nd-brand-selected);
+  color: var(--nd-brand-action-text);
+  background: var(--nd-brand-primary);
+  border-color: var(--nd-brand-primary);
 }
 
 /* Existing app styles dim disabled controls with opacity, compounding muted
@@ -215,23 +346,23 @@
   border-color: var(--nd-brand-border-strong);
 }
 
-/* Consoles remain subordinate to the viewer: a white log surface, pale header,
-   dark text, and a thin seafoam divider instead of a second dark focal area. */
+/* Consoles remain subordinate to the viewer with the deepest surface and a
+   thin green divider. */
 [data-neurodesk-app] :is(.console-container, .nd-console-container) {
   --color-surface: var(--nd-brand-console-surface);
   --color-border: var(--nd-brand-border);
   --color-text: var(--nd-brand-console-text);
   --color-text-muted: var(--nd-brand-console-text);
   --color-text-dim: var(--nd-brand-console-time);
-  --color-error: #b42318;
-  --color-warning: #7a4b00;
+  --color-error: #ff8a80;
+  --color-warning: #f0c777;
   --nd-color-surface: var(--nd-brand-console-surface);
   --nd-color-border: var(--nd-brand-border);
   --nd-color-text: var(--nd-brand-console-text);
   --nd-color-text-muted: var(--nd-brand-console-text);
   --nd-color-text-dim: var(--nd-brand-console-time);
-  --nd-color-error: #b42318;
-  --nd-color-warning: #7a4b00;
+  --nd-color-error: #ff8a80;
+  --nd-color-warning: #f0c777;
   color: var(--nd-brand-console-text);
   background: var(--nd-brand-console-surface);
   border-top: 3px solid var(--nd-brand-primary);
@@ -247,6 +378,14 @@
   background: var(--nd-brand-console-surface);
 }
 
+:root[data-neurodesk-app][data-neurodesk-theme="light"]
+  :is(.console-container, .nd-console-container) {
+  --color-error: #b42318;
+  --color-warning: #7a4b00;
+  --nd-color-error: #b42318;
+  --nd-color-warning: #7a4b00;
+}
+
 [data-neurodesk-app] .nd-imaging-mark {
   color: var(--nd-brand-action-text);
 }
@@ -257,8 +396,8 @@
 }
 
 [data-neurodesk-app] ::selection {
-  color: var(--nd-brand-text);
-  background: var(--nd-brand-light);
+  color: var(--nd-brand-action-text);
+  background: var(--nd-brand-primary);
 }
 
 /* One application identity and navigation contract across every hosted app.
@@ -336,7 +475,7 @@
 
 .nd-app-bar__title {
   flex: 0 0 auto !important;
-  color: #ffffff !important;
+  color: var(--nd-brand-menu-text) !important;
   font-size: 21px !important;
   font-weight: 600 !important;
 }
@@ -375,7 +514,7 @@
   font-size: 16px !important;
   font-weight: 400 !important;
   line-height: 1 !important;
-  color: #ffffff !important;
+  color: var(--nd-brand-menu-text) !important;
   background: transparent !important;
   border: 1px solid transparent !important;
   border-radius: 6px !important;

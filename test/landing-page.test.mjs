@@ -18,6 +18,10 @@ test('landing page renders categorized, searchable app cards', async () => {
   assert.match(html, /Do Not Track and Global Privacy Control/);
   assert.match(html, /name="neurodesk-ga4-measurement-id" content="G-4Z9774J59Y"/);
   assert.match(html, /src="\.\/neurodesk-logo\.svg" alt="Neurodesk"/);
+  assert.match(html, /<html lang="en" data-neurodesk-theme="dark">/);
+  assert.match(html, /src="\.\/theme\.js" data-neurodesk-theme-controller/);
+  assert.match(html, /data-neurodesk-theme-toggle/);
+  assert.match(html, /data-neurodesk-theme-label>Light</);
   assert.equal(
     (html.match(/href="https:\/\/github\.com\/neurodesk\/webapps"/g) ?? []).length,
     2,

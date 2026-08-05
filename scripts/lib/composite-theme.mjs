@@ -15,6 +15,7 @@ export function injectCompositeTheme(html, {
   version,
   measurementId,
   href = '../app-theme.css',
+  themeHref = '../theme.js',
   shellHref = '../app-shell.js',
   analyticsHref = '../analytics.js',
   moreAppsHref = '../',
@@ -23,7 +24,7 @@ export function injectCompositeTheme(html, {
   if (!appIdPattern.test(appId)) throw new Error(`Invalid app id: ${appId}`);
   if (typeof href !== 'string' || !href.trim()) throw new Error('Theme href must be a non-empty string');
   for (const [label, value] of Object.entries({
-    title, description, version, measurementId, shellHref, analyticsHref, moreAppsHref,
+    title, description, version, measurementId, themeHref, shellHref, analyticsHref, moreAppsHref,
   })) {
     if (typeof value !== 'string' || !value.trim()) {
       throw new Error(`${label} must be a non-empty string`);
@@ -34,7 +35,19 @@ export function injectCompositeTheme(html, {
 
   let themed = html;
   if (!/<html\b[^>]*\bdata-neurodesk-app=/i.test(themed)) {
-    themed = themed.replace(/<html\b/i, `<html data-neurodesk-app="${escapeAttribute(appId)}"`);
+    themed = themed.replace(
+      /<html\b/i,
+      `<html data-neurodesk-app="${escapeAttribute(appId)}" data-neurodesk-theme="dark"`,
+    );
+  } else if (!/<html\b[^>]*\bdata-neurodesk-theme=/i.test(themed)) {
+    themed = themed.replace(/<html\b/i, '<html data-neurodesk-theme="dark"');
+  }
+
+  if (!/data-neurodesk-theme-controller(?:\s|=|>)/i.test(themed)) {
+    themed = themed.replace(
+      /<\/head>/i,
+      `  <script src="${escapeAttribute(themeHref)}" data-neurodesk-theme-controller></script>\n</head>`,
+    );
   }
 
   if (!/data-neurodesk-app-theme(?:\s|=|>)/i.test(themed)) {

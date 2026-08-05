@@ -24,15 +24,20 @@ function contrast(foreground, background) {
     / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
 
-test('hosted theme uses the official Neurodesk designer-guide palette', () => {
-  assert.equal(token('nd-brand-primary'), '#6aa329');
-  assert.equal(token('nd-brand-menu'), '#0c0e0a');
-  assert.equal(token('nd-brand-selection'), '#161c10');
-  assert.equal(token('nd-brand-accent-background'), '#1e2a16');
-  assert.equal(token('nd-brand-selected'), '#4f7b38');
-  assert.equal(token('nd-brand-hover'), '#b7d886');
-  assert.equal(token('nd-brand-unselected'), '#e6f1d6');
-  assert.equal(token('nd-brand-pale'), '#f0f7e7');
+test('hosted theme uses the Neurocontainers Builder dark palette', () => {
+  assert.equal(token('nd-brand-page'), '#0a0c08');
+  assert.equal(token('nd-brand-primary'), '#91c84a');
+  assert.equal(token('nd-brand-menu'), '#0a0c08');
+  assert.equal(token('nd-brand-selection'), '#1f2e18');
+  assert.equal(token('nd-brand-accent-background'), '#10140d');
+  assert.equal(token('nd-brand-selected'), '#527435');
+  assert.equal(token('nd-brand-hover'), '#a8d65c');
+  assert.equal(token('nd-brand-unselected'), '#1f2e18');
+  assert.equal(token('nd-brand-pale'), '#10140d');
+  assert.equal(token('nd-brand-surface'), '#161a0e');
+  assert.equal(token('nd-brand-text'), '#e8f5d0');
+  assert.equal(token('nd-brand-border'), '#2d4222');
+  assert.equal(token('nd-brand-success'), '#75b580');
 });
 
 test('core UI pairings meet WCAG AA text contrast', () => {
@@ -40,12 +45,23 @@ test('core UI pairings meet WCAG AA text contrast', () => {
   assert.ok(contrast(token('nd-brand-text-muted'), token('nd-brand-surface')) >= 7);
   assert.ok(contrast(token('nd-brand-action-text'), token('nd-brand-primary')) >= 4.5);
   assert.ok(contrast(token('nd-brand-menu-text'), token('nd-brand-menu')) >= 4.5);
-  assert.ok(contrast(token('nd-brand-selected'), token('nd-brand-surface')) >= 4.5);
-  assert.ok(contrast(token('nd-brand-selected'), token('nd-brand-pale')) >= 4.5);
+  assert.ok(contrast(token('nd-brand-light'), token('nd-brand-surface')) >= 4.5);
+  assert.ok(contrast(token('nd-brand-text-dim'), token('nd-brand-pale')) >= 4.5);
+  assert.ok(contrast(token('nd-brand-success'), token('nd-brand-surface')) >= 4.5);
   assert.ok(contrast(token('nd-brand-console-text'), token('nd-brand-console-surface')) >= 7);
   assert.ok(contrast(token('nd-brand-console-time'), token('nd-brand-console-surface')) >= 4.5);
 });
 
 test('disabled controls keep full opacity and readable text', () => {
   assert.match(css, /\[data-neurodesk-app\] :is\([^}]*:disabled[^}]*\)\s*\{[^}]*opacity:\s*1/s);
+});
+
+test('SurfAnnotate legacy light roles are bridged into the shared dark palette', () => {
+  assert.match(css, /:root\[data-neurodesk-app="surfannotate"\]\[data-neurodesk-theme="dark"\]\s*\{[^}]*--nd-brand-white:\s*var\(--nd-brand-surface\)/s);
+  assert.match(css, /:is\(\.workflow-help, \.layer-list li, \.start-footer\)\s*\{[^}]*background:\s*var\(--nd-brand-pale\)/s);
+  assert.match(css, /#controls\s+:is\(select, input\[type="text"\], input\[type="number"\]\)\s*\{[^}]*background:\s*var\(--nd-brand-unselected\)/s);
+});
+
+test('hosted apps expose the original light palette as an explicit theme', () => {
+  assert.match(css, /:root\[data-neurodesk-app\]\[data-neurodesk-theme="light"\]\s*\{[^}]*color-scheme:\s*light[^}]*--nd-brand-page:\s*#ffffff[^}]*--nd-brand-primary:\s*#6aa329[^}]*--nd-brand-text:\s*#0c0e0a/s);
 });

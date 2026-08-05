@@ -22,6 +22,7 @@ await applyAppTheme({
   measurementId: registry.site.analytics.measurement_id,
   distDir: join(repoRoot, 'apps', appId, 'dist'),
   themeFile: join(repoRoot, 'site', 'app-theme.css'),
+  themeScriptFile: join(repoRoot, 'site', 'theme.js'),
   shellFile: join(repoRoot, 'site', 'app-shell.js'),
   analyticsFile: join(repoRoot, 'packages', 'analytics', 'src', 'index.js'),
 });

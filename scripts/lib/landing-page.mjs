@@ -57,13 +57,14 @@ export function renderLandingPage(registry) {
   }).join('');
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en" data-neurodesk-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Privacy-preserving neuroimaging tools that run locally in your browser.">
   <meta name="neurodesk-ga4-measurement-id" content="${escape(registry.site.analytics.measurement_id)}">
   <title>Neurodesk Webapps</title>
+  <script src="./theme.js" data-neurodesk-theme-controller></script>
   <link rel="stylesheet" href="./landing.css">
   <script type="module" src="./landing.js"></script>
 </head>
@@ -73,6 +74,10 @@ export function renderLandingPage(registry) {
       <a class="brand" href="https://neurodesk.org/" aria-label="Neurodesk home"><img src="./neurodesk-logo.svg" alt="Neurodesk"></a>
       <nav class="site-nav" aria-label="Neurodesk navigation">
         <a href="https://github.com/neurodesk/webapps">GitHub</a>
+        <button class="theme-toggle" type="button" data-neurodesk-theme-toggle aria-label="Use light theme" title="Use light theme">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          <span data-neurodesk-theme-label>Light</span>
+        </button>
         <span aria-current="page">Webapps</span>
       </nav>
     </div>

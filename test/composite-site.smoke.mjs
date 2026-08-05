@@ -92,6 +92,39 @@ try {
   if (await privacyPage.evaluate(() => Boolean(window.dataLayer))) failures.push('Do Not Track still created dataLayer');
   await privacyContext.close();
 
+  const themeContext = await browser.newContext();
+  const themePage = await themeContext.newPage();
+  await themePage.route(/googletagmanager\.com|google-analytics\.com|analytics\.google\.com/,
+    (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
+  await themePage.goto(`${origin}/`, { waitUntil: 'domcontentloaded' });
+  const themeToggle = themePage.locator('[data-neurodesk-theme-toggle]');
+  if (await themePage.locator('html[data-neurodesk-theme="dark"]').count() !== 1) {
+    failures.push('landing page does not default to dark theme');
+  }
+  await themeToggle.click();
+  if (await themePage.locator('html[data-neurodesk-theme="light"]').count() !== 1) {
+    failures.push('landing page theme toggle did not switch to light');
+  }
+  await themePage.reload({ waitUntil: 'domcontentloaded' });
+  if (await themePage.locator('html[data-neurodesk-theme="light"]').count() !== 1) {
+    failures.push('landing page did not restore the saved light theme');
+  }
+  const firstApp = registry.apps[0];
+  await themePage.goto(`${origin}/${firstApp.path}/`, { waitUntil: 'domcontentloaded' });
+  await themePage.waitForTimeout(100);
+  if (await themePage.locator('html[data-neurodesk-theme="light"]').count() !== 1) {
+    failures.push(`${firstApp.id}: did not inherit the saved light theme`);
+  }
+  await themePage.locator('[data-neurodesk-theme-toggle]').first().click();
+  if (await themePage.locator('html[data-neurodesk-theme="dark"]').count() !== 1) {
+    failures.push(`${firstApp.id}: app theme toggle did not switch back to dark`);
+  }
+  await themePage.goto(`${origin}/`, { waitUntil: 'domcontentloaded' });
+  if (await themePage.locator('html[data-neurodesk-theme="dark"]').count() !== 1) {
+    failures.push('landing page did not inherit the dark theme selected in an app');
+  }
+  await themeContext.close();
+
   const landing = await browser.newPage();
   await landing.route(/googletagmanager\.com|google-analytics\.com|analytics\.google\.com/,
     (route) => route.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
@@ -150,6 +183,7 @@ try {
       if (url.origin !== origin || url.pathname === `/favicon.ico`) return;
       if (url.pathname.startsWith('/_runtime/')) return;
       if (url.pathname === '/app-theme.css') return;
+      if (url.pathname === '/theme.js') return;
       if (url.pathname === '/app-shell.js') return;
       if (url.pathname === '/analytics.js') return;
       if (returningHome && url.pathname === '/') return;
@@ -163,6 +197,7 @@ try {
     const title = await page.title();
     const bodyText = await page.locator('body').innerText();
     const themeLinks = await page.locator('link[data-neurodesk-app-theme]').count();
+    const themeScripts = await page.locator('script[data-neurodesk-theme-controller]').count();
     const shellScripts = await page.locator('script[data-neurodesk-app-shell]').count();
     const analyticsScripts = await page.locator('script[data-neurodesk-ga4="G-4Z9774J59Y"]').count();
     const visibleTopBars = page.locator('.nd-app-bar:visible');
@@ -171,13 +206,17 @@ try {
       .map((bar) => Math.round(bar.getBoundingClientRect().top)))]);
     const themeState = await page.evaluate(() => ({
       appId: document.documentElement.dataset.neurodeskApp,
+      theme: document.documentElement.dataset.neurodeskTheme,
+      colorScheme: getComputedStyle(document.documentElement).colorScheme,
       brandPrimary: getComputedStyle(document.documentElement).getPropertyValue('--nd-brand-primary').trim(),
+      pageBackground: getComputedStyle(document.body).backgroundColor,
     }));
 
     if (!response?.ok()) failures.push(`${app.id}: document returned ${response?.status() ?? 'no response'}`);
     if (!title.trim()) failures.push(`${app.id}: empty document title`);
     if (!bodyText.trim()) failures.push(`${app.id}: empty rendered body`);
     if (themeLinks !== 1) failures.push(`${app.id}: found ${themeLinks} hosted theme links, expected 1`);
+    if (themeScripts !== 1) failures.push(`${app.id}: found ${themeScripts} theme controllers, expected 1`);
     if (shellScripts !== 1) failures.push(`${app.id}: found ${shellScripts} shared app-shell scripts, expected 1`);
     if (analyticsScripts !== 1) failures.push(`${app.id}: found ${analyticsScripts} shared GA4 loaders, expected 1`);
     const analyticsCalls = await page.evaluate(() => (window.dataLayer ?? []).map((entry) => entry[0]));
@@ -196,7 +235,7 @@ try {
       if (!identity.includes(app.title)) failures.push(`${app.id}: top bar is missing the app name`);
       if (!identity.includes(app.description)) failures.push(`${app.id}: top bar is missing the short explanation`);
       if (!/v\d+\.\d+/.test(identity)) failures.push(`${app.id}: top bar is missing a version`);
-      if (actions.replace(/\s+/g, ' ').trim() !== 'About Cite Privacy More Apps GitHub') {
+      if (actions.replace(/\s+/g, ' ').trim() !== 'About Cite Privacy Light More Apps GitHub') {
         failures.push(`${app.id}: top-bar actions are out of contract: ${actions.replace(/\s+/g, ' ').trim()}`);
       }
       if (githubHref !== `https://github.com/neurodesk/webapps/tree/main/apps/${app.id}`) {
@@ -204,7 +243,31 @@ try {
       }
     }
     if (themeState.appId !== app.id) failures.push(`${app.id}: document theme identity is ${themeState.appId ?? 'missing'}`);
-    if (themeState.brandPrimary !== '#6aa329') failures.push(`${app.id}: Neurodesk brand tokens were not applied`);
+    if (themeState.theme !== 'dark') failures.push(`${app.id}: document dark-theme identity is ${themeState.theme ?? 'missing'}`);
+    if (themeState.colorScheme !== 'dark') failures.push(`${app.id}: browser color scheme is ${themeState.colorScheme || 'missing'}`);
+    if (themeState.brandPrimary !== '#91c84a') failures.push(`${app.id}: Neurocontainers dark-theme tokens were not applied`);
+    if (!['rgb(16, 20, 13)', 'rgb(10, 12, 8)'].includes(themeState.pageBackground)) {
+      failures.push(`${app.id}: page background is outside the dark palette: ${themeState.pageBackground}`);
+    }
+
+    const appThemeToggle = visibleTopBars.first().locator('[data-neurodesk-theme-toggle]');
+    if (await appThemeToggle.count() !== 1) {
+      failures.push(`${app.id}: visible top bar does not have exactly one theme toggle`);
+    } else {
+      await appThemeToggle.click();
+      const lightThemeState = await page.evaluate(() => ({
+        theme: document.documentElement.dataset.neurodeskTheme,
+        colorScheme: getComputedStyle(document.documentElement).colorScheme,
+        brandPrimary: getComputedStyle(document.documentElement).getPropertyValue('--nd-brand-primary').trim(),
+      }));
+      if (lightThemeState.theme !== 'light' || lightThemeState.colorScheme !== 'light') {
+        failures.push(`${app.id}: theme toggle did not apply the light color scheme`);
+      }
+      if (lightThemeState.brandPrimary !== '#6aa329') {
+        failures.push(`${app.id}: Neurodesk light-theme tokens were not applied`);
+      }
+      await appThemeToggle.click();
+    }
     if (pageErrors.length) failures.push(`${app.id}: page errors: ${[...new Set(pageErrors)].join(' | ')}`);
     if (responseErrors.length) failures.push(`${app.id}: failed same-origin responses: ${[...new Set(responseErrors)].join(' | ')}`);
     if (subpathLeaks.length) failures.push(`${app.id}: assets escaped app subpath: ${[...new Set(subpathLeaks)].join(', ')}`);

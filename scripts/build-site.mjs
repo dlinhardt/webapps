@@ -33,6 +33,7 @@ await assembleRuntimeAssetStore({ repoRoot, siteDist, registry });
 await writeFile(join(siteDist, 'index.html'), renderLandingPage(registry));
 await cp(join(repoRoot, 'site', 'landing.css'), join(siteDist, 'landing.css'));
 await cp(join(repoRoot, 'site', 'landing.js'), join(siteDist, 'landing.js'));
+await cp(join(repoRoot, 'site', 'theme.js'), join(siteDist, 'theme.js'));
 await cp(join(repoRoot, 'site', 'neurodesk-logo.svg'), join(siteDist, 'neurodesk-logo.svg'));
 await cp(join(repoRoot, 'site', 'app-theme.css'), join(siteDist, 'app-theme.css'));
 await cp(join(repoRoot, 'site', 'app-shell.js'), join(siteDist, 'app-shell.js'));

@@ -14,7 +14,8 @@ const metadata = {
 test('injects the hosted app identity, theme, and shared top-bar contract', () => {
   const themed = injectCompositeTheme(document, metadata);
 
-  assert.match(themed, /<html data-neurodesk-app="example-app" lang="en">/);
+  assert.match(themed, /<html data-neurodesk-app="example-app" data-neurodesk-theme="dark" lang="en">/);
+  assert.match(themed, /<script src="\.\.\/theme\.js" data-neurodesk-theme-controller><\/script>/);
   assert.match(themed, /<link rel="stylesheet" href="\.\.\/app-theme\.css" data-neurodesk-app-theme>/);
   assert.match(themed, /src="\.\.\/app-shell\.js" data-neurodesk-app-shell/);
   assert.match(themed, /data-app-title="Example App"/);
@@ -31,7 +32,20 @@ test('theme injection is idempotent', () => {
 
   assert.equal(repeated, themed);
   assert.equal((repeated.match(/data-neurodesk-app-theme/g) ?? []).length, 1);
+  assert.equal((repeated.match(/data-neurodesk-theme-controller/g) ?? []).length, 1);
   assert.equal((repeated.match(/data-neurodesk-app-shell/g) ?? []).length, 1);
+  assert.equal((repeated.match(/data-neurodesk-theme="/g) ?? []).length, 1);
+});
+
+test('adds the controller to an app that already has the shared stylesheet', () => {
+  const legacy = document.replace(
+    '</head>',
+    '<link rel="stylesheet" href="../app-theme.css" data-neurodesk-app-theme></head>',
+  );
+  const themed = injectCompositeTheme(legacy, metadata);
+
+  assert.match(themed, /data-neurodesk-theme-controller/);
+  assert.equal((themed.match(/data-neurodesk-app-theme/g) ?? []).length, 1);
 });
 
 test('rejects invalid app ids and incomplete documents', () => {
