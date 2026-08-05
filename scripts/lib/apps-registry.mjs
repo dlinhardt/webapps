@@ -20,6 +20,7 @@ const SUPPORT_STATUSES = new Set(['active', 'experimental', 'maintenance', 'reti
 const TOOLCHAINS = new Set(['node', 'rust-wasm', 'python-reference']);
 const ASSET_MANIFEST_SCHEMAS = new Set(['scientific-assets-v1', 'pipeline-assets-v1']);
 const PINNED_SOURCE = /^[^/\s]+\/[^@\s]+@[0-9a-f]{40}$/;
+const GA4_MEASUREMENT_ID = /^G-[A-Z0-9]+$/;
 
 export async function loadAppsRegistry(path = registryPath) {
   const registry = parse(await readFile(path, 'utf8'));
@@ -30,6 +31,14 @@ export async function loadAppsRegistry(path = registryPath) {
 
   if (!registry?.site?.domain) errors.push('site.domain is required');
   if (!registry?.site?.cloudflare_project) errors.push('site.cloudflare_project is required');
+  if (!GA4_MEASUREMENT_ID.test(registry?.site?.analytics?.measurement_id ?? '')) {
+    errors.push('site.analytics.measurement_id must be a GA4 measurement id');
+  }
+  if (!Number.isInteger(registry?.site?.analytics?.period_days)
+      || registry.site.analytics.period_days < 1
+      || registry.site.analytics.period_days > 366) {
+    errors.push('site.analytics.period_days must be an integer from 1 to 366');
+  }
   if (!Array.isArray(registry?.site?.categories) || registry.site.categories.length === 0) {
     errors.push('site.categories must be a non-empty array');
   }
@@ -98,6 +107,7 @@ export async function loadAppsRegistry(path = registryPath) {
   return Object.freeze({
     site: Object.freeze({
       ...registry.site,
+      analytics: Object.freeze({ ...registry.site.analytics }),
       categories: Object.freeze(registry.site.categories.map((category) => Object.freeze({ ...category }))),
     }),
     apps: Object.freeze(registry.apps.map((app) => Object.freeze({

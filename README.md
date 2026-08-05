@@ -14,7 +14,8 @@ release eligibility, and scientific assets.
 - `apps/*` keeps app-specific scientific workers, workflows, and interfaces local.
 - `packages/components` is the framework-free shared browser-imaging library.
 - `packages/runtime-support` owns the cross-origin-isolation service worker.
-- `packages/analytics` provides privacy-gated, allow-listed telemetry.
+- `packages/analytics` provides one DNT/GPC-respecting, page-view-only GA4 bootstrap;
+  it deliberately exposes no custom-event API.
 - `scripts/lib/apps-registry.mjs` is the validated catalog interface used by builds,
   tests, scaffolding, and deployment.
 - `scripts/build-static.mjs` supports the native static apps; dicompare remains a

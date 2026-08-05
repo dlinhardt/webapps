@@ -130,17 +130,15 @@ assert.ok(appJs.includes("bindModalButton('startCitationsButton', this.citations
 assert.ok(indexHtml.includes('id="moreAppsLink"'), 'main app header More Apps link exists');
 assert.ok(indexHtml.includes('href="../"'), 'More Apps links return to the composite webapps start page');
 assert.ok(!indexHtml.includes('https://neurodesk.org/getting-started/hosted/webapps/'), 'More Apps links do not leave the composite site');
-assert.ok(indexHtml.includes('Google Analytics (same property and Do Not Track behavior as neurodesk.org)'), 'Google Analytics marker exists');
 assert.ok(
-  indexHtml.includes('https://www.googletagmanager.com/gtag/js?id=G-4Z9774J59Y') &&
-    indexHtml.includes("gtag('config', 'G-4Z9774J59Y')"),
-  'Google Analytics uses the Neurodesk measurement ID'
+  !indexHtml.includes('googletagmanager.com/gtag/js') && !indexHtml.includes("gtag('config'"),
+  'app source leaves analytics bootstrap to the shared hosting shell'
 );
 assert.ok(
-  indexHtml.includes("Google Analytics collects aggregate page usage and performance metrics when your browser's Do Not Track setting is not enabled"),
-  'privacy copy discloses Google Analytics scope and Do Not Track behavior'
+  indexHtml.includes('The Neurodesk hosting layer records page views only, unless your browser sends Do Not Track or Global Privacy Control') &&
+    indexHtml.includes('It does not send custom events'),
+  'privacy copy discloses page-view-only analytics and privacy controls'
 );
-assert.ok(indexHtml.includes("doNotTrack = dnt === '1' || dnt === 'yes'"), 'Google Analytics respects Do Not Track');
 assert.ok(
   indexHtml.includes('SCT: Spinal Cord Toolbox, an open-source software for processing spinal cord MRI data'),
   'Citations modal includes the primary SCT NeuroImage citation'

@@ -12,8 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@neurodesk/webapp-components": "workspace:*",
-    "@neurodesk/analytics": "workspace:*"
+    "@neurodesk/webapp-components": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.44.0",

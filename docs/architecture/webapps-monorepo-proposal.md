@@ -170,20 +170,12 @@ Neurodesk's existing scheduled metrics generator):
 GA4  →  authenticated scheduled workflow (secrets in CI)  →  sanitized aggregate JSON (committed/published)  →  static apps/stats reads JSON
 ```
 
-**Typed telemetry allow-list** (`packages/analytics`, supplied in `examples/`). Only these leave the
-browser, all non-identifying:
+**Page-view-only analytics** (`packages/analytics`). The shared hosting shell initializes automatic
+GA4 page views for every registered route. The package deliberately exposes no custom-event API, so
+apps cannot emit workflow, file, performance, or result events.
 
-- app id, app version, event name (from a fixed enum), coarse timing buckets, boolean feature flags,
-  browser/OS class, run success/failure.
-
-**Values are validated, not just keys.** `sanitize()` drops any prop that is a non-primitive
-(object/array/null), fails its per-key check (exact enum membership, `app`/`app_version` regex,
-string length ≤ 32), or is unknown; unknown event names throw. Unit tests in
-`examples/packages/analytics/test/` cover these cases.
-
-**Consent & Do-Not-Track.** Telemetry is **off by default**: `track()` no-ops and GA4 is never even
-loaded unless consent is stored **and** `navigator.doNotTrack`/GPC is unset. Consent state is surfaced
-in each app's UI.
+**Do-Not-Track and Global Privacy Control.** The shared bootstrap checks both signals before creating
+`dataLayer` or requesting Google's script. When either signal is enabled, no analytics request is made.
 
 **Explicitly prohibited** (never emitted, never logged): filenames, DICOM metadata/tags, image
 dimensions, voxel values, any scientific measurement or segmentation, screenshots, and free-text
@@ -260,10 +252,10 @@ JSON and YAML all parse, the analytics unit tests pass, and the generator has be
 - `deploy.cloudflare.yml` — Turbo build + `wrangler pages deploy` per app; affected-with-dependents
   discovery intersected with the registry; staging/prod split; `workflow_dispatch` + tag both validated
 - `deploy.cloudflare.md` — project/secrets setup
-- `new-app.mjs` + `app-template/` — **self-contained** scaffold (imports `@neurodesk/webapp-components/*`
-  and `@neurodesk/analytics`); ships `wrangler.toml`, `public/_headers`, a Node unit test and a
+- `new-app.mjs` + `app-template/` — **self-contained** scaffold (imports `@neurodesk/webapp-components/*`;
+  analytics is injected centrally by the hosted shell); ships `wrangler.toml`, `public/_headers`, a Node unit test and a
   Playwright browser test; registers the app in `registry/apps.yml`
-- `packages/analytics/` — supplied package: value-validating allow-list + consent/DNT gating + tests
+- `packages/analytics/` — shared page-view-only bootstrap with DNT/GPC gating + tests
 - `changeset-config.json` — independent versioning incl. private packages
 - `models.manifest.json` — externalized model contract (MuscleMap's real 2D, native-z contract)
 

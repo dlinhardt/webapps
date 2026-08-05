@@ -3,6 +3,9 @@
 site:
   domain: webapps.neurodesk.org
   cloudflare_project: neurodesk-webapps
+  analytics:
+    measurement_id: G-4Z9774J59Y
+    period_days: 30
   categories:
     - id: segmentation-analysis
       title: Segmentation & Analysis

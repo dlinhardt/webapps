@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": null,
+  "source": "Google Analytics 4",
+  "periodDays": 30,
+  "unavailable": true,
+  "totals": {
+    "users": 0,
+    "pageViews": 0
+  },
+  "countries": [],
+  "apps": [
+    {
+      "id": "musclemap",
+      "path": "musclemap",
+      "title": "MuscleMap",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "vesselboost",
+      "path": "vesselboost",
+      "title": "VesselBoost",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "spinalcordtoolbox",
+      "path": "sct",
+      "title": "Spinal Cord Toolbox",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "calmar",
+      "path": "calmar",
+      "title": "CALMaR",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "qsmbly",
+      "path": "qsmbly",
+      "title": "QSMbly",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "seedseg",
+      "path": "seedseg",
+      "title": "SeedSeg",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "dicompare",
+      "path": "dicompare",
+      "title": "dicompare",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "deface",
+      "path": "deface",
+      "title": "Deface",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "easy-mp2rage",
+      "path": "easy-mp2rage",
+      "title": "Easy MP2RAGE T1 Map",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "niimath",
+      "path": "niimath",
+      "title": "NiiMath",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "dicom2vid",
+      "path": "dicom2vid",
+      "title": "DICOM2Vid",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "browserqc",
+      "path": "browserqc",
+      "title": "BrowserQC",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    },
+    {
+      "id": "surfannotate",
+      "path": "surfannotate",
+      "title": "SurfAnnotate",
+      "users": 0,
+      "pageViews": 0,
+      "countries": []
+    }
+  ]
+}

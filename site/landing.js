@@ -1,3 +1,8 @@
+import { initAnalytics } from './analytics.js';
+
+const measurementId = document.querySelector('meta[name="neurodesk-ga4-measurement-id"]')?.content;
+if (measurementId) initAnalytics(measurementId);
+
 const searchInput = document.querySelector('#app-search');
 const clearSearch = document.querySelector('#clear-search');
 const resetFilters = document.querySelector('#reset-filters');
@@ -79,3 +84,70 @@ document.addEventListener('keydown', (event) => {
     filterCatalog();
   }
 });
+
+const analyticsSummary = document.querySelector('[data-analytics-summary]');
+const analyticsApps = document.querySelector('[data-analytics-apps]');
+const analyticsPeriod = document.querySelector('[data-analytics-period]');
+const analyticsUpdated = document.querySelector('[data-analytics-updated]');
+const integer = new Intl.NumberFormat();
+
+function renderAnalyticsUnavailable(message = 'Aggregate analytics are not available yet.') {
+  analyticsPeriod.textContent = message;
+  analyticsUpdated.textContent = '';
+  analyticsApps.replaceChildren();
+  const row = document.createElement('tr');
+  const cell = document.createElement('td');
+  cell.colSpan = 4;
+  cell.textContent = 'Statistics will appear after the next analytics-enabled deployment.';
+  row.append(cell);
+  analyticsApps.append(row);
+}
+
+function countryText(countries) {
+  return countries.length
+    ? countries.map((country) => `${country.name} (${integer.format(country.users)})`).join(', ')
+    : 'Not enough aggregate data';
+}
+
+function renderAnalytics(data) {
+  if (data.unavailable) {
+    renderAnalyticsUnavailable();
+    return;
+  }
+
+  const summaryValues = [data.totals.users, data.totals.pageViews, data.countries.length];
+  [...analyticsSummary.querySelectorAll('strong')].forEach((node, index) => {
+    node.textContent = integer.format(summaryValues[index]);
+  });
+  analyticsPeriod.textContent = `Previous ${data.periodDays} days`;
+  analyticsUpdated.textContent = data.generatedAt
+    ? `Updated ${new Date(data.generatedAt).toLocaleDateString()}`
+    : '';
+
+  analyticsApps.replaceChildren();
+  for (const app of data.apps) {
+    const row = document.createElement('tr');
+    const appCell = document.createElement('th');
+    appCell.scope = 'row';
+    const link = document.createElement('a');
+    link.href = `./${app.path}/`;
+    link.textContent = app.title;
+    appCell.append(link);
+    const users = document.createElement('td');
+    users.textContent = integer.format(app.users);
+    const views = document.createElement('td');
+    views.textContent = integer.format(app.pageViews);
+    const countries = document.createElement('td');
+    countries.textContent = countryText(app.countries);
+    row.append(appCell, users, views, countries);
+    analyticsApps.append(row);
+  }
+}
+
+fetch('./analytics.json')
+  .then((response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  })
+  .then(renderAnalytics)
+  .catch(() => renderAnalyticsUnavailable('Aggregate analytics could not be loaded.'));

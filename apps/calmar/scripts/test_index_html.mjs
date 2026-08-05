@@ -337,18 +337,12 @@ assert.doesNotMatch(html, /spinalcordtoolbox-app\.js/,
   'old spinalcordtoolbox-app.js script tag must be gone');
 assert.match(html, /<script\s[^>]*src=["']coi-serviceworker\.js["']/,
   'COI service worker script must remain loaded for same-origin mask downloads');
-assert.match(html, /https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=G-4Z9774J59Y/,
-  'Google Analytics loader must use the Neurodesk GA4 measurement ID');
-assert.match(html, /gtag\(['"]config['"],\s*['"]G-4Z9774J59Y['"]\)/,
-  'Google Analytics config must use the Neurodesk GA4 measurement ID');
-assert.match(html, /navigator\.doNotTrack\s*\|\|\s*window\.doNotTrack\s*\|\|\s*navigator\.msDoNotTrack/,
-  'Google Analytics must check the browser Do Not Track values used by neurodesk.org');
-assert.match(html, /if\s*\(!doNotTrack\)\s*{[\s\S]*?gtag\(['"]config['"],\s*['"]G-4Z9774J59Y['"]\)/,
-  'Google Analytics config must be guarded by the Do Not Track check');
+assert.doesNotMatch(html, /googletagmanager\.com\/gtag\/js|gtag\(['"]config['"]/,
+  'app source must leave analytics bootstrap to the shared hosting shell');
 assert.doesNotMatch(html, /Cloudflare Web Analytics|cloudflareinsights\.com|data-cf-beacon|4312648587884e6b984b7bc189db840e/,
   'the old Cloudflare analytics provider must be absent');
-assert.match(html, /Google Analytics collects aggregate page usage and performance metrics without patient images, masks, voxel values, screenshots, generated outputs, filenames, or analysis results\. If your browser's Do Not Track setting is enabled, Google Analytics tracking is not configured\./,
-  'privacy copy must disclose Google Analytics data limits and Do Not Track behavior');
+assert.match(html, /The Neurodesk hosting layer records page views only, unless your browser sends Do Not Track or Global Privacy Control\.[\s\S]*?It does not send custom events/,
+  'privacy copy must disclose page-view-only analytics and privacy controls');
 assert.match(serviceWorker, /__lnm_downloads/,
   'service worker must serve staged mask downloads from the same-origin route');
 assert.match(serviceWorker, /lnm-mask-downloads-v1/,

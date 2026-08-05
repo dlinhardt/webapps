@@ -14,10 +14,10 @@ orientation, frame rate, slice range, and whether to overlay slice numbers, then
 preview and download the video. It reads the images, windows and reslices them,
 and encodes the video in the page.
 
-- Your images and all processing stay in your browser and are never uploaded. The
-  only external request is anonymous page-view analytics (Google Analytics), which
-  never sees your images. To disable it, delete `web/js/analytics.js` and the two
-  analytics `<script>` tags in `web/index.html`.
+- Your images and all processing stay in your browser and are never uploaded. On
+  Neurodesk hosting, the shared site shell records page views only with Google
+  Analytics. It makes no analytics request when Do Not Track or Global Privacy
+  Control is enabled and never sends images, results, or custom events.
 - Inputs: DICOM (single-frame series and enhanced multiframe, grayscale and RGB
   such as color-FA maps), NIfTI, and FreeSurfer MGZ. Compressed DICOM
   (JPEG/JPEG2000) is not supported; convert it to uncompressed locally first.

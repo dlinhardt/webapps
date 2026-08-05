@@ -5,8 +5,8 @@
 //
 //   pnpm new-app <name>
 //
-// The template imports @neurodesk/webapp-components/* and @neurodesk/analytics by
-// package name (not ../../src), ships its own package.json/vite/eslint/wrangler config,
+// The template imports @neurodesk/webapp-components/* by package name (not
+// ../../src), ships its own package.json/vite/eslint/wrangler config,
 // a DOM-independent Node test, and a Playwright browser test. Missing template files
 // abort loudly instead of being silently skipped.
 import { cp, readFile, writeFile, access, readdir, appendFile } from "node:fs/promises";

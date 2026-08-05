@@ -3,9 +3,10 @@
 A static single-page app that runs the MP2RAGE/SA2RAGE T1-mapping pipeline
 **entirely in your browser** via the Rust core compiled to WebAssembly. Drag in
 NIfTI files, assign roles, compute, preview, and download. **Your images are
-never uploaded** and there is no processing backend. (The hosted page loads
-Google Analytics 4, which reports anonymous page views only — never your images
-or results. Delete the GA `<script>` in `index.html` to self-host without it.)
+never uploaded** and there is no processing backend. (The shared Neurodesk
+hosting shell reports page views only, respects Do Not Track and Global Privacy
+Control, and never sends images, results, or custom events. The app source itself
+contains no analytics bootstrap.)
 
 ## Build the WASM, then run
 

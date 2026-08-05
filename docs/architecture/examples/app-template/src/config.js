@@ -3,5 +3,4 @@
 export const APP = Object.freeze({
   id: "APP_NAME",
   version: "0.0.0",
-  ga4MeasurementId: "", // filled per app from registry/apps.yml
 });

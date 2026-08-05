@@ -1,5 +1,11 @@
 # dicompare
 
+## 0.11.5
+
+### Patch Changes
+
+- Standardize the Neurodesk app shell and add DNT/GPC-respecting page-view analytics with aggregate per-app usage statistics.
+
 ## 0.11.4
 
 ### Patch Changes

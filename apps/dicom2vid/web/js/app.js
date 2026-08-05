@@ -621,7 +621,7 @@ const TOUR = [
   { sel: '#generate', title: '6. Generate and download', body:
     'Encode the <b>MP4 or WebM</b> in the page and download it.' },
   { sel: '.badge', title: 'Privacy', body:
-    'Your images and all processing stay in this browser tab and are never uploaded. The page uses anonymous usage analytics (Google Analytics, page views only) that never include your images or results.' },
+    'Your images and all processing stay in this browser tab and are never uploaded. Neurodesk hosting uses Google Analytics for page views only, sends no custom events, and makes no analytics request when Do Not Track or Global Privacy Control is enabled.' },
 ];
 let tourStep = 0;
 let tourSpotEl = null;

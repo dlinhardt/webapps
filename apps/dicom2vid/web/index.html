@@ -10,12 +10,6 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https://*.google-analytics.com https://*.googletagmanager.com; media-src 'self' blob:; connect-src 'self' blob: https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'">
   <title>MRI2Vid</title>
   <link rel="stylesheet" href="css/style.css">
-  <!-- Anonymous usage analytics (Google Analytics 4): page views only. It never
-       has access to your images, files, or results, which are processed entirely
-       in this browser tab and never uploaded. To disable analytics, delete these
-       two tags and web/js/analytics.js. -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-4Z9774J59Y"></script>
-  <script src="js/analytics.js"></script>
 </head>
 <body>
   <header>
@@ -33,8 +27,8 @@
 
   <div class="intro">
     <p><strong>Runs in your browser.</strong> Your images and all processing stay on your computer and
-      are never uploaded; the video is made right here in this tab. The only external request is
-      anonymous page-view analytics (Google Analytics), which never sees your images.</p>
+      are never uploaded; the video is made right here in this tab. On Neurodesk hosting, Google Analytics
+      records page views only unless Do Not Track or Global Privacy Control is enabled; it never sees your images.</p>
   </div>
 
   <main>
@@ -153,7 +147,7 @@
   </section>
 
   <footer>
-    <p>Based on <code>MRI2vid.py</code>. Runs in your browser; your images never leave it. Uses anonymous page-view analytics (Google Analytics).</p>
+    <p>Based on <code>MRI2vid.py</code>. Runs in your browser; your images never leave it. Neurodesk hosting uses page-view-only analytics and respects browser privacy signals.</p>
   </footer>
 
   <!-- Preview modal: the actual video frames, reconstruction choice, and rotation. -->

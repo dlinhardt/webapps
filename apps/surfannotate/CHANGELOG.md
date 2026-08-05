@@ -1,5 +1,11 @@
 # surfannotate
 
+## 0.1.3
+
+### Patch Changes
+
+- Standardize the Neurodesk app shell and add DNT/GPC-respecting page-view analytics with aggregate per-app usage statistics.
+
 ## 0.1.2
 
 ### Patch Changes

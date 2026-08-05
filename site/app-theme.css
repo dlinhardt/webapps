@@ -260,3 +260,270 @@
   color: var(--nd-brand-text);
   background: var(--nd-brand-light);
 }
+
+/* One application identity and navigation contract across every hosted app.
+   App-owned header controls stay mounted (and can still be invoked by the
+   shared About/Cite/Privacy buttons), but the visible chrome is consistent. */
+[data-neurodesk-top-bar-host] {
+  display: block !important;
+  box-sizing: border-box !important;
+  min-height: 64px !important;
+  width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: var(--nd-brand-menu-text) !important;
+  background: var(--nd-brand-menu) !important;
+  border: 0 !important;
+  border-bottom: 2px solid var(--nd-brand-primary) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+[data-neurodesk-top-bar-host] > :not(.nd-app-bar) {
+  display: none !important;
+}
+
+.nd-app-bar {
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 24px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 62px !important;
+  padding: 0 28px !important;
+  margin: 0 !important;
+  font-family: "Pontano Sans", Arial, sans-serif !important;
+  font-size: 16px !important;
+  font-weight: 400 !important;
+  line-height: 1.2 !important;
+  color: var(--nd-brand-menu-text) !important;
+  background: var(--nd-brand-menu) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.nd-app-bar--standalone {
+  border-bottom: 2px solid var(--nd-brand-primary) !important;
+}
+
+.nd-app-bar__identity,
+.nd-app-bar__navigation {
+  display: flex !important;
+  align-items: center !important;
+  min-width: 0 !important;
+}
+
+.nd-app-bar__identity {
+  gap: 18px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+}
+
+.nd-app-bar__title,
+.nd-app-bar__description,
+.nd-app-bar__version {
+  display: inline !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+}
+
+.nd-app-bar__title {
+  flex: 0 0 auto !important;
+  color: #ffffff !important;
+  font-size: 21px !important;
+  font-weight: 600 !important;
+}
+
+.nd-app-bar__description {
+  overflow: hidden !important;
+  color: var(--nd-brand-hover) !important;
+  font-size: 18px !important;
+  font-weight: 400 !important;
+  text-overflow: ellipsis !important;
+}
+
+.nd-app-bar__version {
+  flex: 0 0 auto !important;
+  color: var(--nd-brand-hover) !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+
+.nd-app-bar__navigation {
+  flex: 0 0 auto !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+}
+
+.nd-app-bar__action {
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  min-height: 40px !important;
+  padding: 7px 8px !important;
+  margin: 0 !important;
+  font: inherit !important;
+  font-size: 16px !important;
+  font-weight: 400 !important;
+  line-height: 1 !important;
+  color: #ffffff !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+  cursor: pointer !important;
+  opacity: 1 !important;
+  transition: color 120ms ease, background-color 120ms ease !important;
+}
+
+.nd-app-bar__action:hover {
+  color: var(--nd-brand-menu) !important;
+  background: var(--nd-brand-hover) !important;
+}
+
+.nd-app-bar__action svg {
+  display: block !important;
+  width: 22px !important;
+  height: 22px !important;
+  flex: 0 0 22px !important;
+  fill: none !important;
+  stroke: currentColor !important;
+  stroke-width: 1.8 !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+}
+
+.nd-app-bar__action:last-child svg {
+  fill: currentColor !important;
+  stroke: none !important;
+}
+
+[data-neurodesk-top-bar-overlay] {
+  flex-direction: column !important;
+}
+
+[data-neurodesk-top-bar-overlay] > .nd-app-bar {
+  position: relative !important;
+  z-index: 1 !important;
+  flex: 0 0 auto !important;
+  border-bottom: 2px solid var(--nd-brand-primary) !important;
+}
+
+/* QSMbly keeps its app-specific launch and QSMxT links below the shared bar;
+   hide only the two navigation links now supplied by the common chrome. */
+:root[data-neurodesk-app="qsmbly"] #landingPage .landing-nav-links
+  :is(a[href="../"], a[href="https://github.com/neurodesk/webapps/tree/main/apps/qsmbly"]) {
+  display: none !important;
+}
+
+.nd-app-utility-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  padding: 8px 28px !important;
+  color: var(--nd-brand-text) !important;
+  background: var(--nd-brand-pale) !important;
+  border-bottom: 1px solid var(--nd-brand-border) !important;
+}
+
+.nd-app-dialog {
+  width: min(520px, calc(100vw - 32px));
+  padding: 0;
+  color: var(--nd-brand-text);
+  background: var(--nd-brand-surface);
+  border: 1px solid var(--nd-brand-border-strong);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgb(12 14 10 / 28%);
+}
+
+.nd-app-dialog::backdrop {
+  background: rgb(12 14 10 / 62%);
+}
+
+.nd-app-dialog__panel {
+  display: grid;
+  gap: 16px;
+  padding: 28px;
+  font-family: "Pontano Sans", Arial, sans-serif;
+}
+
+.nd-app-dialog__panel :is(h2, p) {
+  margin: 0;
+  color: var(--nd-brand-text);
+}
+
+.nd-app-dialog__source {
+  justify-self: start !important;
+  color: var(--nd-brand-selection) !important;
+  background: transparent !important;
+}
+
+.nd-app-dialog__close {
+  justify-self: end;
+  min-width: 90px;
+  padding: 9px 16px;
+  color: var(--nd-brand-action-text);
+  background: var(--nd-brand-primary);
+  border: 1px solid var(--nd-brand-primary);
+  border-radius: 7px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 1120px) {
+  .nd-app-bar {
+    gap: 12px !important;
+    padding-inline: 16px !important;
+  }
+
+  .nd-app-bar__identity {
+    gap: 10px !important;
+  }
+
+  .nd-app-bar__navigation {
+    gap: 2px !important;
+  }
+
+  .nd-app-bar__action {
+    gap: 4px !important;
+    padding-inline: 5px !important;
+    font-size: 14px !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .nd-app-bar {
+    overflow-x: auto !important;
+  }
+
+  .nd-app-bar__description {
+    display: none !important;
+  }
+}
+
+@media (max-width: 620px) {
+  .nd-app-bar__action span {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+}

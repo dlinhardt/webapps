@@ -43,14 +43,13 @@ finish (needs the GitHub UI):
 
 ## Analytics
 
-`web/index.html` loads Google Analytics 4 (measurement ID `G-4Z9774J59Y`) so the
-NeuroDesk team can see anonymous usage (page views / interactions). It never sees
-any images or results — those are processed entirely in the visitor's browser and
-are never uploaded. To self-host without analytics, delete the GA `<script>` block
-near the top of `web/index.html`.
+The shared Neurodesk hosting shell loads Google Analytics 4 for page views only.
+It makes no analytics request when Do Not Track or Global Privacy Control is
+enabled and never sends images, results, or custom events. `web/index.html` itself
+contains no analytics bootstrap, so a standalone deployment is not tracked.
 
 ## Notes
 
-- The only third-party runtime request is the Google Analytics tag; everything else
-  (WASM, viewer, workers) is self-contained. Image processing always happens in the
-  visitor's browser and the static host never sees any data.
+- The application runtime (WASM, viewer, workers) is self-contained. Image
+  processing always happens in the visitor's browser and the static host never
+  sees patient-derived data.

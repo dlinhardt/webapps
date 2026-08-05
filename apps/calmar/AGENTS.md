@@ -19,7 +19,7 @@ Common issues it catches:
 
 - Keep npm dependencies current with `npm install <package>@latest` so `package.json` and `package-lock.json` stay in sync.
 - Keep browser CDN dependencies pinned in `web/index.html`; check the upstream package version before changing those URLs.
-- Google Analytics 4 is loaded from `web/index.html` with measurement ID `G-4Z9774J59Y`, and its `gtag('config', ...)` call is disabled when the browser reports Do Not Track as `1` or `yes`. Keep analytics limited to aggregate page usage and performance metrics; do not add custom analytics events or parameters carrying filenames, patient image metadata, voxel values, masks, screenshots, generated outputs, free text, or analysis results. Keep `scripts/test_index_html.mjs` and the privacy modal aligned if analytics changes.
+- Google Analytics is injected by the monorepo's shared hosting shell, never by `web/index.html`. The shared bootstrap uses measurement ID `G-4Z9774J59Y`, sends automatic page views only, and makes no Google request when Do Not Track or Global Privacy Control is enabled. Do not add app-local analytics or custom events carrying filenames, patient image metadata, voxel values, masks, screenshots, generated outputs, free text, or analysis results. Keep `scripts/test_index_html.mjs` and the privacy modal aligned if analytics changes.
 
 ## Architecture
 

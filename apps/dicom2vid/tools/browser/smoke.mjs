@@ -46,10 +46,6 @@ async function main() {
   const browser = await chromium.launch();
   const page = await browser.newPage();
 
-  // Keep the test hermetic: never hit Google Analytics; return an empty script.
-  await page.route(/googletagmanager\.com|google-analytics\.com|analytics\.google\.com/,
-    (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body: '' }));
-
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(`console.error: ${m.text()}`); });
@@ -57,10 +53,9 @@ async function main() {
   try {
     await page.goto(`${base}/web/index.html`, { waitUntil: 'load' });
 
-    // Analytics snippet is wired without any external call (GA hosts are stubbed).
-    const gaWired = await page.evaluate(() => Array.isArray(window.dataLayer) && window.dataLayer.length >= 2);
-    if (gaWired) ok('analytics wired (dataLayer populated); no external call in test');
-    else fail('analytics snippet not wired (window.dataLayer missing)');
+    const gaAbsent = await page.evaluate(() => !window.dataLayer);
+    if (gaAbsent) ok('standalone app source has no analytics bootstrap');
+    else fail('standalone app source unexpectedly populated window.dataLayer');
 
     // 1. In-browser parity against the golden.
     const parity = await page.evaluate(async () => {

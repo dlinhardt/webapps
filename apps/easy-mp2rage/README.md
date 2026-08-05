@@ -10,10 +10,10 @@ B1-corrected T1 map in your browser. Your images are never uploaded and all
 processing runs client-side. Outputs download as NIfTI. When the input was a
 DICOM folder, the T1 map also downloads as a derived DICOM series.
 
-The hosted site loads Google Analytics for anonymous usage statistics (page
-views only, for the NeuroDesk team); it never has access to your images or
-results. Remove the Google Analytics snippet from web/index.html if you self-host
-and do not want it.
+The shared Neurodesk hosting shell uses Google Analytics for page views only; it
+makes no analytics request when Do Not Track or Global Privacy Control is enabled
+and never sends images, results, or custom events. The application source itself
+contains no analytics bootstrap, so a standalone self-hosted copy has no tracking.
 
 ## What it does
 

@@ -62,6 +62,7 @@ export function renderLandingPage(registry) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Privacy-preserving neuroimaging tools that run locally in your browser.">
+  <meta name="neurodesk-ga4-measurement-id" content="${escape(registry.site.analytics.measurement_id)}">
   <title>Neurodesk Webapps</title>
   <link rel="stylesheet" href="./landing.css">
   <script type="module" src="./landing.js"></script>
@@ -71,7 +72,7 @@ export function renderLandingPage(registry) {
     <div class="site-header__inner">
       <a class="brand" href="https://neurodesk.org/" aria-label="Neurodesk home"><img src="./neurodesk-logo.svg" alt="Neurodesk"></a>
       <nav class="site-nav" aria-label="Neurodesk navigation">
-        <a href="https://github.com/neurodesk">GitHub</a>
+        <a href="https://github.com/neurodesk/webapps">GitHub</a>
         <span aria-current="page">Webapps</span>
       </nav>
     </div>
@@ -117,6 +118,37 @@ export function renderLandingPage(registry) {
       <h2>No matching apps</h2>
       <p>Try a broader term, another category, or search for a file format such as DICOM or NIfTI.</p>
       <button id="reset-filters" type="button">Show all apps</button>
+    </section>
+
+    <section class="analytics-section" id="analytics" aria-labelledby="analytics-title">
+      <header class="analytics-section__header">
+        <div>
+          <p class="eyebrow">Aggregate usage</p>
+          <h2 id="analytics-title">Webapp analytics</h2>
+        </div>
+        <p>See how many people use each webapp and the countries they access it from. These are aggregate page-view statistics only; Do Not Track and Global Privacy Control are respected.</p>
+      </header>
+      <div class="analytics-summary" data-analytics-summary aria-live="polite">
+        <article><strong>—</strong><span>People</span></article>
+        <article><strong>—</strong><span>Page views</span></article>
+        <article><strong>—</strong><span>Countries</span></article>
+      </div>
+      <div class="analytics-panel">
+        <div class="analytics-panel__heading">
+          <div>
+            <h3>Usage by app</h3>
+            <p data-analytics-period>Loading aggregate statistics…</p>
+          </div>
+          <p data-analytics-updated></p>
+        </div>
+        <div class="analytics-table-wrap">
+          <table class="analytics-table">
+            <thead><tr><th>App</th><th>People</th><th>Page views</th><th>Top countries</th></tr></thead>
+            <tbody data-analytics-apps><tr><td colspan="4">Loading analytics…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="analytics-privacy">No custom events, filenames, imaging metadata, processing settings, measurements, or results are sent to Google Analytics. Countries with fewer than five visitors are not published.</p>
     </section>
   </main>
 

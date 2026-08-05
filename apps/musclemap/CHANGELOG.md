@@ -1,5 +1,11 @@
 # musclemap
 
+## 1.2.41
+
+### Patch Changes
+
+- Standardize the Neurodesk app shell and add DNT/GPC-respecting page-view analytics with aggregate per-app usage statistics.
+
 ## 1.2.40
 
 ### Patch Changes

@@ -445,7 +445,7 @@
       <p>SpinalCordToolbox uses ONNX Runtime Web to run browser-compatible deep learning models directly in the browser via WebAssembly. Your NIfTI or DICOM files are read into browser memory, processed locally, and results are displayed without patient-data network transfer.</p>
 
       <h4>Third-party services</h4>
-      <p>Google Analytics collects aggregate page usage and performance metrics when your browser's Do Not Track setting is not enabled. Those statistics must not include patient image data, DICOM metadata, filenames, voxel values, masks, segmentations, screenshots, free-text patient-derived logs, or downloaded outputs.</p>
+      <p>The Neurodesk hosting layer records page views only, unless your browser sends Do Not Track or Global Privacy Control. It does not send custom events, patient image data, DICOM metadata, filenames, voxel values, masks, segmentations, screenshots, free-text patient-derived logs, or downloaded outputs to Google Analytics.</p>
     </div>
   </div>
 </div>
@@ -526,19 +526,5 @@ function toggleSection(section) {
 
 <!-- Main app -->
 <script type="module" src="js/spinalcordtoolbox-app.js"></script>
-<!-- Google Analytics (same property and Do Not Track behavior as neurodesk.org) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-4Z9774J59Y"></script>
-<script>
-  var doNotTrack = false;
-  var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
-  doNotTrack = dnt === '1' || dnt === 'yes';
-  if (!doNotTrack) {
-    window.dataLayer = window.dataLayer || [];
-    function gtag() { dataLayer.push(arguments); }
-    gtag('js', new Date());
-    gtag('config', 'G-4Z9774J59Y');
-  }
-</script>
-
 </body>
 </html>

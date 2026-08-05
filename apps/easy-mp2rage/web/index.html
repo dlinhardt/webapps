@@ -4,17 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Easy MP2RAGE T1 Map, T1 mapping, B1 correction &amp; UNI denoising</title>
-<!-- Anonymous usage analytics (Google Analytics 4) for NeuroDesk hosting stats.
-     Reports page views / interactions only. It never has access to your images,
-     files or results, those are processed entirely in the browser and are never
-     uploaded. Fails silently offline; the app still works with the network off. -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-4Z9774J59Y"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-4Z9774J59Y');
-</script>
 <style>
   :root{
     --bg:#0d1014; --bg2:#0f1319; --panel:#161b22; --panel2:#1d242d; --line:#28313c;
@@ -227,10 +216,10 @@
     single <code>.zip</code>.</p>
     <p><b>Privacy.</b> Everything you load and all image processing runs inside this browser tab via
     WebAssembly. Your images, DICOM/NIfTI files and results are <b>never uploaded</b> to any server, and the
-    tool keeps working with the network disconnected. The page does load <b>Google Analytics</b>, which
-    reports <b>anonymous usage</b> (page views and interactions) to the NeuroDesk team so they can see how
-    many people use the tool. It <b>never has access to your images or results</b>, only that a visit
-    happened. (If you use the folder picker, Chrome shows an &ldquo;upload… only continue if you trust this
+    tool keeps working with the network disconnected. On Neurodesk hosting, Google Analytics records
+    <b>page views only</b>, unless your browser sends Do Not Track or Global Privacy Control. No custom
+    events are sent. It <b>never has access to your images or results</b>, only that a visit happened.
+    (If you use the folder picker, Chrome shows an &ldquo;upload… only continue if you trust this
     site&rdquo; prompt. That is Chrome&rsquo;s wording for granting the page <em>read</em> access to a folder
     on your disk, not a network upload. Drag &amp; drop skips it.)</p>
     <p><b>How to use.</b> (1) Drop your NIfTI files or DICOM folders and tag their roles. (2) Confirm the
