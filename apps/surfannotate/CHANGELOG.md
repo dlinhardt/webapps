@@ -1,5 +1,11 @@
 # surfannotate
 
+## 0.1.4
+
+### Patch Changes
+
+- 46be48e: Add a persistent light and dark theme switch to the webapp catalog and every hosted or standalone webapp bundle.
+
 ## 0.1.3
 
 ### Patch Changes

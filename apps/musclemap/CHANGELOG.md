@@ -1,5 +1,11 @@
 # musclemap
 
+## 1.2.42
+
+### Patch Changes
+
+- 46be48e: Add a persistent light and dark theme switch to the webapp catalog and every hosted or standalone webapp bundle.
+
 ## 1.2.41
 
 ### Patch Changes
