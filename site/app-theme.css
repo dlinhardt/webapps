@@ -254,6 +254,55 @@
   border-color: var(--nd-brand-selected);
 }
 
+/* SurfAnnotate's file input is visually represented by its adjacent label.
+   Theme the visible control itself, including the disabled overlay state. */
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] .upload-visual {
+  color: var(--nd-brand-text);
+  background: var(--nd-brand-pale);
+  border-color: var(--nd-brand-primary);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] .upload-visual > svg {
+  color: var(--nd-brand-primary);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] .upload-action {
+  color: var(--nd-brand-action-text);
+  background: var(--nd-brand-primary);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls
+  .upload-field > input:disabled + .upload-visual {
+  color: var(--nd-brand-text-dim);
+  background: var(--nd-brand-unselected);
+  border-color: var(--nd-brand-border-strong);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls
+  .upload-field > input:disabled + .upload-visual :is(svg, small) {
+  color: var(--nd-brand-text-dim);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] #controls
+  .upload-field > input:disabled + .upload-visual .upload-action {
+  color: var(--nd-brand-text-dim);
+  background: var(--nd-brand-pale);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"]
+  :is(.drop-hint strong, .start-step-number) {
+  color: var(--nd-brand-text);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"]
+  :is(.start-footer a, .cite-section h4, .cite-item a, .cite-close) {
+  color: var(--nd-brand-light);
+}
+
+:root[data-neurodesk-app="surfannotate"][data-neurodesk-theme="dark"] .cite-close:hover {
+  color: var(--nd-brand-action-text);
+}
+
 [data-neurodesk-app] body,
 [data-neurodesk-app] button,
 [data-neurodesk-app] input,
@@ -605,8 +654,12 @@
 
 .nd-app-dialog__source {
   justify-self: start !important;
-  color: var(--nd-brand-selection) !important;
+  color: var(--nd-brand-light) !important;
   background: transparent !important;
+}
+
+:root[data-neurodesk-theme="light"] .nd-app-dialog__source {
+  color: var(--nd-brand-selected) !important;
 }
 
 .nd-app-dialog__close {

@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(here, '..', 'test', 'fixtures');
+const SHARED_THEME = join(here, '..', '..', '..', 'site', 'app-theme.css');
 
 const errors = [];
 
@@ -66,6 +67,67 @@ test('the workspace uses the Neurodesk palette and accessible custom upload cont
   // The styled label remains a native file-input activation target.
   await expect(page.locator('#surfaceInput')).toBeEnabled();
   await expect(page.locator('#overlayInput')).toBeDisabled();
+});
+
+test('the hosted dark theme keeps upload states and information links readable', async ({ page }) => {
+  await page.addStyleTag({ path: SHARED_THEME });
+  await page.evaluate(() => {
+    document.documentElement.dataset.neurodeskApp = 'surfannotate';
+    document.documentElement.dataset.neurodeskTheme = 'dark';
+
+    const dialog = document.createElement('dialog');
+    dialog.className = 'nd-app-dialog';
+    dialog.innerHTML = `
+      <div class="nd-app-dialog__panel">
+        <h2>About SurfAnnotate</h2>
+        <p>SurfAnnotate runs entirely in your browser.</p>
+        <a class="nd-app-bar__action nd-app-dialog__source" href="#source">
+          View source on GitHub
+        </a>
+      </div>
+    `;
+    document.body.append(dialog);
+  });
+  // The upload control intentionally animates theme colour changes.
+  await page.waitForTimeout(500);
+
+  const colours = await page.evaluate(() => {
+    const colour = (selector) => getComputedStyle(document.querySelector(selector)).color;
+    const background = (selector) => getComputedStyle(document.querySelector(selector)).backgroundColor;
+    return {
+      enabledUploadText: colour('#surfaceInput + .upload-visual'),
+      enabledUploadBackground: background('#surfaceInput + .upload-visual'),
+      disabledUploadText: colour('#overlayInput + .upload-visual'),
+      disabledUploadBackground: background('#overlayInput + .upload-visual'),
+      disabledUploadActionText: colour('#overlayInput + .upload-visual .upload-action'),
+      disabledUploadActionBackground: background('#overlayInput + .upload-visual .upload-action'),
+      viewerDropTitle: colour('.drop-hint strong'),
+      startStepNumber: colour('.start-step-number'),
+      startFooterLink: colour('.start-footer a'),
+      citationSectionHeading: colour('.cite-section h4'),
+      citationLink: colour('.cite-item a'),
+      citationClose: colour('.cite-close'),
+      informationLink: colour('.nd-app-dialog__source'),
+      informationBackground: background('.nd-app-dialog')
+    };
+  });
+
+  expect(colours).toEqual({
+    enabledUploadText: 'rgb(232, 245, 208)',
+    enabledUploadBackground: 'rgb(16, 20, 13)',
+    disabledUploadText: 'rgb(156, 163, 175)',
+    disabledUploadBackground: 'rgb(31, 46, 24)',
+    disabledUploadActionText: 'rgb(156, 163, 175)',
+    disabledUploadActionBackground: 'rgb(16, 20, 13)',
+    viewerDropTitle: 'rgb(232, 245, 208)',
+    startStepNumber: 'rgb(232, 245, 208)',
+    startFooterLink: 'rgb(196, 227, 130)',
+    citationSectionHeading: 'rgb(196, 227, 130)',
+    citationLink: 'rgb(196, 227, 130)',
+    citationClose: 'rgb(196, 227, 130)',
+    informationLink: 'rgb(196, 227, 130)',
+    informationBackground: 'rgb(22, 26, 14)'
+  });
 });
 
 test('the empty canvas shows no phantom loading text', async ({ page }) => {

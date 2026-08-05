@@ -1,5 +1,11 @@
 # surfannotate
 
+## 0.1.5
+
+### Patch Changes
+
+- Improve dark-theme contrast for upload controls and informational dialogs.
+
 ## 0.1.4
 
 ### Patch Changes
