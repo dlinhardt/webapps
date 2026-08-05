@@ -28,6 +28,17 @@ function resolveRequest(pathname) {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://127.0.0.1');
+    if (url.pathname === '/qsm-nav.js') {
+      // QSMbly deliberately selects a local ecosystem-bar script on localhost.
+      // Production uses qsmxt.github.io; this fixture keeps the composite smoke
+      // focused on the deployed subpath without requiring that external script.
+      const body = '/* QSM ecosystem navigation smoke fixture */';
+      response.writeHead(200, {
+        'content-length': Buffer.byteLength(body),
+        'content-type': 'text/javascript; charset=utf-8',
+      }).end(body);
+      return;
+    }
     let path = resolveRequest(url.pathname);
     if (!path) {
       response.writeHead(400).end('Bad request');
@@ -186,6 +197,7 @@ try {
       if (url.pathname === '/theme.js') return;
       if (url.pathname === '/app-shell.js') return;
       if (url.pathname === '/analytics.js') return;
+      if (app.id === 'qsmbly' && url.pathname === '/qsm-nav.js') return;
       if (returningHome && url.pathname === '/') return;
       if (url.pathname !== `/${app.path}/` && !url.pathname.startsWith(`/${app.path}/`)) {
         subpathLeaks.push(url.pathname);
