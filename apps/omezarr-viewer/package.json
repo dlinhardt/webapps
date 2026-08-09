@@ -1,0 +1,26 @@
+{
+  "name": "omezarr-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "BSD-2-Clause",
+  "description": "Stream and explore multiscale OME-Zarr volumes directly in the browser.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node ../../scripts/theme-app-dist.mjs --app omezarr-viewer",
+    "preview": "vite preview",
+    "test": "node --test test/*.test.js && tsc --noEmit",
+    "test:e2e": "playwright test",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@neurodesk/webapp-components": "workspace:*",
+    "@niivue/niivue": "1.0.0-rc.11",
+    "zarrita": "^0.7.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.44.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.2"
+  }
+}

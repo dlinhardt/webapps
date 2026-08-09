@@ -1,0 +1,116 @@
+diff --git a/dist/NVControlBase-Cq7vd-TD.js b/dist/NVControlBase-Cq7vd-TD.js
+index 233eaa4b018793ea685dedebbd73c0c8a6417728..d8b330784d0bb69d5264c34a34e2fd519ac70cf1 100644
+--- a/dist/NVControlBase-Cq7vd-TD.js
++++ b/dist/NVControlBase-Cq7vd-TD.js
+@@ -12279,63 +12279,18 @@ function xS(t) {
+       return { lengthMM: n, label: `${n} mm` };
+   return null;
+ }
+-function Yx(t, e, n, i, r) {
+-  const s = pS(t);
+-  if (!s?.screen || !s.leftTopWidthHeight) return null;
+-  const o = jx[s.axCorSag];
+-  if (!o) return null;
+-  const a = s.screen.fovMM, l = Math.abs(a[o[0]]), [c, h, d, u] = s.leftTopWidthHeight, f = xS(l);
+-  if (!f) return null;
+-  const m = d / l, x = f.lengthMM * m, p = 5, y = x / p, T = 4, _ = 8, b = c + d - _, g = b - x, v = h + u - _ - T, w = [];
+-  for (let S = 0; S < p; S++)
+-    if (S % 2 === 0) {
+-      const F = g + S * y, U = g + (S + 1) * y;
+-      w.push(n(F, v, U, v, T, i));
+-    }
+-  const E = 1, A = v - T / 2, M = v + T / 2;
+-  w.push(
+-    n(
+-      g,
+-      A,
+-      b,
+-      A,
+-      E,
+-      i
+-    )
+-  ), w.push(
+-    n(
+-      g,
+-      M,
+-      b,
+-      M,
+-      E,
+-      i
+-    )
+-  ), w.push(
+-    n(
+-      g,
+-      A,
+-      g,
+-      M,
+-      E,
+-      i
+-    )
+-  ), w.push(
+-    n(
+-      b,
+-      A,
+-      b,
+-      M,
+-      E,
+-      i
+-    )
+-  );
+-  for (let S = 1; S < p; S++) {
+-    const F = g + S * y;
+-    w.push(n(F, A, F, M, E, i));
+-  }
+-  const P = g + x / 2, D = v + T / 2 + 2, I = [], R = e(f.label, P, D, 0.8, i, 0, 0);
+-  return R.count > 0 && I.push(R), { lines: w, labels: I };
++function Yx(t, e, n, i, r, s = 1, o) {
++  const a = pS(t);
++  if (!a?.screen || !a.leftTopWidthHeight) return null;
++  const l = jx[a.axCorSag];
++  if (!l) return null;
++  const c = a.screen.fovMM, h = Number.isFinite(s) && s > 0 ? s : 1, d = Math.abs(c[l[0]]) / h, [u, f, m, x] = a.leftTopWidthHeight, p = m / d;
++  if (!Number.isFinite(p) || p <= 0) return null;
++  const y = Math.min(160, Math.max(60, m * 0.2)), T = y / p, _ = T >= 10 ? `${Number((T / 10).toPrecision(2))} cm` : T >= 1 ? `${Number(T.toPrecision(2))} mm` : `${Number((T * 1e3).toPrecision(2))} um`, b = o ? 16 : 8, g = o ? o[0] - b : u + m - b, v = g - y, w = o ? o[1] - 48 : f + x - b - 2, E = [0, 0, 0, 0.85], A = [1, 1, 1, 1], M = [
++    n(v, w, g, w, 5, E),
++    n(v, w, g, w, 2, A)
++  ], P = [], D = e(_, v + y / 2, w + 4, 1, A, 0.5, 0, E);
++  return D.count > 0 && P.push(D), { lines: M, labels: P };
+ }
+ function Zx(t, e, n = [1, 1, 1]) {
+   if (e < 1)
+@@ -19280,7 +19235,9 @@ class _2 {
+           (O, $, N, q, j, Y, K, J) => this.fontRenderer.buildText(O, $, N, q, j, Y, K, J),
+           Pe,
+           n.ui.fontColor,
+-          n.scene.backgroundColor
++          n.scene.backgroundColor,
++          n.scene.pan2Dxyzmm[3],
++          [d, u]
+         );
+         U && (c.push(...U.labels), E.push(...U.lines));
+       }
+@@ -26847,7 +26804,9 @@ class S2 {
+           (q, j, Y, K, J, ne, ce, z) => this.fontRenderer.buildText(q, j, Y, K, J, ne, ce, z),
+           Pe,
+           e.ui.fontColor,
+-          e.scene.backgroundColor
++          e.scene.backgroundColor,
++          e.scene.pan2Dxyzmm[3],
++          [u, f]
+         );
+         N && (h.push(...N.labels), P.push(...N.lines));
+       }
+diff --git a/dist/view/NVRuler.d.ts b/dist/view/NVRuler.d.ts
+index d38eac8cbc65f11cfaf87bddd594f72e0076e95d..5233235c5685bf63e7d28291f22a56194b5e9c26 100644
+--- a/dist/view/NVRuler.d.ts
++++ b/dist/view/NVRuler.d.ts
+@@ -6,7 +6,7 @@ export type RulerResult = {
+     labels: GlyphBatch[];
+ };
+ /**
+- * Build a checkerboard scale ruler on the best 2D tile.
++ * Build a simple horizontal scale ruler on the best 2D tile.
+  * Returns lines and labels in canvas-pixel coordinates, or null if no ruler should be drawn.
+  */
+-export declare function buildRuler(tiles: SliceTile[], buildText: BuildTextFn, buildLine: BuildLineFn, fontColor: number[], _backColor: number[]): RulerResult | null;
++export declare function buildRuler(tiles: SliceTile[], buildText: BuildTextFn, buildLine: BuildLineFn, fontColor: number[], _backColor: number[], zoom?: number, viewportSize?: readonly [number, number]): RulerResult | null;

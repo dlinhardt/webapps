@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@niivue/niivue@1.0.0-rc.11': 4eb0de8e86dc7d24f196ff2255c9d6c95065e7c68d7254581d9a39681d2c8cf2
+
 importers:
 
   .:
@@ -289,6 +292,28 @@ importers:
       vite:
         specifier: ^5.4.6
         version: 5.4.21(@types/node@24.13.3)
+
+  apps/omezarr-viewer:
+    dependencies:
+      '@neurodesk/webapp-components':
+        specifier: workspace:*
+        version: link:../../packages/components
+      '@niivue/niivue':
+        specifier: 1.0.0-rc.11
+        version: 1.0.0-rc.11(patch_hash=4eb0de8e86dc7d24f196ff2255c9d6c95065e7c68d7254581d9a39681d2c8cf2)
+      zarrita:
+        specifier: ^0.7.3
+        version: 0.7.4
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.44.0
+        version: 1.61.1
+      typescript:
+        specifier: ^5.8.3
+        version: 5.8.3
+      vite:
+        specifier: ^6.3.2
+        version: 6.4.3(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0)
 
   apps/qsmbly:
     dependencies:
@@ -1711,6 +1736,9 @@ packages:
   '@niivue/niivue@0.69.0':
     resolution: {integrity: sha512-YMjQvJgD1W2b7DuoxkwlC4VxbrgIePRJ5qyQzXKxi2v2MBVg285P/CIQyg46oDDGDIcaNlbd+MhtO/edMbXJkA==}
 
+  '@niivue/niivue@1.0.0-rc.11':
+    resolution: {integrity: sha512-qfhi/p5yU4vIHrwmcmFaeMuSGBfdORkjNSrBwT2TjnV29f1SPn2OTHLH+SPROznJWViyjhjefmT9SBX4ye/j4Q==}
+
   '@niivue/niivue@1.0.0-rc.9':
     resolution: {integrity: sha512-CPu6+KTONESagpbYn+BF/TWy27twmPgqpLNam9x24tl9XDWKfJTLhkjqBZSCVOyWqu1eYMdJFt/nQeDbTGdWvA==}
 
@@ -2220,6 +2248,9 @@ packages:
 
   '@zarrita/storage@0.1.4':
     resolution: {integrity: sha512-qURfJAQcQGRfDQ4J9HaCjGaj3jlJKc66bnRk6G/IeLUsM7WKyG7Bzsuf1EZurSXyc0I4LVcu6HaeQQ4d3kZ16g==}
+
+  '@zarrita/storage@0.2.0':
+    resolution: {integrity: sha512-855ZXqtnds7spnT8vNvD+MXa3QExP1m2GqShe8yt7uZXHnQLgJHgkpVwFjE1B0KDDRO0ki09hmk6OboTaIfPsQ==}
 
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
@@ -4817,6 +4848,10 @@ packages:
     resolution: {integrity: sha512-gsq2PdJIWWGhx5kcdWStvNWit9FVdTewm4SEG7gFskWs+XCVaULt9+BwuoBtJiRE8eo3L1IPAOrbByNLtLtIlg==}
     engines: {node: '>=12'}
 
+  unzipit@2.0.0:
+    resolution: {integrity: sha512-DVeVIWUZCAQPNzm5sB0hpsG1GygTTdBnzNtYYEpInkttx5evkyqRgZi6rTczoySqp8hO5jHVKzrH0f23X8FZLg==}
+    engines: {node: '>=18'}
+
   unzipper@0.12.5:
     resolution: {integrity: sha512-tXYOi9R57Uj/2Z25SOs5RRSzq886MBQj2gY8dPL+xl/kv6s6SvByoKfAtvfVeEuhntWDgjd2o9p2lb4TVPAz0A==}
 
@@ -5144,6 +5179,9 @@ packages:
 
   zarrita@0.5.4:
     resolution: {integrity: sha512-i88iN2+HqIQ+uiCEWLfhjbYNXAJD7IrM4h3lFwFclfqEOOhxp10amRWtqmgN5jbuy3+h0LwdyLVVzk4y9rTLgg==}
+
+  zarrita@0.7.4:
+    resolution: {integrity: sha512-NChufj86SceFj45z4CYjndmI98dphaG7hU8Wj0UGpMyT21o0V3HTY6zo87aSobYWts1tNFivSXzH2AR1AkaWjA==}
 
   zod@3.22.3:
     resolution: {integrity: sha512-EjIevzuJRiRPbVH4mGc8nApb/lVLKVpmUhAaR5R5doKGfAnGJ6Gr3CViAVjP+4FWSxCsybeWQdcgCtbX+7oZug==}
@@ -6463,6 +6501,14 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-linux-x64-gnu': 4.62.2
 
+  '@niivue/niivue@1.0.0-rc.11(patch_hash=4eb0de8e86dc7d24f196ff2255c9d6c95065e7c68d7254581d9a39681d2c8cf2)':
+    dependencies:
+      cbor-x: 1.6.4
+      clipper2-ts: 2.0.1-18
+      earcut: 3.2.3
+      gl-matrix: 3.4.4
+      nifti-reader-js: 0.8.0
+
   '@niivue/niivue@1.0.0-rc.9':
     dependencies:
       cbor-x: 1.6.4
@@ -6983,6 +7029,11 @@ snapshots:
     dependencies:
       reference-spec-reader: 0.2.0
       unzipit: 1.4.3
+
+  '@zarrita/storage@0.2.0':
+    dependencies:
+      reference-spec-reader: 0.2.0
+      unzipit: 2.0.0
 
   abbrev@4.0.0: {}
 
@@ -10194,6 +10245,8 @@ snapshots:
     dependencies:
       uzip-module: 1.0.3
 
+  unzipit@2.0.0: {}
+
   unzipper@0.12.5:
     dependencies:
       bluebird: 3.7.2
@@ -10484,6 +10537,11 @@ snapshots:
   zarrita@0.5.4:
     dependencies:
       '@zarrita/storage': 0.1.4
+      numcodecs: 0.3.2
+
+  zarrita@0.7.4:
+    dependencies:
+      '@zarrita/storage': 0.2.0
       numcodecs: 0.3.2
 
   zod@3.22.3: {}

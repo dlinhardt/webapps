@@ -10,3 +10,5 @@ allowBuilds:
   onnxruntime-node: true
   sharp: false
   workerd: true
+patchedDependencies:
+  '@niivue/niivue@1.0.0-rc.11': patches/@niivue__niivue@1.0.0-rc.11.patch
