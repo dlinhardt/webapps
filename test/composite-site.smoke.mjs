@@ -163,7 +163,10 @@ try {
   await landing.locator('#clear-search').click();
   await landing.locator('[data-category-filter="quality-annotation"]').click();
   const qualityMatches = await landing.locator('[data-app-card]:not([hidden])').count();
-  if (qualityMatches !== 2) failures.push(`quality category has ${qualityMatches} visible apps, expected 2`);
+  const expectedQualityMatches = registry.apps.filter(({ category }) => category === 'quality-annotation').length;
+  if (qualityMatches !== expectedQualityMatches) {
+    failures.push(`quality category has ${qualityMatches} visible apps, expected ${expectedQualityMatches}`);
+  }
 
   await landing.locator('[data-category-filter="all"]').click();
   await landing.locator('#app-search').fill('no-such-neurodesk-app');

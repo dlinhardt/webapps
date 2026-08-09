@@ -269,3 +269,22 @@ apps:
       toolchains: [node]
       shared_runtime: true
       release: true
+  - id: omezarr-viewer
+    path: omezarr-viewer
+    title: ZARRo
+    description: Stream and explore multiscale OME-Zarr volumes directly in the browser.
+    category: quality-annotation
+    keywords: [OME-Zarr, Zarr, microscopy, DANDI, multiscale, volume, visualization, measurement]
+    legacy_domain: null
+    runtime: vite-webgpu
+    model_manifest: null
+    asset_manifest_schema: null
+    source: neurodesk/webapps@local
+    license: BSD-2-Clause
+    maintainers: [neurodesk]
+    support_status: experimental
+    shell: imaging-workspace
+    ci:
+      toolchains: [node]
+      shared_runtime: true
+      release: true

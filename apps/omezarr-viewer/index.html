@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Explore multiscale OME-Zarr volumes directly from cloud storage in your browser."
+    />
+    <title>ZARRo — Neurodesk</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="controls" aria-label="Viewer controls">
+        <section class="control-panel source-panel" aria-labelledby="source-heading">
+          <div class="panel-heading">
+            <span class="panel-number" aria-hidden="true">01</span>
+            <div>
+              <h2 id="source-heading">Choose a volume</h2>
+              <p>Stream a public multiscale OME-Zarr store without downloading it first.</p>
+            </div>
+          </div>
+
+          <label class="field" for="source">
+            <span>Source</span>
+            <select id="source">
+              <option value="dandi" selected>DANDI LEC SPIM example</option>
+              <option value="custom">Custom OME-Zarr URL</option>
+            </select>
+          </label>
+
+          <div class="field custom-url" id="zarrUrlControl" hidden>
+            <span>Store URLs</span>
+            <div id="zarrUrls" class="zarr-url-list">
+              <div class="zarr-url-row">
+                <input
+                  id="zarrUrl"
+                  type="url"
+                  inputmode="url"
+                  aria-label="OME-Zarr store URL 1"
+                  placeholder="https://example.org/image.ome.zarr"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
+            </div>
+            <button id="addZarrUrl" class="add-url-button" type="button">+ Add another URL</button>
+            <small>Each store is placed from its OME-NGFF translation coordinates. All selected-level voxel spacings must match.</small>
+          </div>
+
+          <div class="source-meta" id="activeLevelControl" hidden>
+            <span>Active detail</span>
+            <output
+              id="activeLevel"
+              aria-live="polite"
+              title="Pyramid levels currently represented in the GPU brick plan"
+            >Loading…</output>
+          </div>
+
+          <button class="primary-button" id="reload" type="button">Load volume</button>
+        </section>
+
+        <section class="control-panel" aria-labelledby="view-heading">
+          <div class="panel-heading compact">
+            <span class="panel-number" aria-hidden="true">02</span>
+            <div>
+              <h2 id="view-heading">Navigate</h2>
+              <p>Change the layout, scale, and center of the visible field.</p>
+            </div>
+          </div>
+
+          <label class="field" for="layout">
+            <span>Layout</span>
+            <select id="layout">
+              <option value="3" selected>Multiplanar</option>
+              <option value="4">3D render</option>
+              <option value="0">Axial</option>
+              <option value="1">Coronal</option>
+              <option value="2">Sagittal</option>
+            </select>
+          </label>
+
+          <div class="slider-field zoom-field">
+            <label for="zoom">Zoom</label>
+            <input
+              id="zoom"
+              type="range"
+              min="0.1"
+              max="10"
+              step="0.01"
+              value="1"
+              aria-describedby="zoomValue"
+            />
+            <output id="zoomValue" for="zoom" aria-live="polite">1.00×</output>
+            <button id="applyZoom" type="button" disabled>Apply</button>
+          </div>
+
+          <div class="axis-grid" aria-label="Pan controls">
+            <label class="slider-field" for="panX">
+              <span>Pan X</span>
+              <input id="panX" type="range" min="-100" max="100" step="1" value="0" />
+              <output id="panXValue" for="panX">0%</output>
+            </label>
+            <label class="slider-field" for="panY">
+              <span>Pan Y</span>
+              <input id="panY" type="range" min="-100" max="100" step="1" value="0" />
+              <output id="panYValue" for="panY">0%</output>
+            </label>
+            <label class="slider-field" for="panZ">
+              <span>Pan Z</span>
+              <input id="panZ" type="range" min="-100" max="100" step="1" value="0" />
+              <output id="panZValue" for="panZ">0%</output>
+            </label>
+          </div>
+        </section>
+
+        <section class="control-panel" aria-labelledby="display-heading">
+          <div class="panel-heading compact">
+            <span class="panel-number" aria-hidden="true">03</span>
+            <div>
+              <h2 id="display-heading">Display</h2>
+              <p>Tune contrast and overlays for the active volume.</p>
+            </div>
+          </div>
+
+          <label class="field" for="colormap">
+            <span>Colour map</span>
+            <select id="colormap">
+              <option value="gray" selected>Gray</option>
+              <option value="viridis">Viridis</option>
+              <option value="hot">Hot</option>
+              <option value="plasma">Plasma</option>
+              <option value="turbo">Turbo</option>
+            </select>
+          </label>
+
+          <label class="slider-field" for="windowLevel">
+            <span>Window level</span>
+            <input
+              id="windowLevel"
+              type="range"
+              min="0"
+              max="65535"
+              step="1"
+              value="3250"
+              aria-description="Moves the visible intensity window brighter or darker"
+            />
+            <output id="windowLevelValue" for="windowLevel">3,250</output>
+          </label>
+
+          <label class="slider-field" for="windowWidth">
+            <span>Window width</span>
+            <input
+              id="windowWidth"
+              type="range"
+              min="1"
+              max="65535"
+              step="1"
+              value="6500"
+              aria-description="Narrows or widens the contrast window"
+            />
+            <output id="windowWidthValue" for="windowWidth">6,500</output>
+          </label>
+
+          <div class="toggle-grid">
+            <label><input id="showCrosshair" type="checkbox" checked /> Crosshair</label>
+            <label><input id="showScaleBar" type="checkbox" checked /> Scale bar</label>
+            <label><input id="showStats" type="checkbox" /> Stream details</label>
+          </div>
+        </section>
+
+        <section class="control-panel" aria-labelledby="tools-heading">
+          <div class="panel-heading compact">
+            <span class="panel-number" aria-hidden="true">04</span>
+            <div>
+              <h2 id="tools-heading">Measure &amp; export</h2>
+              <p>Measure in slice views or save the current volume crop.</p>
+            </div>
+          </div>
+
+          <label class="field" for="interactionTool">
+            <span>Pointer tool</span>
+            <select id="interactionTool">
+              <option value="navigate" selected>Move crosshair</option>
+              <option value="measure">Measure distance</option>
+            </select>
+          </label>
+          <div class="inline-status">
+            <output id="measurementStatus" role="status" aria-live="polite">Select measure distance</output>
+            <button id="clearMeasurements" type="button" disabled>Clear</button>
+          </div>
+
+          <button class="secondary-button" id="downloadNifti" type="button" disabled>
+            Download NIfTI
+          </button>
+          <output id="downloadStatus" class="download-status" role="status" aria-live="polite" hidden></output>
+        </section>
+      </aside>
+
+      <main id="viewer" aria-label="OME-Zarr volume viewer">
+        <canvas id="nv-canvas" aria-label="Interactive streamed volume"></canvas>
+        <div class="hud" id="hud" hidden aria-hidden="true">Loading…</div>
+        <div class="strip" id="chunkStrip" hidden aria-hidden="true"></div>
+        <div class="fallback" id="fallback" aria-hidden="true"></div>
+      </main>
+
+      <footer id="status" hidden></footer>
+    </div>
+    <script type="module" src="/src/viewer.ts"></script>
+  </body>
+</html>
