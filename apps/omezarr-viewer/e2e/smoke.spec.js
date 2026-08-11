@@ -3,6 +3,26 @@
 // (see playwright.config.js) so it exercises the built, header-served output.
 import { test, expect } from "@playwright/test";
 
+async function clickCanvasUntilLocationChanges(page, x, y, previousCount) {
+  // A fixed point can coincide with the current crosshair after a preceding pan,
+  // which is correctly a no-op. Try nearby points within the same slice and
+  // require at least one of them to produce a real crosshair location change.
+  for (const [dx, dy] of [[0, 0], [20, 20], [-20, 16]]) {
+    await page.mouse.click(x + dx, y + dy);
+    try {
+      await page.waitForFunction(
+        (count) => window.__locationChangeCount > count,
+        previousCount,
+        { timeout: 2_000 },
+      );
+      return;
+    } catch {
+      // Try another point in the same visible slice.
+    }
+  }
+  throw new Error("Canvas clicks did not change the crosshair location");
+}
+
 test("app boots", async ({ page }) => {
   await page.goto("/?source=custom");
   await expect(page.locator(".nd-imaging-workspace")).toBeVisible();
@@ -71,7 +91,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   // This exercises the complete translated-mosaic interaction surface. GitHub's
   // shared runners can take more than a minute even though every request is
   // locally mocked, so leave enough headroom for the browser assertions.
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const cancelledChunkErrors = [];
   page.on("console", (message) => {
     if (
@@ -243,10 +263,12 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   const locationChangesBefore = await page.evaluate(
     () => window.__locationChangeCount,
   );
-  await page.mouse.click(startX, startY);
-  await expect.poll(
-    () => page.evaluate(() => window.__locationChangeCount),
-  ).toBeGreaterThan(locationChangesBefore);
+  await clickCanvasUntilLocationChanges(
+    page,
+    startX,
+    startY,
+    locationChangesBefore,
+  );
   await expect.poll(async () => Promise.all(
     panFields.map((selector) => page.locator(selector).inputValue()),
   )).toEqual(panBeforeClick);
@@ -333,10 +355,12 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   const locationChangesAfterMeasurement = await page.evaluate(
     () => window.__locationChangeCount,
   );
-  await page.mouse.click(startX + 20, startY + 20);
-  await expect.poll(
-    () => page.evaluate(() => window.__locationChangeCount),
-  ).toBeGreaterThan(locationChangesAfterMeasurement);
+  await clickCanvasUntilLocationChanges(
+    page,
+    startX + 20,
+    startY + 20,
+    locationChangesAfterMeasurement,
+  );
 
   await page.getByText("Advanced", { exact: true }).click();
   await page.locator("#scrollZoomSpeed").fill("3");
@@ -411,10 +435,12 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   const locationChangesBeforeReloadClick = await page.evaluate(
     () => window.__locationChangeCount,
   );
-  await page.mouse.click(startX + 36, startY + 28);
-  await expect.poll(
-    () => page.evaluate(() => window.__locationChangeCount),
-  ).toBeGreaterThan(locationChangesBeforeReloadClick);
+  await clickCanvasUntilLocationChanges(
+    page,
+    startX + 36,
+    startY + 28,
+    locationChangesBeforeReloadClick,
+  );
   await page.getByRole("button", { name: "Copy share link" }).click();
   const clickedCrosshair = new URL(
     await page.evaluate(() => window.__copiedText),
