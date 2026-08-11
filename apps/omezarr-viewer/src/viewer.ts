@@ -58,12 +58,15 @@ import {
   type ShareableViewState,
 } from './share_state'
 import {
+  axialSliceFraction,
+  axialSliceIndex,
   crosshairAppearanceForSpacing,
   clampViewerZoom,
   detailLevelForZoom,
   fineLodRadiusForShape,
   lodDeliveryDisplay,
   lodFocusTracksInteraction,
+  loadingTileCount,
   rangeBoundsForWindow,
   updateAdaptiveLodDetail,
   visibleFovBounds,
@@ -304,10 +307,10 @@ class ByteLruCache implements zarr.ByteCache {
   }
 }
 
-function el<T extends HTMLElement>(id: string): T {
+function el<T extends Element>(id: string): T {
   const node = document.getElementById(id)
   if (!node) throw new Error(`Missing #${id}`)
-  return node as T
+  return node as unknown as T
 }
 
 const els = {
@@ -333,6 +336,9 @@ const els = {
     el<HTMLOutputElement>('panYValue'),
     el<HTMLOutputElement>('panZValue'),
   ],
+  axialSlice: el<HTMLInputElement>('axialSlice'),
+  axialSliceValue: el<HTMLOutputElement>('axialSliceValue'),
+  axialSliceHelp: el<HTMLElement>('axialSliceHelp'),
   colormap: el<HTMLSelectElement>('colormap'),
   autoContrast: el<HTMLButtonElement>('autoContrast'),
   windowLevel: el<HTMLInputElement>('windowLevel'),
@@ -372,7 +378,12 @@ const els = {
   hud: el<HTMLDivElement>('hud'),
   chunkStrip: el<HTMLDivElement>('chunkStrip'),
   fallback: el<HTMLDivElement>('fallback'),
+  crosshairOverlay: el<SVGSVGElement>('crosshairOverlay'),
+  crosshairOutline: el<SVGPathElement>('crosshairOutline'),
+  crosshairLines: el<SVGPathElement>('crosshairLines'),
+  scaleIndicators: el<HTMLDivElement>('scaleIndicators'),
   visibleLevel: el<HTMLOutputElement>('visibleLevel'),
+  tileLoading: el<HTMLOutputElement>('tileLoading'),
 }
 
 let nv: NiiVue | null = null
@@ -382,6 +393,8 @@ let chunkPlan: ChunkPlan | null = null
 let chunkedVolume: NVChunkedVolume | null = null
 let stats: RangeStats = freshStats()
 let pollHandle = 0
+let displayedLoadingTiles = -1
+let displayedCrosshairPath = ''
 let shouldInitializeCustomSource = true
 let selectedDandiStoreUrls: string[] = []
 let requestedBaseLevel: number | null = null
@@ -2457,6 +2470,7 @@ function setVisibleLevel(
       : requestedLevel !== null && requestedLevel !== level
         ? `Finest Zarr level currently visible: L${level}; camera requested L${requestedLevel}`
         : `Finest Zarr level currently visible: L${level}`
+  syncScaleIndicatorVisibility()
 }
 
 function syncActiveLodIndicator(plan: ChunkPlan | null): void {
@@ -2593,6 +2607,24 @@ function syncStatsVisibility(): void {
   if (isVisible) renderHud()
 }
 
+function syncScaleIndicatorVisibility(): void {
+  els.scaleIndicators.hidden =
+    !els.showScaleBar.checked || !nv || nv.volumes.length === 0
+  els.visibleLevel.hidden =
+    els.scaleIndicators.hidden || els.visibleLevel.value.length === 0
+}
+
+function syncTileLoadingIndicator(): void {
+  const stream = nv?.chunkStreamStats()
+  const count = loadingTileCount(stream?.pending, stream?.inFlight)
+  if (count !== displayedLoadingTiles) {
+    displayedLoadingTiles = count
+    els.tileLoading.value = `${count} tile${count === 1 ? '' : 's'} loading`
+    els.tileLoading.dataset.loading = String(count)
+  }
+  syncScaleIndicatorVisibility()
+}
+
 function syncScaleBarVisibility(): void {
   if (nv) {
     nv.isRulerVisible = els.showScaleBar.checked
@@ -2600,12 +2632,22 @@ function syncScaleBarVisibility(): void {
   }
   els.visibleLevel.hidden =
     !els.showScaleBar.checked || els.visibleLevel.value.length === 0
+  syncScaleIndicatorVisibility()
+  syncTileLoadingIndicator()
 }
 
 function syncCrosshairVisibility(): void {
   if (!nv) return
-  nv.is3DCrosshairVisible = els.showCrosshair.checked
+  // Slice crosshairs are measured in screen pixels while the 3D crosshair is
+  // measured in world units. Do not draw the world-space cylinder in the
+  // multiplanar preview, where a readable slice crosshair would be enormous.
+  nv.is3DCrosshairVisible =
+    els.showCrosshair.checked && nv.sliceType === SLICE_TYPE.RENDER
+  nv.isCrossLinesVisible = false
+  els.canvas.dataset.crosshairVisible = els.showCrosshair.checked ? '1' : '0'
+  syncCrosshairAppearance()
   nv.drawScene()
+  syncCrosshairOverlay()
 }
 
 function formatMeasuredDistance(distanceMM: number): string {
@@ -2720,6 +2762,8 @@ function startHudPolling(): void {
       syncActiveLodIndicator(plan)
       syncDownloadControl()
     }
+    syncTileLoadingIndicator()
+    syncCrosshairOverlay()
     renderHud()
     pollHandle = requestAnimationFrame(tick)
   }
@@ -2729,8 +2773,7 @@ function startHudPolling(): void {
 function applyLayout(): void {
   if (!nv) return
   nv.sliceType = Number(els.layout.value)
-  syncCrosshairAppearance()
-  nv.drawScene()
+  syncCrosshairVisibility()
   syncViewControls()
   syncInteractionTool()
   renderHud()
@@ -2927,22 +2970,77 @@ function currentVisibleFovBounds(
 
 function syncCrosshairAppearance(): void {
   if (!nv || !activeSource) return
-  // Multiplanar layouts can include a 3D tile, so compensate using the render
-  // camera even when the overall layout is not the dedicated render view.
-  const cameraZoom =
-    Number.isFinite(nv.scaleMultiplier) && nv.scaleMultiplier > 0
-      ? nv.scaleMultiplier
-      : 1
-  const crosshair = crosshairAppearanceForSpacing(
-    activeSource.crosshairSpacing,
-    cameraZoom,
-  )
+  const isRender = nv.sliceType === SLICE_TYPE.RENDER
+  const cameraZoom = Number.isFinite(nv.scaleMultiplier) && nv.scaleMultiplier > 0
+    ? nv.scaleMultiplier
+    : 1
+  const crosshair = !els.showCrosshair.checked
+    ? { width: 0, gap: 0 }
+    : isRender
+      ? crosshairAppearanceForSpacing(activeSource.crosshairSpacing, cameraZoom)
+      : { width: 2, gap: 8 }
   // Update both related values before the next frame. The individual NiiVue
   // setters each redraw, which would add two redundant renders per wheel event.
   nv.model.ui.crosshairWidth = crosshair.width
   nv.model.ui.crosshairGap = crosshair.gap
   els.canvas.dataset.crosshairWidth = String(crosshair.width)
   els.canvas.dataset.crosshairGap = String(crosshair.gap)
+}
+
+function syncCrosshairOverlay(): void {
+  if (!nv || !els.showCrosshair.checked || nv.volumes.length === 0) {
+    els.crosshairOverlay.setAttribute('hidden', '')
+    return
+  }
+  const point = nv.getCrosshairPos()
+  const paths: string[] = []
+  const deviceScale = els.canvas.width / Math.max(1, els.canvas.clientWidth)
+  const gap = 8 * deviceScale
+  for (const tile of nv.view?.screenSlices ?? []) {
+    const rect = tile.leftTopWidthHeight
+    const matrix = tile.mvpMatrix
+    if (!rect || !matrix || tile.axCorSag === SLICE_TYPE.RENDER) continue
+    const [worldX, worldY, worldZ] = point
+    const clipX =
+      matrix[0] * worldX +
+      matrix[4] * worldY +
+      matrix[8] * worldZ +
+      matrix[12]
+    const clipY =
+      matrix[1] * worldX +
+      matrix[5] * worldY +
+      matrix[9] * worldZ +
+      matrix[13]
+    const clipW =
+      matrix[3] * worldX +
+      matrix[7] * worldY +
+      matrix[11] * worldZ +
+      matrix[15]
+    if (!Number.isFinite(clipW) || Math.abs(clipW) < 1e-8) continue
+    const x = rect[0] + ((clipX / clipW + 1) * rect[2]) / 2
+    const y = rect[1] + ((1 - clipY / clipW) * rect[3]) / 2
+    const left = rect[0]
+    const top = rect[1]
+    const right = left + rect[2]
+    const bottom = top + rect[3]
+    if (x < left || x > right || y < top || y > bottom) continue
+    paths.push(
+      `M${left},${y}L${Math.max(left, x - gap)},${y}`,
+      `M${Math.min(right, x + gap)},${y}L${right},${y}`,
+      `M${x},${top}L${x},${Math.max(top, y - gap)}`,
+      `M${x},${Math.min(bottom, y + gap)}L${x},${bottom}`,
+    )
+  }
+  const path = paths.join('')
+  els.crosshairOverlay.setAttribute(
+    'viewBox',
+    `0 0 ${els.canvas.width} ${els.canvas.height}`,
+  )
+  els.crosshairOverlay.toggleAttribute('hidden', path.length === 0)
+  if (path === displayedCrosshairPath) return
+  displayedCrosshairPath = path
+  els.crosshairOutline.setAttribute('d', path)
+  els.crosshairLines.setAttribute('d', path)
 }
 
 function panExtent(axis: number): number {
@@ -2967,6 +3065,77 @@ function syncFocusFromPan(): boolean {
     Math.min(1, Math.max(0, 0.5 - (pan[axis] ?? 0) / panExtent(axis))),
   ) as Shape3
   return true
+}
+
+function axialSliceCount(): number {
+  const count = activeSource?.shape[2] ?? 0
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+}
+
+function axialSliceNavigationEnabled(): boolean {
+  if (!nv || nv.volumes.length === 0 || axialSliceCount() <= 1) return false
+  return nv.sliceType !== SLICE_TYPE.RENDER
+}
+
+function syncAxialSliceControl(): void {
+  const count = axialSliceCount()
+  const fraction = nv?.crosshairPos[2] ?? 0.5
+  const index = axialSliceIndex(fraction, count)
+  els.axialSlice.min = '0'
+  els.axialSlice.max = String(Math.max(0, count - 1))
+  els.axialSlice.value = String(index)
+  els.axialSlice.disabled = !axialSliceNavigationEnabled()
+  els.axialSliceValue.value = count > 0 ? `${index + 1} / ${count}` : '—'
+  els.axialSliceHelp.textContent =
+    'Use the slider or arrow keys in the viewer to move through axial slices.'
+}
+
+function setAxialSlice(index: number): void {
+  if (!nv || !axialSliceNavigationEnabled()) return
+  const count = axialSliceCount()
+  const boundedIndex = Math.min(count - 1, Math.max(0, index))
+  const fraction = axialSliceFraction(boundedIndex, count)
+  const current = nv.crosshairPos
+  nv.crosshairPos = [current[0] ?? 0.5, current[1] ?? 0.5, fraction]
+  focusFraction = [focusFraction[0], focusFraction[1], fraction]
+  // At detail zooms, sagittal and coronal panels show only a narrow Z span.
+  // Follow the selected axial slice on that shared axis while preserving the
+  // user's X/Y framing. At overview zoom, zero pan keeps the full range visible.
+  const pan = nv.pan2Dxyzmm
+  const centeredZ = pan[3] > 1 ? panForCrosshair()[2] : 0
+  nv.pan2Dxyzmm = [pan[0], pan[1], centeredZ, pan[3]]
+  syncViewControls()
+  syncDownloadControl()
+  scheduleAdaptiveLod(true)
+}
+
+function applyAxialSliceControl(): void {
+  setAxialSlice(Number(els.axialSlice.value))
+}
+
+function handleAxialSliceKeys(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return
+  const target = event.target
+  if (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || target.matches('input, select, textarea, button'))
+  ) {
+    return
+  }
+  const direction =
+    event.key === 'ArrowRight' || event.key === 'ArrowUp'
+      ? 1
+      : event.key === 'ArrowLeft' || event.key === 'ArrowDown'
+        ? -1
+        : 0
+  if (direction === 0 || !axialSliceNavigationEnabled()) return
+  event.preventDefault()
+  event.stopPropagation()
+  const next = Math.min(
+    Number(els.axialSlice.max),
+    Math.max(0, Number(els.axialSlice.value) + direction),
+  )
+  setAxialSlice(next)
 }
 
 function syncViewControls(): void {
@@ -3006,6 +3175,7 @@ function syncViewControls(): void {
   const zoomDisabled = !nv || nv.volumes.length === 0 || levelCount === 0
   els.zoom.disabled = zoomDisabled
   els.applyZoom.disabled = zoomDisabled || !zoomDisplay.canApply
+  syncAxialSliceControl()
 }
 
 function currentScrollZoomSpeed(): number {
@@ -3452,6 +3622,7 @@ async function main(): Promise<void> {
     backgroundColor: [0.02, 0.03, 0.03, 1],
     isColorbarVisible: true,
     is3DCrosshairVisible: els.showCrosshair.checked,
+    isCrossLinesVisible: false,
     isRulerVisible: els.showScaleBar.checked,
     crosshairWidth: 0.5,
     primaryDragMode: DRAG_MODE.crosshairPan,
@@ -3460,6 +3631,10 @@ async function main(): Promise<void> {
     maxChunkResidencyBytes: DEFAULT_RESIDENCY_BYTES,
   })
   await nv.attachToCanvas(els.canvas)
+  syncCrosshairVisibility()
+  els.canvas.addEventListener('pointerdown', () => {
+    els.canvas.focus({ preventScroll: true })
+  })
   els.canvas.addEventListener('contextmenu', handleMeasurementContextMenu)
   els.canvas.addEventListener('wheel', handleWheelZoom, {
     capture: true,
@@ -3485,6 +3660,7 @@ async function main(): Promise<void> {
     els.measurementStatus.value = `${formatMeasuredDistance(event.detail.distance)} · right-click to remove`
     els.clearMeasurements.disabled = false
   })
+  nv.addEventListener('locationChange', syncAxialSliceControl)
   // Crosshair locationChange events intentionally do not refocus LOD. A click
   // moves the marker without moving the viewport; following it would shift the
   // fine box away from the visible field and expose coarse context rectangles.
@@ -3523,6 +3699,8 @@ async function main(): Promise<void> {
     applyZoomControl()
   })
   els.applyZoom.addEventListener('click', applyZoomControl)
+  els.axialSlice.addEventListener('input', applyAxialSliceControl)
+  document.addEventListener('keydown', handleAxialSliceKeys, { capture: true })
   for (const control of els.pan) {
     control.addEventListener('input', applyPanControls)
   }

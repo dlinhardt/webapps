@@ -42,6 +42,38 @@ export const MIN_VIEWER_ZOOM = 0.1
 export const MAX_VIEWER_ZOOM = 128
 const MIN_CROSSHAIR_WORLD_SIZE = 0.000001
 
+export function axialSliceIndex(
+  fraction: number,
+  sliceCount: number,
+): number {
+  if (!Number.isFinite(sliceCount) || sliceCount <= 1) return 0
+  const boundedFraction = Number.isFinite(fraction)
+    ? Math.min(1, Math.max(0, fraction))
+    : 0.5
+  return Math.round(boundedFraction * (Math.floor(sliceCount) - 1))
+}
+
+export function axialSliceFraction(
+  index: number,
+  sliceCount: number,
+): number {
+  if (!Number.isFinite(sliceCount) || sliceCount <= 1) return 0.5
+  const lastSlice = Math.floor(sliceCount) - 1
+  const boundedIndex = Number.isFinite(index)
+    ? Math.min(lastSlice, Math.max(0, Math.round(index)))
+    : 0
+  return boundedIndex / lastSlice
+}
+
+export function loadingTileCount(
+  pending: number | undefined,
+  inFlight: number | undefined,
+): number {
+  const count = (value: number | undefined): number =>
+    Number.isFinite(value) && (value ?? 0) > 0 ? Math.floor(value ?? 0) : 0
+  return count(pending) + count(inFlight)
+}
+
 /** Keep the finest-detail focus local on thin or small volumes. */
 export function fineLodRadiusForShape(
   shape: readonly [number, number, number],

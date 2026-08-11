@@ -541,11 +541,6 @@ a:focus-visible {
   border-radius: 50%;
 }
 
-.axis-grid {
-  display: grid;
-  gap: 0.6rem;
-}
-
 .advanced-panel summary {
   color: var(--nd-color-text);
   cursor: pointer;
@@ -690,11 +685,56 @@ a:focus-visible {
   outline: none;
 }
 
-.visible-level {
+#nv-canvas:focus-visible {
+  outline: 2px solid var(--nd-color-primary);
+  outline-offset: -2px;
+}
+
+.crosshair-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.crosshair-overlay[hidden] {
+  display: none;
+}
+
+.crosshair-overlay path {
+  fill: none;
+  stroke-linecap: square;
+}
+
+.crosshair-outline {
+  stroke: rgb(0 0 0 / 88%);
+  stroke-width: 4px;
+}
+
+.crosshair-lines {
+  stroke: #ff453a;
+  stroke-width: 2px;
+}
+
+.scale-indicators {
   position: absolute;
   right: 1rem;
   bottom: 3.15rem;
   z-index: 3;
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  pointer-events: none;
+}
+
+.scale-indicators[hidden] {
+  display: none;
+}
+
+.visible-level {
   padding: 0.18rem 0.42rem;
   color: rgb(255 255 255 / 92%);
   background: rgb(0 0 0 / 68%);
@@ -704,11 +744,15 @@ a:focus-visible {
   font-size: 0.66rem;
   font-weight: 750;
   line-height: 1;
-  pointer-events: none;
 }
 
 .visible-level[hidden] {
   display: none;
+}
+
+.tile-loading {
+  min-width: 6.4rem;
+  text-align: center;
 }
 
 .hud {

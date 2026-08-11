@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  axialSliceFraction,
+  axialSliceIndex,
   crosshairAppearanceForSpacing,
   detailLevelForZoom,
   fineLodRadiusForShape,
   lodDeliveryDisplay,
+  loadingTileCount,
   rangeBoundsForWindow,
   visibleFovBounds,
   wheelZoomValue,
@@ -13,6 +16,21 @@ import {
   zoomForDetailLevel,
   zoomLevelControlDisplay,
 } from '../src/viewer_controls.ts'
+
+test('maps axial slice positions to stable voxel indices', () => {
+  assert.equal(axialSliceIndex(0, 2048), 0)
+  assert.equal(axialSliceIndex(0.5, 2048), 1024)
+  assert.equal(axialSliceIndex(1, 2048), 2047)
+  assert.equal(axialSliceFraction(1024, 2048), 1024 / 2047)
+  assert.equal(axialSliceFraction(-10, 20), 0)
+  assert.equal(axialSliceFraction(100, 20), 1)
+})
+
+test('counts queued and in-flight tiles as current loading work', () => {
+  assert.equal(loadingTileCount(7, 3), 10)
+  assert.equal(loadingTileCount(undefined, 2), 2)
+  assert.equal(loadingTileCount(-1, Number.NaN), 0)
+})
 
 test('describes multiplanar FOV as three visible slice slabs', () => {
   const bounds = visibleFovBounds(

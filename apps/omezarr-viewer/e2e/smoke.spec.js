@@ -58,9 +58,13 @@ test("app boots", async ({ page }) => {
   await expect(page.locator("#detailBudget")).toHaveValue("8");
   await expect(page.locator("#scrollZoomSpeed")).toBeHidden();
   await expect(page.locator("#detailBudget")).toBeHidden();
+  await expect(page.locator("#showStats")).toBeHidden();
   await expect(page.getByText("Advanced", { exact: true })).toBeVisible();
   await expect(page.locator("#panX")).toBeHidden();
   await expect(page.locator("#panY")).toBeHidden();
+  await expect(page.locator("#panZ")).toBeHidden();
+  await expect(page.getByText("Pan Z", { exact: true })).toHaveCount(0);
+  await expect(page.locator("#axialSlice")).toBeVisible();
   const topBar = page.locator(".nd-app-bar:visible");
   await expect(topBar).toHaveCount(1);
   await expect(topBar.locator(".nd-app-bar__identity")).toContainText("ZARRo");
@@ -221,6 +225,55 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     { timeout: 15_000 },
   );
   await expect(page.locator("#activeLevel")).toHaveText("L0");
+  await expect(page.locator("#axialSlice")).toHaveAttribute("min", "0");
+  await expect(page.locator("#axialSlice")).toHaveAttribute("max", "15");
+  await expect(page.locator("#axialSliceHelp")).toContainText("arrow keys in the viewer");
+  for (let index = 0; index < 4; index++) {
+    await page.locator("#nv-canvas").dispatchEvent("wheel", {
+      deltaY: -120,
+      deltaMode: 0,
+    });
+  }
+  await page.locator("#axialSlice").fill("4");
+  await expect(page.locator("#axialSliceValue")).toHaveText("5 / 16");
+  await expect(page.locator("#panZ")).not.toHaveValue("0");
+  await page.waitForTimeout(250);
+  await expect.poll(async () => {
+    const path = await page.locator("#crosshairLines").getAttribute("d");
+    return path?.match(/M/g)?.length ?? 0;
+  }).toBe(12);
+  for (let index = 0; index < 4; index++) {
+    await page.locator("#nv-canvas").dispatchEvent("wheel", {
+      deltaY: 120,
+      deltaMode: 0,
+    });
+  }
+  await page.locator("#zoom").fill("0");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "data-fov-levels",
+    "0",
+  );
+  await page.locator("#nv-canvas").focus();
+  await expect(page.locator("#nv-canvas")).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("#axialSlice")).toHaveValue("5");
+  await expect(page.locator("#axialSliceValue")).toHaveText("6 / 16");
+  await page.locator("#layout").selectOption("1");
+  await expect(page.locator("#axialSlice")).toBeEnabled();
+  await page.locator("#layout").selectOption("2");
+  await expect(page.locator("#axialSlice")).toBeEnabled();
+  await page.locator("#layout").selectOption("3");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-crosshair-visible",
+    "1",
+  );
+  await expect(page.locator("#crosshairOverlay")).toBeVisible();
+  await expect(page.locator("#crosshairLines")).toHaveAttribute("d", /^M/);
+  await page.locator("#showCrosshair").uncheck();
+  await expect(page.locator("#crosshairOverlay")).toBeHidden();
+  await page.locator("#showCrosshair").check();
+  await expect(page.locator("#crosshairOverlay")).toBeVisible();
   expect(await page.locator("#activeLevel").evaluate(
     (output) => output.scrollWidth <= output.clientWidth,
   )).toBe(true);
@@ -380,6 +433,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   );
 
   await page.getByText("Advanced", { exact: true }).click();
+  await expect(page.getByLabel("Stream details")).toBeVisible();
   await page.locator("#scrollZoomSpeed").fill("3");
   await expect(page.locator("#scrollZoomSpeedValue")).toHaveText("3×");
   await page.locator("#detailBudget").fill("8");
@@ -392,15 +446,18 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "2");
   await page.locator("#showScaleBar").uncheck();
   await expect(page.locator("#visibleLevel")).toBeHidden();
+  await expect(page.locator("#scaleIndicators")).toBeHidden();
   await page.locator("#showScaleBar").check();
   await expect(page.locator("#visibleLevel")).toBeVisible();
+  await expect(page.locator("#tileLoading")).toBeVisible();
+  await expect(page.locator("#tileLoading")).toHaveAttribute("data-loading", /\d+/);
   await expect(page.locator("#nv-canvas")).toHaveAttribute(
     "data-crosshair-width",
-    "0.00075",
+    "2",
   );
   await expect(page.locator("#nv-canvas")).toHaveAttribute(
     "data-crosshair-gap",
-    "0.005",
+    "8",
   );
   const sharedPan = await Promise.all(
     panFields.map((selector) => page.locator(selector).inputValue()),
@@ -443,6 +500,9 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toContainText("target L1");
   await expect.poll(() => delayedLevelOneChunkRequests).toBeGreaterThan(0);
+  await expect.poll(async () => Number(
+    await page.locator("#tileLoading").getAttribute("data-loading"),
+  )).toBeGreaterThan(0);
 
   // Start a newer LOD request while L1 chunks are still delayed. The latest
   // plan must win, and a crosshair click made during the swap must survive.
@@ -467,6 +527,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
   expect(cancelledChunkErrors).toEqual([]);
   await expect(page.locator("#visibleLevel")).toHaveText("L0");
+  await page.getByText("Advanced", { exact: true }).click();
   await page.getByLabel("Stream details").check();
   await expect(page.locator("#hud")).toContainText("30 x 16 x 16 uint8");
   expect(chunkRequestsByLevel.get(0)).toBeGreaterThan(0);

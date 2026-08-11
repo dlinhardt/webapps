@@ -161,13 +161,25 @@
           <output id="panXValue" for="panX" hidden>0%</output>
           <input id="panY" type="hidden" value="0" />
           <output id="panYValue" for="panY" hidden>0%</output>
-          <div class="axis-grid" aria-label="Pan controls">
-            <label class="slider-field" for="panZ">
-              <span>Pan Z</span>
-              <input id="panZ" type="range" min="-100" max="100" step="1" value="0" />
-              <output id="panZValue" for="panZ">0%</output>
-            </label>
+          <input id="panZ" type="hidden" value="0" />
+          <output id="panZValue" for="panZ" hidden>0%</output>
+          <div class="slider-field axial-slice-field">
+            <label for="axialSlice">Axial slice</label>
+            <input
+              id="axialSlice"
+              type="range"
+              min="0"
+              max="0"
+              step="1"
+              value="0"
+              disabled
+              aria-describedby="axialSliceValue axialSliceHelp"
+            />
+            <output id="axialSliceValue" for="axialSlice" aria-live="polite">—</output>
           </div>
+          <small class="zoom-level-help" id="axialSliceHelp">
+            Use the slider or arrow keys to move through axial slices.
+          </small>
         </section>
 
         <section class="control-panel" aria-labelledby="display-heading">
@@ -256,7 +268,6 @@
           <div class="toggle-grid">
             <label><input id="showCrosshair" type="checkbox" checked /> Crosshair</label>
             <label><input id="showScaleBar" type="checkbox" checked /> Scale bar</label>
-            <label><input id="showStats" type="checkbox" /> Stream details</label>
           </div>
         </section>
 
@@ -326,18 +337,40 @@
             <small class="zoom-level-help" id="detailBudgetHelp">
               Higher values allow finer FOV tiles. GPU residency remains capped at 512 MiB.
             </small>
+
+            <div class="toggle-grid">
+              <label><input id="showStats" type="checkbox" /> Stream details</label>
+            </div>
           </div>
         </details>
       </aside>
 
       <main id="viewer" aria-label="OME-Zarr volume viewer">
-        <canvas id="nv-canvas" aria-label="Interactive streamed volume"></canvas>
-        <output
-          id="visibleLevel"
-          class="visible-level"
-          aria-label="Currently displayed Zarr level"
+        <canvas id="nv-canvas" aria-label="Interactive streamed volume" tabindex="0"></canvas>
+        <svg
+          id="crosshairOverlay"
+          class="crosshair-overlay"
+          aria-hidden="true"
+          preserveAspectRatio="none"
           hidden
-        ></output>
+        >
+          <path id="crosshairOutline" class="crosshair-outline" vector-effect="non-scaling-stroke"></path>
+          <path id="crosshairLines" class="crosshair-lines" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <div id="scaleIndicators" class="scale-indicators" hidden>
+          <output
+            id="visibleLevel"
+            class="visible-level"
+            aria-label="Currently displayed Zarr level"
+            hidden
+          ></output>
+          <output
+            id="tileLoading"
+            class="visible-level tile-loading"
+            aria-label="Tiles currently loading"
+            aria-live="polite"
+          >0 tiles loading</output>
+        </div>
         <div class="hud" id="hud" hidden aria-hidden="true">Loading…</div>
         <div class="strip" id="chunkStrip" hidden aria-hidden="true"></div>
         <div class="fallback" id="fallback" aria-hidden="true"></div>
