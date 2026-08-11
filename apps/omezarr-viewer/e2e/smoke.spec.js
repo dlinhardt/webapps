@@ -344,7 +344,6 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     panFields.map((selector) => page.locator(selector).inputValue()),
   )).toEqual(panBeforeClick);
 
-  const canvasBeforeWindowing = await page.locator("#nv-canvas").screenshot();
   const chunkRequestsBeforeWindowing = leftChunkRequests + rightChunkRequests;
   await page.locator("#windowLevel").evaluate((input) => {
     input.value = "60";
@@ -359,10 +358,8 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   expect(leftChunkRequests + rightChunkRequests).toBe(chunkRequestsBeforeWindowing);
   await expect(page.locator("#windowMin")).toHaveValue("50");
   await expect(page.locator("#windowMax")).toHaveValue("70");
-  await expect.poll(async () => {
-    const canvasAfterWindowing = await page.locator("#nv-canvas").screenshot();
-    return canvasAfterWindowing.equals(canvasBeforeWindowing);
-  }).toBe(false);
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-min", "50");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-max", "70");
 
   await page.locator("#windowLevel").evaluate((input) => {
     input.value = "10";

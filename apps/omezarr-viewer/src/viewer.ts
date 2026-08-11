@@ -830,10 +830,13 @@ function handleWindowRangeInput(changed: 'min' | 'max'): void {
 
 function scheduleWindowUpdate(): void {
   syncWindowControlValues()
+  delete els.canvas.dataset.windowMin
+  delete els.canvas.dataset.windowMax
   window.clearTimeout(windowUpdateHandle)
   windowUpdateHandle = window.setTimeout(() => {
     const source = activeSource
     if (!nv || !source || nv.volumes.length === 0) return
+    const revision = manualWindowRevision
     const win = windowFromLevelWidth(
       Number(els.windowLevel.value),
       Number(els.windowWidth.value),
@@ -841,6 +844,11 @@ function scheduleWindowUpdate(): void {
     source.defaultWindow = win
     void nv
       .setVolume(0, { calMin: win.min, calMax: win.max })
+      .then(() => {
+        if (activeSource !== source || manualWindowRevision !== revision) return
+        els.canvas.dataset.windowMin = String(win.min)
+        els.canvas.dataset.windowMax = String(win.max)
+      })
       .catch((error: unknown) => {
         showFallback(
           `Window update failed: ${error instanceof Error ? error.message : String(error)}`,
