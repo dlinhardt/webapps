@@ -26,11 +26,11 @@ jobs:
       release_apps: ${{ steps.plan.outputs.release_apps }}
       has_release_apps: ${{ steps.plan.outputs.has_release_apps }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -55,11 +55,11 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.app-plan.outputs.release_apps) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -70,7 +70,7 @@ jobs:
       - name: Install wasm-pack
         if: matrix.rust_wasm
         run: curl -sSf https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: matrix.python_reference
         with:
           python-version: '3.13'
@@ -105,7 +105,7 @@ jobs:
             exit 1
           fi
           (cd "apps/${APP}/dist" && zip -qr "${GITHUB_WORKSPACE}/${APP}-${VERSION}-web.zip" .)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.app }}
           path: ${{ matrix.app }}-*-web.zip
@@ -120,10 +120,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.app-plan.outputs.release_apps) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-${{ matrix.app }}
           path: release-bundle
