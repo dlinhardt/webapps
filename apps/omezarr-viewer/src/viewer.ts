@@ -14,6 +14,7 @@ import '@neurodesk/webapp-components/styles/base.css'
 import { mountImagingWorkspace } from '@neurodesk/webapp-components/core/mount-imaging-workspace'
 import * as zarr from 'zarrita'
 import './styles.css'
+import { AbortableTaskPool } from './abortable_task_pool'
 import { getBackendFromUrl } from './backend'
 import {
   searchDandiZarrAssets,
@@ -24,18 +25,23 @@ import {
   isGenericDtypeWindow,
 } from './intensity_window'
 import {
+  DecodedChunkCache,
+  withDecodedChunkCaching,
+} from './decoded_chunk_cache'
+import {
   buildLogicalVolume,
   niftiDatatype,
   type Shape3,
 } from './logical_volume'
 import { LatestTaskQueue } from './latest_task_queue'
+import { measurementIndexAtCanvasPoint } from './measurement_hit_test'
 import {
   layoutTranslatedBlocks,
   spatialTransformMm,
   translatedMosaicId,
-  translatedMosaicVolumeId,
   type MosaicBlockLayout,
 } from './mosaic_layout'
+import { createMosaicChunkedVolumeSource } from './mosaic_chunked_source.ts'
 import {
   compositeMosaicBlocks,
   mosaicSamplingWindow,
@@ -55,16 +61,23 @@ import {
   crosshairAppearanceForSpacing,
   clampViewerZoom,
   detailLevelForZoom,
+  fineLodRadiusForShape,
+  lodDeliveryDisplay,
   lodFocusTracksInteraction,
   rangeBoundsForWindow,
   updateAdaptiveLodDetail,
+  visibleFovBounds,
   wheelZoomValue,
   windowFromLevelWidth,
   windowLevelWidth,
   zoomForDetailLevel,
   zoomLevelControlDisplay,
 } from './viewer_controls'
-import { withInflightReadDeduplication } from './zarr_store'
+import { ZarrReadSession } from './zarr_read_session'
+import {
+  withInflightReadDeduplication,
+  withOptionalConsolidatedMetadata,
+} from './zarr_store'
 
 mountImagingWorkspace({
   root: '#app',
@@ -79,15 +92,19 @@ mountImagingWorkspace({
 const BACKEND = getBackendFromUrl()
 const MANIFEST_URL = assetUrl('range-poc/synthetic-volume.json')
 const DEFAULT_RESIDENCY_BYTES = 512 * 1024 * 1024
+const DEFAULT_DETAIL_BUDGET_GIB = 8
 // NiiVue's planner accounts for eight bytes per voxel regardless of source
 // dtype. ZARRo supports one- and two-byte data, so this corrects that estimate
 // while the stream manager still enforces DEFAULT_RESIDENCY_BYTES at runtime.
-const ADAPTIVE_PLANNER_BUDGET_BYTES = DEFAULT_RESIDENCY_BYTES * 4
 const STREAMING_CHUNK_EDGE = 256
 const STREAMING_CHUNK_HALO: Shape3 = [3, 3, 3]
 const ZARR_BYTE_CACHE_BYTES = 512 * 1024 * 1024
+const DECODED_CHUNK_CACHE_BYTES = 256 * 1024 * 1024
+const ZARR_REGION_CONCURRENCY = 6
 const LOD_DEBOUNCE_MS = 180
-const ADAPTIVE_MAX_BRICKS = 512
+// Match NiiVue's renderer-side ceiling. GPU residency remains independently
+// bounded by DEFAULT_RESIDENCY_BYTES, so this only permits a larger plan.
+const ADAPTIVE_MAX_BRICKS = 1024
 const ADAPTIVE_CELL_EDGE = 128
 // Keep the finest data local to the viewport focus. NiiVue's automatic radius
 // is based on the full 3D diagonal, which overestimates the visible footprint
@@ -183,6 +200,7 @@ interface OmezarrSource extends LoadedSourceBase {
   kind: 'omezarr'
   baseLevel: number
   levels: OmezarrLevel[]
+  decodedCache: DecodedChunkCache
 }
 
 interface OmezarrLevel {
@@ -201,11 +219,20 @@ interface OmezarrMosaicBlock extends MosaicBlockLayout {
   level: OmezarrLevel
 }
 
+interface OmezarrMosaicLevel {
+  level: number
+  shape: Shape3
+  spacing: Shape3
+  worldOrigin: Shape3
+  blocks: OmezarrMosaicBlock[]
+}
+
 interface OmezarrMosaicSource extends LoadedSourceBase {
   kind: 'omezarr-mosaic'
   baseLevel: number
   worldOrigin: Shape3
-  blocks: OmezarrMosaicBlock[]
+  levels: OmezarrMosaicLevel[]
+  decodedCache: DecodedChunkCache
 }
 
 type LoadedSource = RangeSource | OmezarrSource | OmezarrMosaicSource
@@ -223,6 +250,10 @@ interface RangeStats {
   fullFileFallbacks: number
   failures: number
   lastRequests: string[]
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 class ByteLruCache implements zarr.ByteCache {
@@ -290,6 +321,8 @@ const els = {
   zarrLevel: el<HTMLSelectElement>('zarrLevel'),
   scrollZoomSpeed: el<HTMLInputElement>('scrollZoomSpeed'),
   scrollZoomSpeedValue: el<HTMLOutputElement>('scrollZoomSpeedValue'),
+  detailBudget: el<HTMLInputElement>('detailBudget'),
+  detailBudgetValue: el<HTMLOutputElement>('detailBudgetValue'),
   pan: [
     el<HTMLInputElement>('panX'),
     el<HTMLInputElement>('panY'),
@@ -344,6 +377,7 @@ const els = {
 
 let nv: NiiVue | null = null
 let activeSource: LoadedSource | null = null
+let activeReadSession: ZarrReadSession | null = null
 let chunkPlan: ChunkPlan | null = null
 let chunkedVolume: NVChunkedVolume | null = null
 let stats: RangeStats = freshStats()
@@ -363,15 +397,7 @@ let sliceViewBeforeRender: ViewState | null = null
 let windowUpdateHandle = 0
 let pendingZoomLevel: number | null = null
 let dandiSearchController: AbortController | null = null
-let mosaicLodHandle = 0
-let mosaicLodRevision = 0
 const reloadQueue = new LatestTaskQueue()
-
-function cancelMosaicLodReload(): void {
-  mosaicLodRevision++
-  window.clearTimeout(mosaicLodHandle)
-  mosaicLodHandle = 0
-}
 let initialSharedView: ViewState | null = null
 let initialSharedSettings: ShareableViewState | null = null
 let manualWindowRevision = 0
@@ -422,6 +448,7 @@ function defaultShareState(): ShareableViewState {
     windowLevel: Number(els.windowLevel.value),
     windowWidth: Number(els.windowWidth.value),
     scrollZoomSpeed: Number(els.scrollZoomSpeed.value),
+    detailBudgetGiB: Number(els.detailBudget.value),
     showCrosshair: els.showCrosshair.checked,
     showScaleBar: els.showScaleBar.checked,
     showStats: els.showStats.checked,
@@ -445,11 +472,13 @@ function applySharedControlSettings(
     els.windowWidth.value = String(Math.max(1, settings.windowWidth))
   }
   els.scrollZoomSpeed.value = String(settings.scrollZoomSpeed)
+  els.detailBudget.value = String(settings.detailBudgetGiB)
   els.showCrosshair.checked = settings.showCrosshair
   els.showScaleBar.checked = settings.showScaleBar
   els.showStats.checked = settings.showStats
   syncWindowControlValues()
   syncScrollZoomSpeed()
+  syncDetailBudget()
 }
 
 function viewFromShareState(settings: ShareableViewState): ViewState {
@@ -539,10 +568,19 @@ function currentFovGeometry(source: OmezarrSource): ExportGeometry {
 }
 
 function currentMosaicFovGeometry(source: OmezarrMosaicSource): ExportGeometry {
-  const level = source.blocks[0]?.level
+  const plan = currentPlan()
+  const activeLevel = plan
+    ? Math.min(...plan.chunks.map((chunk) => chunk.sourceLevel ?? 0))
+    : source.baseLevel
+  const mosaicLevel = source.levels[activeLevel]
+  const level = mosaicLevel?.blocks[0]?.level
   if (!level) throw new Error('The translated mosaic has no readable blocks')
   const crop = fovCropGeometry(
-    { level: source.baseLevel, shape: source.shape, spacing: source.spacing },
+    {
+      level: mosaicLevel.level,
+      shape: mosaicLevel.shape,
+      spacing: mosaicLevel.spacing,
+    },
     focusFraction,
     viewerZoom(),
   )
@@ -860,7 +898,8 @@ async function reloadAfterStoreRemoval(): Promise<void> {
     await reloadVolume({ reloadSource: true, preserveView: true })
     return
   }
-  cancelMosaicLodReload()
+  activeReadSession?.abort('OME-Zarr store removed')
+  activeReadSession = null
   await disposeChunkedVolume()
   activeSource = null
   chunkPlan = null
@@ -1093,11 +1132,11 @@ function syncSourceControls(): void {
   syncZarrLevelControl()
 }
 
-function pyramidLevels(source: LoadedSource | null): OmezarrLevel[] {
+function pyramidLevels(
+  source: LoadedSource | null,
+): readonly { level: number }[] {
   if (source?.kind === 'omezarr') return source.levels
-  if (source?.kind === 'omezarr-mosaic') {
-    return source.blocks[0]?.source.levels ?? []
-  }
+  if (source?.kind === 'omezarr-mosaic') return source.levels
   return []
 }
 
@@ -1175,6 +1214,7 @@ function initControlsFromUrl(): void {
     'wl',
     'ww',
     'scrollZoomSpeed',
+    'detailBudget',
     'crosshairVisible',
     'scaleBar',
     'stats',
@@ -1191,6 +1231,7 @@ function updateUrlFromControls(): void {
   const url = new URL(window.location.href)
   const kind = currentSourceKind()
   url.searchParams.set('source', els.source.value)
+  url.searchParams.set('detailBudget', String(currentDetailBudgetGiB()))
   if (kind === 'omezarr') {
     const level = requestedBaseLevel ?? 0
     url.searchParams.set('level', String(level))
@@ -1414,17 +1455,27 @@ async function openOmezarrSource(
   profile: OmezarrProfile,
   requestedLevelInput: number | null,
   initializeWindow: boolean,
+  decodedCache: DecodedChunkCache,
+  readSession: ZarrReadSession,
 ): Promise<OmezarrSource> {
   const isInitialCustomLoad = initializeWindow
   const storeUrl = profile.storeUrl()
   const baseStore = new zarr.FetchStore(storeUrl, {
     fetch: createTrackedZarrFetch(),
   })
-  const store = zarr.withByteCaching(withInflightReadDeduplication(baseStore), {
-    cache: new ByteLruCache(ZARR_BYTE_CACHE_BYTES),
-  })
+  const cachedStore = zarr.withByteCaching(
+    withInflightReadDeduplication(baseStore),
+    { cache: new ByteLruCache(ZARR_BYTE_CACHE_BYTES) },
+  )
+  const store = await withOptionalConsolidatedMetadata(
+    cachedStore,
+    readSession.signal,
+  )
   const root = zarr.root(store)
-  const group = await zarr.open(root, { kind: 'group' })
+  const group = await zarr.open(root, {
+    kind: 'group',
+    signal: readSession.signal,
+  })
   const attrs = group.attrs as OmezarrRootAttributes
   const multiscale = multiscalesFromAttrs(attrs)[0]
   const levelCount = multiscale?.datasets?.length ?? 0
@@ -1442,8 +1493,16 @@ async function openOmezarrSource(
 
   const levels = await Promise.all(
     datasets.map(async (levelDataset, levelIndex): Promise<OmezarrLevel> => {
-      const array = await zarr.open(root.resolve(`/${levelDataset.path}`), {
-        kind: 'array',
+      const openedArray = await zarr.open(
+        root.resolve(`/${levelDataset.path}`),
+        {
+          kind: 'array',
+          signal: readSession.signal,
+        },
+      )
+      const array = withDecodedChunkCaching(openedArray, {
+        cache: decodedCache,
+        namespace: `${profile.id}\0${levelDataset.path}`,
       })
       const [shapeZ, shapeY, shapeX] = trailingSpatial(array.shape, 'shape')
       const [chunkZ, chunkY, chunkX] = trailingSpatial(array.chunks, 'chunks')
@@ -1507,10 +1566,13 @@ async function openOmezarrSource(
     transportLabel: profile.transportLabel,
     baseLevel: level,
     levels,
+    decodedCache,
   }
 }
 
-async function loadOmezarrSource(): Promise<OmezarrSource | OmezarrMosaicSource> {
+async function loadOmezarrSource(
+  readSession: ZarrReadSession,
+): Promise<OmezarrSource | OmezarrMosaicSource> {
   const profiles = currentStoreUrls().map(customProfile)
   if (profiles.length === 0) {
     throw new Error(
@@ -1519,11 +1581,14 @@ async function loadOmezarrSource(): Promise<OmezarrSource | OmezarrMosaicSource>
         : 'Add at least one OME-Zarr store URL before loading',
     )
   }
+  const decodedCache = new DecodedChunkCache(DECODED_CHUNK_CACHE_BYTES)
   const initializeWindow = shouldInitializeCustomSource
   const first = await openOmezarrSource(
     profiles[0] as OmezarrProfile,
     requestedBaseLevel,
     initializeWindow,
+    decodedCache,
+    readSession,
   )
   requestedBaseLevel = first.baseLevel
   if (fixedZarrLevel !== null) fixedZarrLevel = first.baseLevel
@@ -1532,7 +1597,13 @@ async function loadOmezarrSource(): Promise<OmezarrSource | OmezarrMosaicSource>
   if (profiles.length === 1) return first
   const rest = await Promise.all(
     profiles.slice(1).map((profile) =>
-      openOmezarrSource(profile, first.baseLevel, false),
+      openOmezarrSource(
+        profile,
+        first.baseLevel,
+        false,
+        decodedCache,
+        readSession,
+      ),
     ),
   )
   const sources = [first, ...rest]
@@ -1542,59 +1613,91 @@ async function loadOmezarrSource(): Promise<OmezarrSource | OmezarrMosaicSource>
         `Store ${source.id} uses ${source.dtype}; all translated stores must use ${first.dtype}`,
       )
     }
-  }
-  const levels = sources.map((source) => {
-    const level = source.levels[first.baseLevel]
-    if (!level) {
-      throw new Error(`Store ${source.id} has no pyramid level ${first.baseLevel}`)
+    if (source.levels.length !== first.levels.length) {
+      throw new Error(
+        `Store ${source.id} has ${source.levels.length} pyramid levels; all translated stores must have ${first.levels.length}`,
+      )
     }
-    return { source, level }
-  })
-  const layout = layoutTranslatedBlocks(
-    levels.map(({ source, level }) => ({
-      id: source.id,
-      shape: level.shape,
-      spacing: level.spacing,
-      translation: level.translation,
-    })),
+  }
+  const mosaicLevels = first.levels.map(
+    (_, levelIndex): OmezarrMosaicLevel => {
+      const sourceLevels = sources.map((source) => {
+        const level = source.levels[levelIndex]
+        if (!level) {
+          throw new Error(`Store ${source.id} has no pyramid level ${levelIndex}`)
+        }
+        return { source, level }
+      })
+      const layout = layoutTranslatedBlocks(
+        sourceLevels.map(({ source, level }) => ({
+          id: source.id,
+          shape: level.shape,
+          spacing: level.spacing,
+          translation: level.translation,
+        })),
+      )
+      const blocks = layout.blocks.map(
+        (block, index): OmezarrMosaicBlock => {
+          const sourceLevel = sourceLevels[index]
+          if (!sourceLevel) {
+            throw new Error('Translated store layout is incomplete')
+          }
+          return {
+            ...block,
+            source: sourceLevel.source,
+            level: sourceLevel.level,
+          }
+        },
+      )
+      return {
+        level: levelIndex,
+        shape: layout.shape,
+        spacing: layout.spacing,
+        worldOrigin: layout.worldOrigin,
+        blocks,
+      }
+    },
   )
+  const finest = mosaicLevels[0]
+  const selected = mosaicLevels[first.baseLevel]
+  if (!finest || !selected) {
+    throw new Error('The translated mosaic has no readable pyramid levels')
+  }
   const grid = renderCropGrid(
-    layout.shape,
+    selected.shape,
     STREAMING_CHUNK_EDGE,
     STREAMING_CHUNK_HALO,
   )
-  const blocks = layout.blocks.map((block, index): OmezarrMosaicBlock => {
-    const sourceLevel = levels[index]
-    if (!sourceLevel) throw new Error('Translated store layout is incomplete')
-    return { ...block, source: sourceLevel.source, level: sourceLevel.level }
-  })
   return {
     kind: 'omezarr-mosaic',
     id: translatedMosaicId(sources.map((source) => source.id)),
     name: `${sources.length}-store translated OME-Zarr mosaic`,
-    shape: layout.shape,
-    spacing: layout.spacing,
+    shape: finest.shape,
+    spacing: finest.spacing,
     crosshairSpacing: first.crosshairSpacing,
     dtype: first.dtype,
     datatypeCode: first.datatypeCode,
     numBitsPerVoxel: first.numBitsPerVoxel,
     defaultWindow: first.defaultWindow,
     chunkGrid: grid,
-    chunkShape: layout.shape.map((size, axis) =>
+    chunkShape: selected.shape.map((size, axis) =>
       Math.ceil(size / grid[axis]),
     ) as Shape3,
     chunkCount: grid[0] * grid[1] * grid[2],
     sourceUrl: sources.map((source) => source.sourceUrl).join(' + '),
     transportLabel: `${sources.length} translated OME-Zarr stores`,
     baseLevel: first.baseLevel,
-    worldOrigin: layout.worldOrigin,
-    blocks,
+    worldOrigin: finest.worldOrigin,
+    levels: mosaicLevels,
+    decodedCache,
   }
 }
 
-async function loadActiveSource(): Promise<LoadedSource> {
+async function loadActiveSource(
+  readSession: ZarrReadSession,
+): Promise<LoadedSource> {
   return currentSourceKind() === 'omezarr'
-    ? loadOmezarrSource()
+    ? loadOmezarrSource(readSession)
     : loadSyntheticSource()
 }
 
@@ -1663,6 +1766,7 @@ function omezarrRequestKey(
 async function fetchOmezarrRegion(
   level: OmezarrLevel,
   request: ChunkedVolumeFetch,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const [x0, y0, z0] = request.texOrigin
   const [sx, sy, sz] = request.texDims
@@ -1672,7 +1776,7 @@ async function fetchOmezarrRegion(
   selection.push(zarr.slice(y0, y0 + sy))
   selection.push(zarr.slice(x0, x0 + sx))
 
-  const view = await zarr.get(level.array, selection)
+  const view = await zarr.get(level.array, selection, { signal })
   const bytes = bytesFromZarrView(view)
   const expectedBytes = sx * sy * sz * request.bytesPerVoxel
   if (bytes.byteLength !== expectedBytes) {
@@ -1684,21 +1788,22 @@ async function fetchOmezarrRegion(
 }
 
 function mosaicRequestKey(
-  source: OmezarrMosaicSource,
+  level: number,
   origin: Shape3,
   dims: Shape3,
 ): string {
-  return `mosaic:${source.baseLevel}:${origin.join(',')}:${dims.join(',')}`
+  return `mosaic:${level}:${origin.join(',')}:${dims.join(',')}`
 }
 
 async function fetchMosaicRegion(
-  source: OmezarrMosaicSource,
+  level: OmezarrMosaicLevel,
   origin: Shape3,
   dims: Shape3,
   bytesPerVoxel: number,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const fetched = await Promise.all(
-    source.blocks.map(async (block): Promise<FetchedMosaicBlock | null> => {
+    level.blocks.map(async (block): Promise<FetchedMosaicBlock | null> => {
       const window = mosaicSamplingWindow(
         block.voxelOrigin,
         block.shape,
@@ -1706,12 +1811,16 @@ async function fetchMosaicRegion(
         dims,
       )
       if (!window) return null
-      const bytes = await fetchOmezarrRegion(block.level, {
-        levelIndex: block.level.level,
-        texOrigin: window.sourceOrigin,
-        texDims: window.sourceDims,
-        bytesPerVoxel,
-      })
+      const bytes = await fetchOmezarrRegion(
+        block.level,
+        {
+          levelIndex: block.level.level,
+          texOrigin: window.sourceOrigin,
+          texDims: window.sourceDims,
+          bytesPerVoxel,
+        },
+        signal,
+      )
       return {
         voxelOrigin: block.voxelOrigin,
         shape: block.shape,
@@ -1728,39 +1837,30 @@ async function fetchMosaicRegion(
   )
 }
 
-function createMosaicVolume(
+function createMosaicPyramidSource(
   source: OmezarrMosaicSource,
-): { volume: NVImage; plan: ChunkPlan } {
-  const plan = chunkVolumeGrid(
-    source.shape,
-    source.chunkGrid,
-    STREAMING_CHUNK_EDGE,
-    STREAMING_CHUNK_HALO,
-  )
-  const win = parseWindow(source.defaultWindow)
-  const volume = buildLogicalVolume({
-    id: translatedMosaicVolumeId(source.id, source.baseLevel),
-    url: `client-zarr-mosaic://${source.id}?level=${source.baseLevel}`,
-    shape: source.shape,
-    spacing: source.spacing,
-    origin: source.worldOrigin,
+  readSession: ZarrReadSession,
+): ChunkedVolumeSource {
+  return createMosaicChunkedVolumeSource({
     datatypeCode: source.datatypeCode,
-    numBitsPerVoxel: source.numBitsPerVoxel,
-    calMin: win.min,
-    calMax: win.max,
-    colormap: els.colormap.value,
-    chunkSource: async (request) => {
-      const origin = request.desc.texOrigin
-      const dims = request.desc.texDims
-      const key = mosaicRequestKey(source, origin, dims)
+    levels: source.levels,
+    signal: () => readSession.signal,
+    concurrency: ZARR_REGION_CONCURRENCY,
+    fetchRegion: async (level, request, signal) => {
+      const key = mosaicRequestKey(
+        level.level,
+        request.texOrigin,
+        request.texDims,
+      )
       stats.requested.add(key)
       renderHud()
       try {
         const bytes = await fetchMosaicRegion(
-          source,
-          origin,
-          dims,
+          level,
+          request.texOrigin,
+          request.texDims,
           request.bytesPerVoxel,
+          signal,
         )
         observeChunkForAutoWindow(source, bytes)
         stats.completed.add(key)
@@ -1768,20 +1868,21 @@ function createMosaicVolume(
         renderHud()
         return bytes
       } catch (error) {
-        stats.failures++
-        renderHud()
+        if (!isAbortError(error)) {
+          stats.failures++
+          renderHud()
+        }
         throw error
       }
     },
   })
-  volume.chunkPlan = plan
-  volume.chunkExplode = { enabled: false }
-  return { volume, plan }
 }
 
 function createOmezarrPyramidSource(
   source: OmezarrSource,
+  readSession: ZarrReadSession,
 ): ChunkedVolumeSource {
+  const reads = new AbortableTaskPool(ZARR_REGION_CONCURRENCY)
   return {
     datatypeCode: source.datatypeCode,
     levels: source.levels.map((level) => ({
@@ -1789,32 +1890,37 @@ function createOmezarrPyramidSource(
       shape: level.shape,
       spacing: level.spacing,
     })),
-    fetchChunk: async (request) => {
-      const level = source.levels[request.levelIndex]
-      if (!level) {
-        throw new Error(
-          `OME-Zarr pyramid level ${request.levelIndex} is missing`,
+    fetchChunk: (request) => {
+      const signal = readSession.signal
+      return reads.run(signal, async () => {
+        const level = source.levels[request.levelIndex]
+        if (!level) {
+          throw new Error(
+            `OME-Zarr pyramid level ${request.levelIndex} is missing`,
+          )
+        }
+        const key = omezarrRequestKey(
+          request.levelIndex,
+          request.texOrigin,
+          request.texDims,
         )
-      }
-      const key = omezarrRequestKey(
-        request.levelIndex,
-        request.texOrigin,
-        request.texDims,
-      )
-      stats.requested.add(key)
-      renderHud()
-      try {
-        const bytes = await fetchOmezarrRegion(level, request)
-        observeChunkForAutoWindow(source, bytes)
-        stats.completed.add(key)
-        stats.decodedBytes += bytes.byteLength
+        stats.requested.add(key)
         renderHud()
-        return bytes
-      } catch (err) {
-        stats.failures++
-        renderHud()
-        throw err
-      }
+        try {
+          const bytes = await fetchOmezarrRegion(level, request, signal)
+          observeChunkForAutoWindow(source, bytes)
+          stats.completed.add(key)
+          stats.decodedBytes += bytes.byteLength
+          renderHud()
+          return bytes
+        } catch (err) {
+          if (!isAbortError(err)) {
+            stats.failures++
+            renderHud()
+          }
+          throw err
+        }
+      })
     },
   }
 }
@@ -1822,6 +1928,7 @@ function createOmezarrPyramidSource(
 function createOmezarrRenderCropVolume(
   source: OmezarrSource,
   geometry: ExportGeometry,
+  readSession: ZarrReadSession,
 ): { volume: NVImage; plan: ChunkPlan } {
   const level = geometry.level
   if (!level) throw new Error('The 3D render crop level is unavailable')
@@ -1861,20 +1968,26 @@ function createOmezarrRenderCropVolume(
       stats.requested.add(key)
       renderHud()
       try {
-        const bytes = await fetchOmezarrRegion(level, {
-          levelIndex: level.level,
-          texOrigin,
-          texDims,
-          bytesPerVoxel: request.bytesPerVoxel,
-        })
+        const bytes = await fetchOmezarrRegion(
+          level,
+          {
+            levelIndex: level.level,
+            texOrigin,
+            texDims,
+            bytesPerVoxel: request.bytesPerVoxel,
+          },
+          readSession.signal,
+        )
         observeChunkForAutoWindow(source, bytes)
         stats.completed.add(key)
         stats.decodedBytes += bytes.byteLength
         renderHud()
         return bytes
       } catch (error) {
-        stats.failures++
-        renderHud()
+        if (!isAbortError(error)) {
+          stats.failures++
+          renderHud()
+        }
         throw error
       }
     },
@@ -1924,11 +2037,16 @@ async function readMosaicGeometry(
   source: OmezarrMosaicSource,
   geometry: ExportGeometry,
 ): Promise<Uint8Array> {
+  const levelIndex = geometry.level?.level ?? source.baseLevel
+  const level = source.levels[levelIndex]
+  if (!level) {
+    throw new Error(`Translated mosaic level ${levelIndex} is unavailable`)
+  }
   setDownloadStatus(
-    `Fetching translated L${source.baseLevel} field of view...`,
+    `Fetching translated L${level.level} field of view...`,
   )
   return fetchMosaicRegion(
-    source,
+    level,
     geometry.origin,
     geometry.shape,
     source.numBitsPerVoxel / 8,
@@ -1972,10 +2090,16 @@ async function readWholeRangeSource(source: RangeSource): Promise<Uint8Array> {
 }
 
 function niftiFilename(source: LoadedSource, geometry: ExportGeometry): string {
-  const cleanId = source.id
+  const sourceName =
+    source.kind === 'omezarr-mosaic'
+      ? `omezarr-mosaic-${source.levels[0]?.blocks.length ?? 0}-stores`
+      : source.id
+  const cleanId = sourceName
     .replace(/\.ome\.zarr$/i, '')
     .replace(/[^a-z0-9._-]+/gi, '-')
     .replace(/^-+|-+$/g, '')
+    .slice(0, 96)
+    .replace(/-+$/g, '')
   const levelSuffix = geometry.level ? `-L${geometry.level.level}` : ''
   return `${cleanId || 'volume'}${levelSuffix}-fov.nii`
 }
@@ -1987,7 +2111,9 @@ function downloadBuffer(buffer: ArrayBuffer, filename: string): void {
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = filename
+  document.body.append(anchor)
   anchor.click()
+  anchor.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
@@ -2019,6 +2145,10 @@ async function niftiHeader(
   geometry: ExportGeometry,
 ): Promise<Uint8Array> {
   const win = parseWindow(source.defaultWindow)
+  const mosaicLevel =
+    source.kind === 'omezarr-mosaic'
+      ? source.levels[geometry.level?.level ?? source.baseLevel]
+      : undefined
   const volume = buildLogicalVolume({
     id: source.name,
     url: source.sourceUrl,
@@ -2028,7 +2158,8 @@ async function niftiHeader(
       source.kind === 'omezarr-mosaic'
         ? geometry.origin.map(
             (value, axis) =>
-              source.worldOrigin[axis] + value * geometry.spacing[axis],
+              (mosaicLevel?.worldOrigin[axis] ?? source.worldOrigin[axis]) +
+              value * geometry.spacing[axis],
           ) as Shape3
         : undefined,
     datatypeCode: source.datatypeCode,
@@ -2134,7 +2265,9 @@ async function downloadNifti(): Promise<void> {
   try {
     const geometry = sourceExportGeometry(source)
     const filename = niftiFilename(source, geometry)
-    if (source.kind !== 'synthetic' && bytes > MAX_IN_MEMORY_NIFTI_BYTES) {
+    const streamsToSelectedFile =
+      source.kind !== 'synthetic' && bytes > MAX_IN_MEMORY_NIFTI_BYTES
+    if (streamsToSelectedFile) {
       await streamUniformOmezarr(source, geometry, filename)
     } else {
       const imageBytes =
@@ -2146,7 +2279,11 @@ async function downloadNifti(): Promise<void> {
       setDownloadStatus('Writing NIfTI header...')
       await saveInMemoryNifti(source, geometry, imageBytes, filename)
     }
-    setDownloadStatus(`Downloaded ${filename}`)
+    setDownloadStatus(
+      streamsToSelectedFile
+        ? `Saved ${filename}`
+        : `Download started: ${filename}`,
+    )
   } catch (error) {
     const cancelled =
       error instanceof DOMException && error.name === 'AbortError'
@@ -2216,7 +2353,11 @@ function planRequestKey(
   const chunk = plan?.chunks[chunkIndex]
   if (!chunk) return null
   if (source.kind === 'omezarr-mosaic') {
-    return mosaicRequestKey(source, chunk.texOrigin, chunk.texDims)
+    return mosaicRequestKey(
+      chunk.sourceLevel ?? 0,
+      chunk.texOrigin,
+      chunk.texDims,
+    )
   }
   const cropGeometry = renderCropGeometry
   const cropLevel = cropGeometry?.level
@@ -2273,18 +2414,15 @@ function visibleFovLevels(plan: ChunkPlan | null): number[] {
   if (!plan) return []
   const cropLevel = renderCropGeometry?.level
   if (cropLevel) return [cropLevel.level]
-  const zoom = Math.max(1, viewerZoom())
-  const lo = plan.volumeDims.map((size, axis) =>
-    Math.max(0, focusFraction[axis] * size - size / (2 * zoom)),
-  )
-  const hi = plan.volumeDims.map((size, axis) =>
-    Math.min(size, focusFraction[axis] * size + size / (2 * zoom)),
-  )
+  const bounds = currentVisibleFovBounds(plan.volumeDims)
   const levels = new Set<number>()
   for (const chunk of plan.chunks) {
-    const intersects = chunk.voxelOrigin.every(
-      (origin, axis) =>
-        origin < hi[axis] && origin + chunk.voxelDims[axis] > lo[axis],
+    const intersects = bounds.some((box) =>
+      chunk.voxelOrigin.every(
+        (origin, axis) =>
+          origin < box.max[axis] &&
+          origin + chunk.voxelDims[axis] > box.min[axis],
+      ),
     )
     if (intersects) levels.add(chunk.sourceLevel ?? 0)
   }
@@ -2302,30 +2440,36 @@ function setActiveLodLoading(target?: number): void {
       : 'Reading the OME-Zarr pyramid and preparing its GPU brick plan'
   els.activeLevel.removeAttribute('data-levels')
   els.activeLevel.removeAttribute('data-fov-levels')
+  els.activeLevel.removeAttribute('data-requested-level')
+  els.activeLevel.removeAttribute('data-delivered-level')
 }
 
-function setVisibleLevel(level: number | null): void {
-  els.visibleLevel.hidden = level === null
-  els.visibleLevel.value = level === null ? '' : `L${level}`
+function setVisibleLevel(
+  level: number | null,
+  label = level === null ? '' : `L${level}`,
+  requestedLevel: number | null = null,
+): void {
+  els.visibleLevel.hidden = level === null || !els.showScaleBar.checked
+  els.visibleLevel.value = label
   els.visibleLevel.title =
-    level === null ? '' : `Finest Zarr level currently visible: L${level}`
+    level === null
+      ? ''
+      : requestedLevel !== null && requestedLevel !== level
+        ? `Finest Zarr level currently visible: L${level}; camera requested L${requestedLevel}`
+        : `Finest Zarr level currently visible: L${level}`
 }
 
 function syncActiveLodIndicator(plan: ChunkPlan | null): void {
-  if (activeSource?.kind === 'omezarr-mosaic') {
-    els.activeLevelControl.hidden = false
-    els.activeLevel.value = `L${activeSource.baseLevel} · ${activeSource.blocks.length} translated stores`
-    els.activeLevel.dataset.levels = String(activeSource.baseLevel)
-    els.activeLevel.dataset.fovLevels = String(activeSource.baseLevel)
-    els.activeLevel.title = `One composite volume positioned from ${activeSource.blocks.length} OME-NGFF translation transforms`
-    setVisibleLevel(activeSource.baseLevel)
-    return
-  }
-  if (activeSource?.kind !== 'omezarr') {
+  if (
+    activeSource?.kind !== 'omezarr' &&
+    activeSource?.kind !== 'omezarr-mosaic'
+  ) {
     els.activeLevelControl.hidden = true
     els.activeLevel.value = ''
     els.activeLevel.removeAttribute('data-levels')
     els.activeLevel.removeAttribute('data-fov-levels')
+    els.activeLevel.removeAttribute('data-requested-level')
+    els.activeLevel.removeAttribute('data-delivered-level')
     setVisibleLevel(null)
     return
   }
@@ -2338,31 +2482,59 @@ function syncActiveLodIndicator(plan: ChunkPlan | null): void {
   const fovLevels = visibleFovLevels(plan)
   const contextLevels = levels.filter((level) => !fovLevels.includes(level))
   const fovLabel = fovLevels.map((level) => `L${level}`).join(' · ')
-  const contextLabel = contextLevels.map((level) => `L${level}`).join(' · ')
+  const display = lodDeliveryDisplay(
+    currentDetailLevel,
+    fovLevels,
+    contextLevels,
+  )
   els.activeLevelControl.hidden = false
-  els.activeLevel.value = contextLabel
-    ? `FOV ${fovLabel} · context ${contextLabel}`
-    : `FOV ${fovLabel}`
+  els.activeLevel.value = display.visibleLabel
   els.activeLevel.dataset.levels = levels.join(',')
   els.activeLevel.dataset.fovLevels = fovLevels.join(',')
-  setVisibleLevel(fovLevels[0] ?? currentDetailLevel)
-  els.activeLevel.title = `Visible FOV: ${fovLabel}. Whole plan: ${counts
+  if (currentDetailLevel === null) {
+    els.activeLevel.removeAttribute('data-requested-level')
+  } else {
+    els.activeLevel.dataset.requestedLevel = String(currentDetailLevel)
+  }
+  if (display.deliveredLevel === null) {
+    els.activeLevel.removeAttribute('data-delivered-level')
+  } else {
+    els.activeLevel.dataset.deliveredLevel = String(display.deliveredLevel)
+  }
+  setVisibleLevel(
+    display.deliveredLevel,
+    display.visibleLabel,
+    currentDetailLevel,
+  )
+  const sourceDetail =
+    activeSource.kind === 'omezarr-mosaic'
+      ? ` Composite of ${activeSource.levels[0]?.blocks.length ?? 0} translated stores.`
+      : ''
+  els.activeLevel.title = `Visible FOV: ${fovLabel}.${sourceDetail} Whole plan: ${counts
     .map(([level, count]) => `L${level}: ${count} bricks`)
     .join(', ')}`
 }
 
 function httpSummary(): string {
+  const metadata =
+    stats.metadataHits > 0 ? `${stats.metadataHits} metadata` : ''
   if (stats.rangeHits > 0) {
-    return `<span class="ok">${stats.rangeHits} range 206</span>`
+    const summary = [metadata, `${stats.rangeHits} range 206`]
+      .filter(Boolean)
+      .join(' + ')
+    return `<span class="ok">${summary}</span>`
   }
   if (stats.chunkObjectHits > 0) {
-    return `<span class="ok">${stats.chunkObjectHits} chunk objects</span>`
+    const summary = [metadata, `${stats.chunkObjectHits} chunk objects`]
+      .filter(Boolean)
+      .join(' + ')
+    return `<span class="ok">${summary}</span>`
   }
   if (stats.fullFileFallbacks > 0) {
     return `<span class="warn">${stats.fullFileFallbacks} full-file 200</span>`
   }
   if (stats.metadataHits > 0) {
-    return `<span class="warn">${stats.metadataHits} metadata</span>`
+    return `<span class="ok">${metadata}</span>`
   }
   return '<span class="warn">pending</span>'
 }
@@ -2382,9 +2554,11 @@ function renderHud(): void {
     source.kind === 'omezarr'
       ? `<div class="row"><span class="key">base chunks</span><span>L${source.baseLevel}: ${source.chunkGrid.join(' x ')} @ ${source.chunkShape.join(' x ')}</span></div>`
       : source.kind === 'omezarr-mosaic'
-        ? `<div class="row"><span class="key">translated stores</span><span>${source.blocks.length} stores · world origin ${source.worldOrigin.join(', ')} mm</span></div>`
+        ? `<div class="row"><span class="key">translated stores</span><span>${source.levels[0]?.blocks.length ?? 0} stores · world origin ${source.worldOrigin.join(', ')} mm</span></div>`
       : ''
   const stream = nv?.chunkStreamStats()
+  const decodedCache =
+    source.kind === 'synthetic' ? null : source.decodedCache
   const failures =
     stats.failures > 0
       ? `<span class="bad">${stats.failures}</span>`
@@ -2402,7 +2576,8 @@ function renderHud(): void {
     <div class="row"><span class="key">completed</span><span>${planCounts.completed} / ${chunkCount}</span></div>
     <div class="row"><span class="key">wire</span><span>${formatBytes(stats.wireBytes)}</span></div>
     <div class="row"><span class="key">decoded</span><span>${formatBytes(stats.decodedBytes)}</span></div>
-    <div class="row"><span class="key">cache</span><span>${stats.cacheHits} hits, ${formatBytes(stats.cacheBytes)}</span></div>
+    <div class="row"><span class="key">byte cache</span><span>${stats.cacheHits} hits, ${formatBytes(stats.cacheBytes)}</span></div>
+    ${decodedCache ? `<div class="row"><span class="key">decoded cache</span><span>${decodedCache.hits} hits / ${decodedCache.misses} misses, ${formatBytes(decodedCache.byteLength)}</span></div>` : ''}
     <div class="row"><span class="key">resident</span><span>${stream ? `${stream.resident} resident, ${stream.pending} pending, ${stream.inFlight} in flight` : 'pending'}</span></div>
     <div class="row"><span class="key">failures</span><span>${failures}</span></div>
     <div class="row"><span class="key">last requests</span><span>${html(stats.lastRequests.join(' | ') || 'none')}</span></div>
@@ -2416,6 +2591,15 @@ function syncStatsVisibility(): void {
   els.chunkStrip.hidden = !isVisible
   els.chunkStrip.setAttribute('aria-hidden', String(!isVisible))
   if (isVisible) renderHud()
+}
+
+function syncScaleBarVisibility(): void {
+  if (nv) {
+    nv.isRulerVisible = els.showScaleBar.checked
+    nv.drawScene()
+  }
+  els.visibleLevel.hidden =
+    !els.showScaleBar.checked || els.visibleLevel.value.length === 0
 }
 
 function syncCrosshairVisibility(): void {
@@ -2466,6 +2650,37 @@ function clearMeasurements(): void {
       : 'crosshair movement active'
 }
 
+function handleMeasurementContextMenu(event: MouseEvent): void {
+  if (!nv || event.shiftKey || nv.model.completedMeasurements.length === 0) return
+  const rect = els.canvas.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+  const scaleX = els.canvas.width / rect.width
+  const scaleY = els.canvas.height / rect.height
+  const point: [number, number] = [
+    (event.clientX - rect.left) * scaleX,
+    (event.clientY - rect.top) * scaleY,
+  ]
+  const planeTolerance =
+    Math.max(...(activeSource?.crosshairSpacing ?? [1, 1, 1])) * 0.5
+  const index = measurementIndexAtCanvasPoint(
+    nv.model.completedMeasurements,
+    nv.view?.screenSlices ?? [],
+    point,
+    12 * Math.max(scaleX, scaleY),
+    planeTolerance,
+  )
+  if (index < 0) return
+  event.preventDefault()
+  nv.model.completedMeasurements.splice(index, 1)
+  nv.drawScene()
+  const remaining = nv.model.completedMeasurements.length
+  els.clearMeasurements.disabled = remaining === 0
+  els.measurementStatus.value =
+    remaining === 0
+      ? 'drag across a structure'
+      : `${remaining} measurement${remaining === 1 ? '' : 's'} · right-click to remove`
+}
+
 function resetRenderCropForSourceChange(): void {
   clearMeasurements()
   renderCropGeometry = null
@@ -2514,6 +2729,7 @@ function startHudPolling(): void {
 function applyLayout(): void {
   if (!nv) return
   nv.sliceType = Number(els.layout.value)
+  syncCrosshairAppearance()
   nv.drawScene()
   syncViewControls()
   syncInteractionTool()
@@ -2530,10 +2746,12 @@ async function enterOmezarrRenderCrop(source: OmezarrSource): Promise<void> {
   stats = freshStats()
   suppressAdaptiveEvents = true
   try {
+    if (activeReadSession) activeReadSession.renew()
+    else activeReadSession = new ZarrReadSession()
     setActiveLodLoading(geometry.level?.level)
     await disposeChunkedVolume()
     nv.sliceType = SLICE_TYPE.RENDER
-    await loadOmezarrRenderCrop(source, geometry)
+    await loadOmezarrRenderCrop(source, geometry, activeReadSession)
     const camera = nv as unknown as CameraView
     camera.crosshairPos = [0.5, 0.5, 0.5]
     nv.renderPivotMM = null
@@ -2623,6 +2841,7 @@ function currentShareState(): ShareableViewState {
     windowLevel: Number(els.windowLevel.value),
     windowWidth: Number(els.windowWidth.value),
     scrollZoomSpeed: currentScrollZoomSpeed(),
+    detailBudgetGiB: currentDetailBudgetGiB(),
     showCrosshair: els.showCrosshair.checked,
     showScaleBar: els.showScaleBar.checked,
     showStats: els.showStats.checked,
@@ -2687,6 +2906,43 @@ function viewerZoom(): number {
   const zoom =
     nv.sliceType === SLICE_TYPE.RENDER ? nv.scaleMultiplier : nv.pan2Dxyzmm[3]
   return Number.isFinite(zoom) && zoom > 0 ? zoom : 1
+}
+
+function visibleSliceAxes(): number[] | null {
+  const sliceType = nv?.sliceType ?? Number(els.layout.value)
+  if (sliceType === SLICE_TYPE.MULTIPLANAR) return [0, 1, 2]
+  if (sliceType === SLICE_TYPE.SAGITTAL) return [0]
+  if (sliceType === SLICE_TYPE.CORONAL) return [1]
+  if (sliceType === SLICE_TYPE.AXIAL) return [2]
+  return null
+}
+
+function currentVisibleFovBounds(
+  shape: Shape3,
+  focus: Shape3 = focusFraction,
+  zoom = viewerZoom(),
+) {
+  return visibleFovBounds(shape, focus, zoom, visibleSliceAxes())
+}
+
+function syncCrosshairAppearance(): void {
+  if (!nv || !activeSource) return
+  // Multiplanar layouts can include a 3D tile, so compensate using the render
+  // camera even when the overall layout is not the dedicated render view.
+  const cameraZoom =
+    Number.isFinite(nv.scaleMultiplier) && nv.scaleMultiplier > 0
+      ? nv.scaleMultiplier
+      : 1
+  const crosshair = crosshairAppearanceForSpacing(
+    activeSource.crosshairSpacing,
+    cameraZoom,
+  )
+  // Update both related values before the next frame. The individual NiiVue
+  // setters each redraw, which would add two redundant renders per wheel event.
+  nv.model.ui.crosshairWidth = crosshair.width
+  nv.model.ui.crosshairGap = crosshair.gap
+  els.canvas.dataset.crosshairWidth = String(crosshair.width)
+  els.canvas.dataset.crosshairGap = String(crosshair.gap)
 }
 
 function panExtent(axis: number): number {
@@ -2754,13 +3010,40 @@ function syncViewControls(): void {
 
 function currentScrollZoomSpeed(): number {
   const speed = Number(els.scrollZoomSpeed.value)
-  return Number.isFinite(speed) ? Math.min(4, Math.max(0.25, speed)) : 2
+  return Number.isFinite(speed) ? Math.min(10, Math.max(0.25, speed)) : 5
 }
 
 function syncScrollZoomSpeed(): void {
   const speed = currentScrollZoomSpeed()
   els.scrollZoomSpeed.value = String(speed)
   els.scrollZoomSpeedValue.value = `${Number(speed.toFixed(2))}×`
+}
+
+function currentDetailBudgetGiB(): number {
+  const budget = Number(els.detailBudget.value)
+  return Number.isFinite(budget)
+    ? Math.min(8, Math.max(0.5, budget))
+    : DEFAULT_DETAIL_BUDGET_GIB
+}
+
+function currentDetailBudgetBytes(): number {
+  return currentDetailBudgetGiB() * 1024 * 1024 * 1024
+}
+
+function syncDetailBudget(): void {
+  const budget = currentDetailBudgetGiB()
+  els.detailBudget.value = String(budget)
+  els.detailBudgetValue.value = `${Number(budget.toFixed(1))} GiB`
+}
+
+function applyDetailBudget(): void {
+  syncDetailBudget()
+  updateUrlFromControls()
+  if (!chunkedVolume) return
+  activeReadSession?.renew()
+  setActiveLodLoading(currentDetailLevel ?? undefined)
+  chunkedVolume.setBudget(currentDetailBudgetBytes())
+  syncDownloadControl()
 }
 
 function updateZoomSelection(): void {
@@ -2784,6 +3067,7 @@ function applyZoomControl(): void {
     nv.pan2Dxyzmm = [pan[0], pan[1], pan[2], zoom]
     nv.scaleMultiplier = zoom
   }
+  syncCrosshairAppearance()
   nv.drawScene()
   updateUrlFromControls()
   syncViewControls()
@@ -2866,13 +3150,17 @@ function handleWheelZoom(event: WheelEvent): void {
     nv.pan2Dxyzmm = [pan[0], pan[1], pan[2], zoom]
     nv.scaleMultiplier = zoom
   }
+  syncCrosshairAppearance()
   nv.drawScene()
   syncViewControls()
   syncDownloadControl()
   scheduleAdaptiveLod()
 }
 
-function detailLevelForView(source: OmezarrSource, zoom: number): number {
+function detailLevelForView(
+  source: OmezarrSource | OmezarrMosaicSource,
+  zoom: number,
+): number {
   if (fixedZarrLevel !== null) {
     return Math.min(
       source.levels.length - 1,
@@ -2894,7 +3182,12 @@ function scheduleAdaptiveLod(focusMoved = false): void {
     deferredAdaptiveFocusMoved ||= focusMoved
     return
   }
-  if (activeSource?.kind === 'omezarr' && chunkedVolume) {
+  if (
+    (activeSource?.kind === 'omezarr' ||
+      activeSource?.kind === 'omezarr-mosaic') &&
+    chunkedVolume
+  ) {
+    activeReadSession?.renew()
     const target = detailLevelForView(activeSource, viewerZoom())
     const targetChanged = updateAdaptiveLodDetail(
       chunkedVolume,
@@ -2903,24 +3196,12 @@ function scheduleAdaptiveLod(focusMoved = false): void {
     )
     currentDetailLevel = target
     if (targetChanged) setActiveLodLoading(target)
-    if (focusMoved) chunkedVolume.setFocus(focusFraction)
+    chunkedVolume.setFocus(
+      focusFraction,
+      currentVisibleFovBounds(activeSource.shape),
+    )
     return
   }
-  if (activeSource?.kind !== 'omezarr-mosaic' || fixedZarrLevel !== null) return
-  const firstBlock = activeSource.blocks[0]
-  const levelCount = firstBlock?.source.levels.length ?? 0
-  if (levelCount === 0) return
-  const target = detailLevelForZoom(levelCount - 1, viewerZoom(), levelCount)
-  cancelMosaicLodReload()
-  if (target === activeSource.baseLevel) return
-  const revision = mosaicLodRevision
-  mosaicLodHandle = window.setTimeout(() => {
-    if (revision !== mosaicLodRevision) return
-    mosaicLodHandle = 0
-    requestedBaseLevel = target
-    setActiveLodLoading(target)
-    void reloadVolume({ reloadSource: true, preserveView: true })
-  }, LOD_DEBOUNCE_MS)
 }
 
 async function disposeChunkedVolume(): Promise<void> {
@@ -2933,6 +3214,7 @@ async function disposeChunkedVolume(): Promise<void> {
 async function loadOmezarrVolume(
   source: OmezarrSource,
   view: ViewState | null,
+  readSession: ZarrReadSession,
 ): Promise<void> {
   if (!nv) return
   const win = parseWindow(source.defaultWindow)
@@ -2944,7 +3226,7 @@ async function loadOmezarrVolume(
   const minLevel = detailLevelForView(source, zoom)
   currentDetailLevel = minLevel
   chunkedVolume = await nv.loadChunkedVolume(
-    createOmezarrPyramidSource(source),
+    createOmezarrPyramidSource(source, readSession),
     {
       id: source.id,
       name: source.name,
@@ -2952,46 +3234,85 @@ async function loadOmezarrVolume(
       calMax: win.max,
       colormap: els.colormap.value,
       focus: focusFraction,
-      radius: ADAPTIVE_FINE_RADIUS,
+      focusBounds: currentVisibleFovBounds(source.shape, focusFraction, zoom),
+      radius: fineLodRadiusForShape(source.shape, ADAPTIVE_FINE_RADIUS),
       minLevel,
-      budgetBytes: ADAPTIVE_PLANNER_BUDGET_BYTES,
+      budgetBytes: currentDetailBudgetBytes(),
       maxBricks: ADAPTIVE_MAX_BRICKS,
       cellEdge: ADAPTIVE_CELL_EDGE,
       halo: STREAMING_CHUNK_HALO,
       detail: 0.1,
       debounceMs: LOD_DEBOUNCE_MS,
+      // Let requests reach the abort-aware pool immediately. The pool preserves
+      // the measured-optimal six-wide network/decode concurrency.
+      maxConcurrentLoads: ADAPTIVE_MAX_BRICKS,
     },
   )
   chunkedVolume.volume.chunkExplode = { enabled: false }
   chunkPlan = chunkedVolume.currentPlan
   syncActiveLodIndicator(chunkPlan)
   restoreView(view)
+  syncCrosshairAppearance()
   nv.drawScene()
 }
 
 async function loadMosaicVolume(
   source: OmezarrMosaicSource,
   view: ViewState | null,
+  readSession: ZarrReadSession,
 ): Promise<void> {
   if (!nv) return
-  currentDetailLevel = source.baseLevel
-  const { volume, plan } = createMosaicVolume(source)
-  await nv.loadVolumes([volume])
-  chunkPlan = plan
-  syncActiveLodIndicator(plan)
+  const win = parseWindow(source.defaultWindow)
+  const zoom = view
+    ? nv.sliceType === SLICE_TYPE.RENDER
+      ? view.scale
+      : view.pan2D[3]
+    : viewerZoom()
+  const minLevel = detailLevelForView(source, zoom)
+  currentDetailLevel = minLevel
+  chunkedVolume = await nv.loadChunkedVolume(
+    createMosaicPyramidSource(source, readSession),
+    {
+      id: source.id,
+      name: source.name,
+      calMin: win.min,
+      calMax: win.max,
+      colormap: els.colormap.value,
+      focus: focusFraction,
+      focusBounds: currentVisibleFovBounds(source.shape, focusFraction, zoom),
+      radius: fineLodRadiusForShape(source.shape, ADAPTIVE_FINE_RADIUS),
+      minLevel,
+      budgetBytes: currentDetailBudgetBytes(),
+      maxBricks: ADAPTIVE_MAX_BRICKS,
+      cellEdge: ADAPTIVE_CELL_EDGE,
+      halo: STREAMING_CHUNK_HALO,
+      detail: 0.1,
+      debounceMs: LOD_DEBOUNCE_MS,
+      maxConcurrentLoads: ADAPTIVE_MAX_BRICKS,
+    },
+  )
+  chunkedVolume.volume.chunkExplode = { enabled: false }
+  chunkPlan = chunkedVolume.currentPlan
+  syncActiveLodIndicator(chunkPlan)
   restoreView(view)
+  syncCrosshairAppearance()
   nv.drawScene()
 }
 
 async function loadOmezarrRenderCrop(
   source: OmezarrSource,
   geometry: ExportGeometry,
+  readSession: ZarrReadSession,
 ): Promise<void> {
   if (!nv) return
   const level = geometry.level
   if (!level) throw new Error('The 3D current FOV has no pyramid level')
   currentDetailLevel = level.level
-  const { volume, plan } = createOmezarrRenderCropVolume(source, geometry)
+  const { volume, plan } = createOmezarrRenderCropVolume(
+    source,
+    geometry,
+    readSession,
+  )
   await nv.loadVolumes([volume])
   chunkPlan = plan
   syncActiveLodIndicator(plan)
@@ -3011,23 +3332,26 @@ function reloadVolume(options: ReloadOptions = {}): Promise<void> {
     shouldInitializeCustomSource,
   }
   return reloadQueue
-    .run(async () => {
+    .run(async (signal) => {
       requestedBaseLevel = requestState.requestedBaseLevel
       fixedZarrLevel = requestState.fixedZarrLevel
       shouldInitializeCustomSource = requestState.shouldInitializeCustomSource
-      await performReloadVolume(options)
+      await performReloadVolume(options, signal)
     })
     .then(() => undefined)
 }
 
-async function performReloadVolume(options: ReloadOptions): Promise<void> {
+async function performReloadVolume(
+  options: ReloadOptions,
+  taskSignal: AbortSignal,
+): Promise<void> {
   if (!nv) return
-  if (options.reloadSource) cancelMosaicLodReload()
   hideFallback()
   setDownloadStatus('')
   stats = freshStats()
   let view = options.view !== undefined ? options.view : null
   const cropGeometry = renderCropGeometry
+  const nextReadSession = new ZarrReadSession(taskSignal)
   suppressAdaptiveEvents = true
   try {
     if (options.reloadSource || !activeSource) {
@@ -3037,7 +3361,10 @@ async function performReloadVolume(options: ReloadOptions): Promise<void> {
       els.autoContrast.disabled = true
       chunkPlan = null
       syncDownloadControl()
-      const source = await loadActiveSource()
+      const source = await loadActiveSource(nextReadSession)
+      taskSignal.throwIfAborted()
+      activeReadSession?.abort('OME-Zarr source superseded')
+      activeReadSession = nextReadSession
       activeSource = source
       syncZarrLevelControl()
       prepareAutoWindow(source)
@@ -3050,6 +3377,9 @@ async function performReloadVolume(options: ReloadOptions): Promise<void> {
         }
         renderCropGeometry = { ...cropGeometry, level }
       }
+    } else {
+      activeReadSession?.abort('OME-Zarr view superseded')
+      activeReadSession = nextReadSession
     }
     if (!activeSource) {
       throw new Error('No active source selected')
@@ -3058,22 +3388,21 @@ async function performReloadVolume(options: ReloadOptions): Promise<void> {
     // Preserve the newest camera state immediately before swapping volumes,
     // rather than restoring the stale state captured when the reload started.
     if (options.view === undefined && options.preserveView) view = captureView()
-    const crosshair = crosshairAppearanceForSpacing(
-      activeSource.crosshairSpacing,
-    )
-    nv.crosshairWidth = crosshair.width
-    nv.crosshairGap = crosshair.gap
     syncCrosshairVisibility()
     await disposeChunkedVolume()
     if (activeSource.kind === 'omezarr') {
       if (renderCropGeometry && nv.sliceType === SLICE_TYPE.RENDER) {
-        await loadOmezarrRenderCrop(activeSource, renderCropGeometry)
+        await loadOmezarrRenderCrop(
+          activeSource,
+          renderCropGeometry,
+          nextReadSession,
+        )
       } else {
-        await loadOmezarrVolume(activeSource, view)
+        await loadOmezarrVolume(activeSource, view, nextReadSession)
       }
     } else if (activeSource.kind === 'omezarr-mosaic') {
       renderCropGeometry = null
-      await loadMosaicVolume(activeSource, view)
+      await loadMosaicVolume(activeSource, view, nextReadSession)
     } else {
       chunkPlan = createChunkPlan(activeSource)
       await nv.loadVolumes([createStreamingVolume(activeSource)])
@@ -3082,6 +3411,11 @@ async function performReloadVolume(options: ReloadOptions): Promise<void> {
     applyLayout()
     syncViewControls()
   } catch (err) {
+    if (taskSignal.aborted) {
+      nextReadSession.abort('OME-Zarr reload superseded')
+      throw taskSignal.reason
+    }
+    nextReadSession.abort('OME-Zarr reload failed')
     if (!activeSource) {
       await disposeChunkedVolume()
       chunkPlan = null
@@ -3096,7 +3430,10 @@ async function performReloadVolume(options: ReloadOptions): Promise<void> {
     suppressAdaptiveEvents = false
     syncDownloadControl()
     syncZarrLevelControl()
-    if (deferredAdaptiveLod) {
+    if (taskSignal.aborted) {
+      deferredAdaptiveLod = false
+      deferredAdaptiveFocusMoved = false
+    } else if (deferredAdaptiveLod) {
       const focusMoved = deferredAdaptiveFocusMoved
       deferredAdaptiveLod = false
       deferredAdaptiveFocusMoved = false
@@ -3123,6 +3460,7 @@ async function main(): Promise<void> {
     maxChunkResidencyBytes: DEFAULT_RESIDENCY_BYTES,
   })
   await nv.attachToCanvas(els.canvas)
+  els.canvas.addEventListener('contextmenu', handleMeasurementContextMenu)
   els.canvas.addEventListener('wheel', handleWheelZoom, {
     capture: true,
     passive: false,
@@ -3130,10 +3468,12 @@ async function main(): Promise<void> {
   nv.addEventListener('change', (event) => {
     if (event.detail.property === 'pan2Dxyzmm') {
       const focusMoved = lodFocusTracksInteraction('pan') && syncFocusFromPan()
+      syncCrosshairAppearance()
       syncViewControls()
       syncDownloadControl()
       scheduleAdaptiveLod(focusMoved)
     } else if (event.detail.property === 'scaleMultiplier') {
+      syncCrosshairAppearance()
       syncViewControls()
       syncDownloadControl()
       scheduleAdaptiveLod()
@@ -3145,24 +3485,11 @@ async function main(): Promise<void> {
     els.measurementStatus.value = `${formatMeasuredDistance(event.detail.distance)} · right-click to remove`
     els.clearMeasurements.disabled = false
   })
-  const measurementEvents = nv as unknown as EventTarget
-  measurementEvents.addEventListener(
-    'measurementRemoved',
-    (event) => {
-      const { remaining } = (event as CustomEvent<{ remaining: number }>).detail
-      els.clearMeasurements.disabled = remaining === 0
-      els.measurementStatus.value =
-        remaining === 0
-          ? 'drag across a structure'
-          : `${remaining} measurement${remaining === 1 ? '' : 's'} · right-click to remove`
-    },
-  )
   // Crosshair locationChange events intentionally do not refocus LOD. A click
   // moves the marker without moving the viewport; following it would shift the
   // fine box away from the visible field and expose coarse context rectangles.
 
   els.source.addEventListener('change', () => {
-    cancelMosaicLodReload()
     resetRenderCropForSourceChange()
     fixedZarrLevel = null
     shouldInitializeCustomSource = true
@@ -3188,6 +3515,8 @@ async function main(): Promise<void> {
     void applyZarrLevelControl()
   })
   els.scrollZoomSpeed.addEventListener('input', syncScrollZoomSpeed)
+  els.detailBudget.addEventListener('input', syncDetailBudget)
+  els.detailBudget.addEventListener('change', applyDetailBudget)
   els.zoom.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return
     event.preventDefault()
@@ -3210,9 +3539,7 @@ async function main(): Promise<void> {
     handleWindowRangeInput('max')
   })
   els.interactionTool.addEventListener('click', toggleInteractionTool)
-  els.showScaleBar.addEventListener('change', () => {
-    if (nv) nv.isRulerVisible = els.showScaleBar.checked
-  })
+  els.showScaleBar.addEventListener('change', syncScaleBarVisibility)
   els.clearMeasurements.addEventListener('click', clearMeasurements)
   els.showCrosshair.addEventListener('change', syncCrosshairVisibility)
   els.showStats.addEventListener('change', syncStatsVisibility)
@@ -3263,7 +3590,7 @@ async function main(): Promise<void> {
       activeSource.kind === 'synthetic' ||
       !isGenericDtypeWindow(activeSource.dtype, sharedWindow)
     applySharedControlSettings(initialSharedSettings, preserveSharedWindow)
-    nv.isRulerVisible = initialSharedSettings.showScaleBar
+    syncScaleBarVisibility()
     syncCrosshairVisibility()
     if (preserveSharedWindow) {
       manualWindowRevision++

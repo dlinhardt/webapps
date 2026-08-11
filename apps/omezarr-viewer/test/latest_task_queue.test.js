@@ -30,7 +30,7 @@ test('runs one task at a time and coalesces pending work to the latest request',
   assert.deepEqual(order, ['first:start'])
   releaseFirst()
 
-  assert.equal(await first, 'first')
+  assert.equal(await first, undefined)
   assert.equal(await latest, 'latest')
   assert.equal(maximumActive, 1)
   assert.deepEqual(order, [
@@ -39,4 +39,32 @@ test('runs one task at a time and coalesces pending work to the latest request',
     'latest:start',
     'latest:end',
   ])
+})
+
+test('aborts running work when a newer task supersedes it', async () => {
+  const queue = new LatestTaskQueue()
+  let started
+  const running = new Promise((resolve) => {
+    started = resolve
+  })
+  let obsoleteSignal
+
+  const obsolete = queue.run(async (signal) => {
+    obsoleteSignal = signal
+    started()
+    await new Promise((_, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), {
+        once: true,
+      })
+    })
+  })
+  await running
+  const latest = queue.run(async (signal) => {
+    assert.equal(signal.aborted, false)
+    return 'latest'
+  })
+
+  assert.equal(await obsolete, undefined)
+  assert.equal(obsoleteSignal.aborted, true)
+  assert.equal(await latest, 'latest')
 })

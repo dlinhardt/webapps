@@ -19,6 +19,17 @@ export interface ZoomLevelControlDisplay {
   canApply: boolean
 }
 
+export interface LodDeliveryDisplay {
+  label: string
+  deliveredLevel: number | null
+  visibleLabel: string
+}
+
+export interface FovBounds {
+  min: [number, number, number]
+  max: [number, number, number]
+}
+
 export type LodFocusInteraction = 'pan' | 'crosshair'
 
 export interface AdaptiveLodController {
@@ -29,6 +40,47 @@ const WHEEL_ZOOM_SENSITIVITY = 0.00075
 const MAX_WHEEL_DELTA_PX = 120
 export const MIN_VIEWER_ZOOM = 0.1
 export const MAX_VIEWER_ZOOM = 128
+const MIN_CROSSHAIR_WORLD_SIZE = 0.000001
+
+/** Keep the finest-detail focus local on thin or small volumes. */
+export function fineLodRadiusForShape(
+  shape: readonly [number, number, number],
+  maximum: number,
+): number {
+  return Math.max(1, Math.min(maximum, Math.min(...shape) / 8))
+}
+
+/**
+ * Approximate the visible volume footprint in common-grid voxels. Slice views
+ * reserve only their displayed plane; a null axis list reserves the full 3D
+ * view box. This keeps multiplanar refinement from filling the unseen volume
+ * between its three orthogonal panels.
+ */
+export function visibleFovBounds(
+  shape: readonly [number, number, number],
+  focus: readonly [number, number, number],
+  cameraZoom: number,
+  sliceAxes: readonly number[] | null,
+): FovBounds[] {
+  const zoom = Math.max(1, Number.isFinite(cameraZoom) ? cameraZoom : 1)
+  const center = shape.map((size, axis) =>
+    Math.max(0, Math.min(size - 0.001, focus[axis] * size)),
+  ) as [number, number, number]
+  const min = shape.map((size, axis) =>
+    Math.max(0, center[axis] - size / (2 * zoom)),
+  ) as [number, number, number]
+  const max = shape.map((size, axis) =>
+    Math.min(size, center[axis] + size / (2 * zoom)),
+  ) as [number, number, number]
+  if (sliceAxes === null) return [{ min, max }]
+  return sliceAxes.map((sliceAxis) => {
+    const slabMin = [...min] as [number, number, number]
+    const slabMax = [...max] as [number, number, number]
+    slabMin[sliceAxis] = center[sliceAxis]
+    slabMax[sliceAxis] = Math.min(shape[sliceAxis], center[sliceAxis] + 0.001)
+    return { min: slabMin, max: slabMax }
+  })
+}
 
 export function zoomLevelControlDisplay(
   appliedLevel: number,
@@ -104,7 +156,7 @@ export function wheelZoomValue(
     Math.max(-MAX_WHEEL_DELTA_PX, deltaY * pixelsPerUnit),
   )
   const safeSpeed = Number.isFinite(speed)
-    ? Math.min(4, Math.max(0.25, speed))
+    ? Math.min(10, Math.max(0.25, speed))
     : 1
   const zoom =
     current * Math.exp(-pixelDelta * WHEEL_ZOOM_SENSITIVITY * safeSpeed)
@@ -135,6 +187,34 @@ export function zoomForDetailLevel(level: number, levelCount: number): number {
   return clampViewerZoom(2 ** (overviewLevel - selectedLevel))
 }
 
+/** Distinguish the camera-requested level from the finest planned FOV level. */
+export function lodDeliveryDisplay(
+  requestedLevel: number | null,
+  fovLevels: readonly number[],
+  contextLevels: readonly number[],
+): LodDeliveryDisplay {
+  const deliveredLevel = fovLevels[0] ?? null
+  const requestedLabel =
+    requestedLevel === null ? '' : `Requested L${requestedLevel} · `
+  const fovLabel =
+    fovLevels.length > 0
+      ? fovLevels.map((level) => `L${level}`).join(' · ')
+      : 'unavailable'
+  const contextLabel = contextLevels
+    .map((level) => `L${level}`)
+    .join(' · ')
+  return {
+    label: `${requestedLabel}FOV ${fovLabel}${contextLabel ? ` · context ${contextLabel}` : ''}`,
+    deliveredLevel,
+    visibleLabel:
+      deliveredLevel === null
+        ? ''
+        : requestedLevel !== null && requestedLevel !== deliveredLevel
+          ? `L${deliveredLevel} · requested L${requestedLevel}`
+          : `L${deliveredLevel}`,
+  }
+}
+
 export function rangeBoundsForWindow(
   window: ContrastWindow,
   configuredMinimum: number,
@@ -148,13 +228,24 @@ export function rangeBoundsForWindow(
 
 export function crosshairAppearanceForSpacing(
   spacing: readonly number[],
+  cameraZoom = 1,
 ): CrosshairAppearance {
   const voxelWidth = Math.min(
     ...spacing.filter((value) => Number.isFinite(value) && value > 0),
   )
-  if (!Number.isFinite(voxelWidth)) return { width: 0.5, gap: 10 }
+  const zoom =
+    Number.isFinite(cameraZoom) && cameraZoom > 0 ? cameraZoom : 1
+  if (!Number.isFinite(voxelWidth)) {
+    return { width: 0.5 / zoom, gap: 10 / zoom }
+  }
   return {
-    width: Math.max(0.0001, voxelWidth * 1.5),
-    gap: Math.max(0.0001, voxelWidth * 10),
+    width: Math.max(
+      MIN_CROSSHAIR_WORLD_SIZE,
+      (voxelWidth * 1.5) / zoom,
+    ),
+    gap: Math.max(
+      MIN_CROSSHAIR_WORLD_SIZE,
+      (voxelWidth * 10) / zoom,
+    ),
   }
 }

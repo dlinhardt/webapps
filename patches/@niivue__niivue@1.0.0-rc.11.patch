@@ -13,7 +13,7 @@ index 7e65858379bcb0eb58cde7ef98137ce8716e7bfd..65287eeebcb502e0a7c029b7e0daa7ed
  export declare enum SHOW_RENDER {
      NEVER = 0,
 diff --git a/dist/NVControlBase-Cq7vd-TD.js b/dist/NVControlBase-Cq7vd-TD.js
-index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb96767cdf8 100644
+index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a2215c3fc18 100644
 --- a/dist/NVControlBase-Cq7vd-TD.js
 +++ b/dist/NVControlBase-Cq7vd-TD.js
 @@ -1836,7 +1836,7 @@ function $e(t, e, n = !1) {
@@ -101,7 +101,55 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
  }
  function Zx(t, e, n = [1, 1, 1]) {
    if (e < 1)
-@@ -15516,6 +15471,10 @@ class y2 {
+@@ -12639,16 +12594,35 @@ function yS(t, e, n, i = {}) {
+           R($, N, s);
+         }
+     return y(I, P);
++  }, H = (M, P) => {
++    let D = M;
++    if (e.reserveBounds?.length) {
++      const I = (R) => e.reserveBounds.some((S) => R.voxelOrigin.every((F, U) => F < S.max[U] && F + R.voxelDims[U] > S.min[U]));
++      for (let R = s; R > P; R--) {
++        const S = [];
++        for (const F of D)
++          (F.sourceLevel ?? 0) === R && I(F) ? p(F, S) : S.push(F);
++        D = S;
++      }
++      return D;
++    }
++    for (let I = P; I > o; I--) {
++      const R = D.findIndex((S) => (S.sourceLevel ?? 0) === I && S.voxelOrigin.every((F, U) => (e.reserveCenter ?? e.center)[U] >= F && (e.reserveCenter ?? e.center)[U] < F + S.voxelDims[U]));
++      if (R < 0) break;
++      const S = [];
++      p(D[R], S), D = [...D.slice(0, R), ...S, ...D.slice(R + 1)];
++    }
++    return D;
+   }, _ = i.budgetBytes && i.budgetBytes > 0 ? i.budgetBytes : 0, b = i.maxBricks && i.maxBricks > 0 ? i.maxBricks : Number.POSITIVE_INFINITY, g = (M) => M.reduce(
+     (P, D) => P + D.texDims[0] * D.texDims[1] * D.texDims[2] * 8,
+     0
+   ), v = (M) => _ > 0 && g(M) > _ || M.length > b;
+-  let w = d, E = o, A = T(w, E);
++  let w = d, E = o, A = H(T(w, E), E);
+   if (_ > 0 || b !== Number.POSITIVE_INFINITY) {
+     for (let M = 0; M < 16 && v(A); M++)
+-      w /= 1.6, A = T(w, E);
++      w /= 1.6, A = H(T(w, E), E);
+     for (; v(A) && E < s; )
+-      E++, A = T(w, E);
++      E++, A = H(T(w, E), E);
+     if (A.length > b) {
+       const M = Math.max(
+         1,
+@@ -12656,7 +12630,7 @@ function yS(t, e, n, i = {}) {
+       );
+       let P = 1;
+       for (; A.length > b && P < M; )
+-        P = Math.min(M, P * 2), A = T(w, s, P);
++        P = Math.min(M, P * 2), A = H(T(w, s, P), s);
+     }
+   }
+   return {
+@@ -15516,6 +15490,10 @@ class y2 {
    get residentCount() {
      return this._resident.size;
    }
@@ -112,7 +160,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
    /** True once every chunk in the plan is resident. */
    get isFullyResident() {
      return this._resident.size === this.chunkCount;
-@@ -15625,7 +15584,7 @@ class y2 {
+@@ -15625,7 +15603,7 @@ class y2 {
    /** Destroy every resident chunk's GPU resources and reset all state. */
    destroy() {
      for (const e of this._resident.values()) this._hooks.destroy(e.chunk);
@@ -121,7 +169,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
    }
    _removeQueuedUpload(e) {
      for (let n = this._uploadQueue.length - 1; n >= 0; n--)
-@@ -16094,7 +16053,7 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16094,7 +16072,7 @@ function Oa(t, e, n, i = () => !0) {
      throw new Error(
        "orientChunkedGL: source is non-RAS but missing RAS mapping"
      );
@@ -130,7 +178,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
    function p(b) {
      const g = n.chunks[b];
      if (!g)
-@@ -16130,6 +16089,8 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16130,6 +16108,8 @@ function Oa(t, e, n, i = () => !0) {
    }
    function y(b) {
      if (!r) return p(b);
@@ -139,7 +187,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      const g = x.get(b);
      if (g) return g;
      const v = p(b);
-@@ -16145,7 +16106,7 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16145,7 +16125,7 @@ function Oa(t, e, n, i = () => !0) {
      if (!g)
        throw new Error(`orientChunkedGL: chunk index ${b} out of range`);
      const v = await y(b);
@@ -148,7 +196,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      const w = o ? hA(t, f2(v, s), g.texDims) : _A(t, v, s, g.texDims, e), E = [
        g.texDims[0],
        g.texDims[1],
-@@ -16153,7 +16114,16 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16153,7 +16133,16 @@ function Oa(t, e, n, i = () => !0) {
      ], A = i(), M = A ? zi(t, w, E) : VA(t, E);
      return { volumeTexture: w, volumeGradientTexture: M, desc: g, hasGradient: A };
    }
@@ -166,7 +214,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
  }
  function $A(t, e) {
    if (e)
-@@ -16672,6 +16642,9 @@ function qA(t) {
+@@ -16672,6 +16661,9 @@ function qA(t) {
    const [e, n, i] = t.desc.texDims;
    return e * n * i * 8;
  }
@@ -176,7 +224,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
  function $a(t, e) {
    const n = t.chunks[e], [i, r, s] = t.volumeDims, [o, a, l] = n.texDims, c = t.levelDims?.[n.sourceLevel ?? 0] ?? t.volumeDims;
    return {
-@@ -16884,9 +16857,22 @@ let jA = class extends ze {
+@@ -16884,9 +16876,22 @@ let jA = class extends ze {
          `Volume ${n.name} tiles into ${a.chunks.length} chunks, exceeding the per-tile limit of ${Li}. Use a coarser pyramid level or crop the volume.`
        );
      const h = n.url || n.name, d = h ? this._texCache.get(h) : void 0;
@@ -202,7 +250,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      const u = {
        kind: "chunked",
        volume: n,
-@@ -16897,7 +16883,8 @@ let jA = class extends ze {
+@@ -16897,7 +16902,8 @@ let jA = class extends ze {
          a,
          () => this.gradientAmount > 0
        ),
@@ -212,7 +260,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      };
      u.manager = new y2(
        a.chunks.length,
-@@ -16905,6 +16892,7 @@ let jA = class extends ze {
+@@ -16905,6 +16911,7 @@ let jA = class extends ze {
        {
          bytesOf: qA,
          destroy: (m) => $A(e, [m]),
@@ -220,7 +268,16 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
          prefetch: (m) => u.uploader.prefetchChunk(m)
        }
      );
-@@ -19280,7 +19268,9 @@ class _2 {
+@@ -17211,7 +17218,7 @@ let jA = class extends ze {
+             const h = await l.uploadChunk(a);
+             s.manager.generation === c ? (h.hasGradient || (this._uploadedUnlit = !0), s.manager.admit(a, h)) : s.manager.discardUpload(a, h);
+           } catch (h) {
+-            s.manager.failUpload(a), V.error("chunk upload failed", h);
++            s.manager.failUpload(a), h?.name !== "AbortError" && V.error("chunk upload failed", h);
+             continue;
+           }
+           e = !0, n++, r = !0;
+@@ -19280,7 +19287,9 @@ class _2 {
            (O, $, N, q, j, Y, K, J) => this.fontRenderer.buildText(O, $, N, q, j, Y, K, J),
            Pe,
            n.ui.fontColor,
@@ -231,7 +288,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
          );
          U && (c.push(...U.labels), E.push(...U.lines));
        }
-@@ -22835,7 +22825,7 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22835,7 +22844,7 @@ async function Ja(t, e, n, i = () => !0) {
    ) : null, f = r ? !0 : m2(e), m = e.img2RASstart, x = e.img2RASstep;
    if (!r && !f && (!x || !m))
      throw new Error("orientChunked: source is non-RAS but missing RAS mapping");
@@ -240,7 +297,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
    function y(v) {
      const w = n.chunks[v];
      if (!w)
-@@ -22871,6 +22861,8 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22871,6 +22880,8 @@ async function Ja(t, e, n, i = () => !0) {
    }
    function T(v) {
      if (!r) return y(v);
@@ -249,7 +306,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      const w = p.get(v);
      if (w) return w;
      const E = y(v);
-@@ -22886,7 +22878,7 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22886,7 +22897,7 @@ async function Ja(t, e, n, i = () => !0) {
      if (!w)
        throw new Error(`orientChunked: chunk index ${v} out of range`);
      const E = await T(v);
@@ -258,7 +315,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      let A;
      if (o)
        A = t.createTexture({
-@@ -22952,9 +22944,17 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22952,9 +22963,17 @@ async function Ja(t, e, n, i = () => !0) {
      };
    }
    function g() {
@@ -278,7 +335,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
  }
  function Y5(t) {
    if (t)
-@@ -23753,9 +23753,22 @@ class t4 extends ze {
+@@ -23753,9 +23772,22 @@ class t4 extends ze {
          `Volume ${n.name} tiles into ${l.chunks.length} chunks, exceeding the per-tile limit of ${en}. Use a coarser pyramid level or crop the volume.`
        );
      const d = n.url || n.name, u = d ? this._texCache.get(d) : void 0;
@@ -304,7 +361,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      const f = await Ja(
        e,
        n,
-@@ -23767,7 +23780,8 @@ class t4 extends ze {
+@@ -23767,7 +23799,8 @@ class t4 extends ze {
        manager: void 0,
        uploader: f,
        plan: l,
@@ -314,7 +371,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      };
      m.manager = new y2(
        l.chunks.length,
-@@ -23776,7 +23790,7 @@ class t4 extends ze {
+@@ -23776,7 +23809,7 @@ class t4 extends ze {
          bytesOf: e4,
          destroy: (p) => Y5([p]),
          onEvict: (p) => {
@@ -323,7 +380,16 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
          },
          prefetch: (p) => m.uploader.prefetchChunk(p),
          onAdmit: r
-@@ -26847,7 +26861,9 @@ class S2 {
+@@ -24093,7 +24126,7 @@ class t4 extends ze {
+             const h = await l.uploadChunk(a);
+             s.manager.generation === c ? (h.hasGradient || (this._uploadedUnlit = !0), s.manager.admit(a, h)) : s.manager.discardUpload(a, h);
+           } catch (h) {
+-            s.manager.failUpload(a), V.error("chunk upload failed", h);
++            s.manager.failUpload(a), h?.name !== "AbortError" && V.error("chunk upload failed", h);
+             continue;
+           }
+           e = !0, n++, r = !0;
+@@ -26847,7 +26880,9 @@ class S2 {
            (q, j, Y, K, J, ne, ce, z) => this.fontRenderer.buildText(q, j, Y, K, J, ne, ce, z),
            Pe,
            e.ui.fontColor,
@@ -334,7 +400,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
          );
          N && (h.push(...N.labels), P.push(...N.lines));
        }
-@@ -32599,6 +32615,11 @@ function to(t, e) {
+@@ -32599,6 +32634,11 @@ function to(t, e) {
    }
    return i.length > 0 && n.push({ ...e, polygons: i }), n;
  }
@@ -346,7 +412,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
  function V4(t, e) {
    return e === 0 ? t.model.interaction.primaryDragMode : e === 2 ? t.model.interaction.secondaryDragMode : ge.none;
  }
-@@ -32776,6 +32797,10 @@ function $4(t) {
+@@ -32776,6 +32816,10 @@ function $4(t) {
  }
  function Sl(t) {
    const e = t._activeDragMode;
@@ -357,7 +423,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
    if (e === ge.angle) {
      if (t._angleState === "drawing_first_line") {
        t._angleFirstLine = [
-@@ -32849,7 +32874,7 @@ function Al(t) {
+@@ -32849,7 +32893,7 @@ function Al(t) {
    e && t.emit("dragRelease", e);
  }
  function Ml(t) {
@@ -366,7 +432,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
  }
  function X4(t) {
    const e = t._pan2DxyzmmAtDragStart;
-@@ -32859,7 +32884,7 @@ function X4(t) {
+@@ -32859,7 +32903,7 @@ function X4(t) {
      t.dragStartXY[0],
      t.dragStartXY[1]
    ), i = Je(t, t.dragEndXY[0], t.dragEndXY[1]);
@@ -375,7 +441,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
  }
  function W4(t) {
    const e = t._pan2DxyzmmAtDragStart;
-@@ -33796,7 +33821,7 @@ function k2(t) {
+@@ -33796,7 +33840,7 @@ function k2(t) {
        }
        if (t.isDragging = !0, t.activeButton = n.button, t.activeTileHit && !t.activeTileHit.isRender) {
          const l = V4(t, n.button);
@@ -384,7 +450,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
            const c = at(
              t.view?.screenSlices ?? [],
              t.model,
-@@ -33805,7 +33830,7 @@ function k2(t) {
+@@ -33805,7 +33849,7 @@ function k2(t) {
              t.activeTileHit
            );
            c && t.setCrosshairPos(c);
@@ -393,7 +459,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
            const c = t.model.scene.pan2Dxyzmm;
            t._pan2DxyzmmAtDragStart = [c[0], c[1], c[2], c[3]];
          } else l === ge.angle && t._angleState !== "drawing_second_line" && (t._angleState = "drawing_first_line");
-@@ -33973,7 +33998,7 @@ function k2(t) {
+@@ -33973,7 +34017,7 @@ function k2(t) {
        button: n.button
      });
    }, t._eventListeners.pointercancel = (e) => {
@@ -402,7 +468,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      try {
        t._annotation3DActive && Fl(t);
      } finally {
-@@ -34295,6 +34320,11 @@ function k2(t) {
+@@ -34295,6 +34339,11 @@ function k2(t) {
          case ge.pan:
            X4(t), t.drawScene();
            break;
@@ -414,7 +480,50 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
          case ge.slicer3D:
            W4(t), t.drawScene();
            break;
-@@ -37700,7 +37730,7 @@ function $R(t, e) {
+@@ -37403,9 +37452,9 @@ function MR(t, e) {
+   const i = G.create();
+   return G.transformMat4(i, G.fromValues(e[0], e[1], e[2]), n), [Ss(i[0]), Ss(i[1]), Ss(i[2])];
+ }
+-function RR(t, e, n, i) {
+-  const r = t.levels.map((o) => o.shape), s = AR(r[0], e, i.cellEdge);
+-  return yS(r, { center: s, radius: n }, i.deviceLimit, {
++function RR(t, e, n, i, r = []) {
++  const s = t.levels.map((a) => a.shape), o = AR(s[0], e, i.cellEdge), a = [0, 1, 2].map((l) => Math.max(0, Math.min(s[0][l] - 1e-3, e[l] * s[0][l])));
++  return yS(s, { center: o, reserveCenter: a, reserveBounds: r, radius: n }, i.deviceLimit, {
+     cellEdge: i.cellEdge,
+     haloSize: i.halo,
+     detail: i.detail,
+@@ -37470,7 +37519,7 @@ class IR {
+       deviceLimit: i.deviceLimit ?? LR(e) ?? 256,
+       renderCentering: i.renderCentering ?? "none",
+       debounceMs: i.debounceMs ?? 150
+-    }, this.radiusOpt = i.radius ?? "auto";
++    }, this.radiusOpt = i.radius ?? "auto", this.focusBounds = i.focusBounds?.map((r) => ({ min: [...r.min], max: [...r.max] })) ?? [];
+     const r = i.focus ?? "crosshair";
+     this.followCrosshair = r === "crosshair", this.focusFrac = Array.isArray(r) ? [r[0], r[1], r[2]] : [0.5, 0.5, 0.5], this.onLocationChange = () => this.handleLocationChange();
+     const s = n.levels[0];
+@@ -37515,8 +37564,8 @@ class IR {
+     return this.plan;
+   }
+   /** Move the focus and rebuild+swap the plan (debounced). */
+-  setFocus(e) {
+-    this.focusFrac = [e[0], e[1], e[2]], this.refocus();
++  setFocus(e, n) {
++    this.focusFrac = [e[0], e[1], e[2]], n !== void 0 && (this.focusBounds = n.map((i) => ({ min: [...i.min], max: [...i.max] }))), this.refocus();
+   }
+   /** Cap the finest level the octree may use (index into `source.levels`). */
+   setMaxDetail(e) {
+@@ -37551,7 +37600,8 @@ class IR {
+       this.source,
+       this.focusFrac,
+       this.currentRadius(),
+-      this.o
++      this.o,
++      this.focusBounds
+     );
+   }
+   currentRadius() {
+@@ -37700,7 +37750,7 @@ function $R(t, e) {
  }
  let fD = class extends EventTarget {
    constructor(e = {}, n, i = "both") {
@@ -423,7 +532,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb9
      const r = e.backend ?? "webgpu";
      if (this.opts = {
        backend: r,
-@@ -40186,6 +40216,7 @@ let fD = class extends EventTarget {
+@@ -40186,6 +40236,7 @@ let fD = class extends EventTarget {
          roiSelection: ge.roiSelection,
          angle: ge.angle,
          crosshair: ge.crosshair,
@@ -443,6 +552,45 @@ index e06d564ce9e6464e8d161031563abafcc8deb0c3..a57460dad2dce1da5a513117e35da944
      _annotationUndoStack: AnnotationUndoStack;
      _annotationBrushPath: AnnotationPoint[];
      _frozenLoopPoints: AnnotationPoint[] | null;
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 5969cdb8c613b57598252135179af9fb5795c0aa..3bef44f9ba1ae5fbe94c122c1e71c7f93c8d9a78 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -30,7 +30,7 @@ export type { SlideVectorKind, SlideVectorShape } from './slide/slideVector';
+ export { SlideVectorLayer } from './slide/slideVector';
+ export { buildDrawingLut, drawingBitmapToRGBA } from './view/NVDrawingTexture';
+ export type { ChunkedVolumeFetch, ChunkedVolumeLevel, ChunkedVolumeSource, } from './volume/ChunkedVolumeSource';
+-export type { ChunkPlan, MultiLodFocus, MultiLodOptions, Vec3f, Vec3i, VolumeChunkDesc, } from './volume/chunking';
++export type { ChunkPlan, MultiLodBounds, MultiLodFocus, MultiLodOptions, Vec3f, Vec3i, VolumeChunkDesc, } from './volume/chunking';
+ export { chunkVolumeGrid, chunkVolumeMultiLOD } from './volume/chunking';
+ export { buildDerivedScalarVolume, isMrsiVolume } from './volume/mrsi';
+ export { type ChunkedVolumeOptions, NVChunkedVolume, } from './volume/NVChunkedVolume';
+diff --git a/dist/index.webgl2.d.ts b/dist/index.webgl2.d.ts
+index 306a846dede1c51d7d7fcd942dc27152ce06f00f..24bf1289e7da429fa1f293c1cdbf0b09c20234fd 100644
+--- a/dist/index.webgl2.d.ts
++++ b/dist/index.webgl2.d.ts
+@@ -13,7 +13,7 @@ export type { AffineMatrix, AffineTransform, BackendType, CanvasViewport, ColorM
+ export type { SignalFromUrlOptions } from './signal/NVSignal';
+ export { apodize, deriveSpectroscopySeries, GYRO_MAG_RATIO, halveFirstPoint, integratePpmBandMap, PPM_RANGE, PPM_SHIFT, type PpmBandOptions, phaseCorrection, ppmRefForNucleus, } from './signal/processing';
+ export type { ChunkedVolumeFetch, ChunkedVolumeLevel, ChunkedVolumeSource, } from './volume/ChunkedVolumeSource';
+-export type { ChunkPlan, MultiLodFocus, MultiLodOptions, Vec3f, Vec3i, VolumeChunkDesc, } from './volume/chunking';
++export type { ChunkPlan, MultiLodBounds, MultiLodFocus, MultiLodOptions, Vec3f, Vec3i, VolumeChunkDesc, } from './volume/chunking';
+ export { chunkVolumeGrid, chunkVolumeMultiLOD } from './volume/chunking';
+ export { buildDerivedScalarVolume, isMrsiVolume } from './volume/mrsi';
+ export { type ChunkedVolumeOptions, NVChunkedVolume, } from './volume/NVChunkedVolume';
+diff --git a/dist/index.webgpu.d.ts b/dist/index.webgpu.d.ts
+index 0bb2e42332096615a1d7d8db94f868c9e6d5aeae..e7616233b9cdc945125eb207c38b1d103f13e991 100644
+--- a/dist/index.webgpu.d.ts
++++ b/dist/index.webgpu.d.ts
+@@ -13,7 +13,7 @@ export type { AffineMatrix, AffineTransform, BackendType, CanvasViewport, ColorM
+ export type { SignalFromUrlOptions } from './signal/NVSignal';
+ export { apodize, deriveSpectroscopySeries, GYRO_MAG_RATIO, halveFirstPoint, integratePpmBandMap, PPM_RANGE, PPM_SHIFT, type PpmBandOptions, phaseCorrection, ppmRefForNucleus, } from './signal/processing';
+ export type { ChunkedVolumeFetch, ChunkedVolumeLevel, ChunkedVolumeSource, } from './volume/ChunkedVolumeSource';
+-export type { ChunkPlan, MultiLodFocus, MultiLodOptions, Vec3f, Vec3i, VolumeChunkDesc, } from './volume/chunking';
++export type { ChunkPlan, MultiLodBounds, MultiLodFocus, MultiLodOptions, Vec3f, Vec3i, VolumeChunkDesc, } from './volume/chunking';
+ export { chunkVolumeGrid, chunkVolumeMultiLOD } from './volume/chunking';
+ export { buildDerivedScalarVolume, isMrsiVolume } from './volume/mrsi';
+ export { type ChunkedVolumeOptions, NVChunkedVolume, } from './volume/NVChunkedVolume';
 diff --git a/dist/view/NVRuler.d.ts b/dist/view/NVRuler.d.ts
 index d38eac8cbc65f11cfaf87bddd594f72e0076e95d..5233235c5685bf63e7d28291f22a56194b5e9c26 100644
 --- a/dist/view/NVRuler.d.ts
@@ -457,3 +605,81 @@ index d38eac8cbc65f11cfaf87bddd594f72e0076e95d..5233235c5685bf63e7d28291f22a5619
   */
 -export declare function buildRuler(tiles: SliceTile[], buildText: BuildTextFn, buildLine: BuildLineFn, fontColor: number[], _backColor: number[]): RulerResult | null;
 +export declare function buildRuler(tiles: SliceTile[], buildText: BuildTextFn, buildLine: BuildLineFn, fontColor: number[], _backColor: number[], zoom?: number, viewportSize?: readonly [number, number]): RulerResult | null;
+diff --git a/dist/volume/NVChunkedVolume.d.ts b/dist/volume/NVChunkedVolume.d.ts
+index 4f62bcb330bb08c9fde315f00bfcbec9ecfe4546..1ca14ce8a133f1ec75a61bc0aa71699e7e598630 100644
+--- a/dist/volume/NVChunkedVolume.d.ts
++++ b/dist/volume/NVChunkedVolume.d.ts
+@@ -2,7 +2,7 @@ import { mat4 } from 'gl-matrix';
+ import { default as NiiVue } from '../NVControlBase';
+ import { NVImage, VolumeChunkSource } from '../NVTypes';
+ import { ChunkedVolumeSource } from './ChunkedVolumeSource';
+-import { ChunkPlan, Vec3f, Vec3i } from './chunking';
++import { ChunkPlan, MultiLodBounds, Vec3f, Vec3i } from './chunking';
+ /** Options for {@link NiiVue.loadChunkedVolume}. */
+ export interface ChunkedVolumeOptions {
+     /** Display window minimum (default 0). */
+@@ -24,6 +24,8 @@ export interface ChunkedVolumeOptions {
+      * fraction pins a static focus.
+      */
+     focus?: 'crosshair' | Vec3f;
++    /** Visible bounds that must be assigned one uniform pyramid level. */
++    focusBounds?: MultiLodBounds[];
+     /**
+      * Finest-LOD radius in common-grid voxels. `'auto'` (default) derives it from
+      * the view: tight in the 3D render view, the visible-slice box in multiplanar
+@@ -88,7 +90,7 @@ export declare function focusCenterBiased(common: Vec3i, frac: Vec3f, cellEdge:
+  */
+ export declare function mmToVolumeFraction(frac2mm: mat4, mm: Vec3f): Vec3f | null;
+ /** Build a crosshair-focused multi-LOD plan for a source at a focus + radius. */
+-export declare function planForFocus(source: ChunkedVolumeSource, focusFrac: Vec3f, radius: number, o: ResolvedOptions): ChunkPlan;
++export declare function planForFocus(source: ChunkedVolumeSource, focusFrac: Vec3f, radius: number, o: ResolvedOptions, focusBounds?: MultiLodBounds[]): ChunkPlan;
+ /**
+  * Wrap a {@link ChunkedVolumeSource} as a renderer `VolumeChunkSource`: dispatch
+  * each brick to its own pyramid level (`desc.sourceLevel`), bound in-flight
+@@ -118,6 +120,7 @@ export declare class NVChunkedVolume {
+     private readonly radiusOpt;
+     private readonly onLocationChange;
+     private focusFrac;
++    private focusBounds;
+     private plan;
+     private disposed;
+     private refocusHandle;
+@@ -136,7 +139,7 @@ export declare class NVChunkedVolume {
+     /** The current multi-LOD plan (read-only; useful for debugging/telemetry). */
+     get currentPlan(): ChunkPlan;
+     /** Move the focus and rebuild+swap the plan (debounced). */
+-    setFocus(frac: Vec3f): void;
++    setFocus(frac: Vec3f, focusBounds?: MultiLodBounds[]): void;
+     /** Cap the finest level the octree may use (index into `source.levels`). */
+     setMaxDetail(levelIndex: number): void;
+     /** Change the plan's GPU byte budget. */
+diff --git a/dist/volume/chunking.d.ts b/dist/volume/chunking.d.ts
+index 34e9f0dcdd17157e8e544c872a023c495f4f2e4d..6004ca2b596fe75c8024afc76afb3c55769501e2 100644
+--- a/dist/volume/chunking.d.ts
++++ b/dist/volume/chunking.d.ts
+@@ -140,9 +140,25 @@ export declare function chunkAtVoxel(plan: ChunkPlan, voxel: Vec3i): VolumeChunk
+  */
+ export declare function matchChunksByContent(oldPlan: ChunkPlan, newPlan: ChunkPlan): Map<number, number>;
+ /** A focused region of interest, in COMMON (finest, level-0) voxel coordinates. */
++export interface MultiLodBounds {
++    /** Inclusive lower corner in common-grid voxels. */
++    min: Vec3f;
++    /** Exclusive upper corner in common-grid voxels. */
++    max: Vec3f;
++}
+ export interface MultiLodFocus {
+     /** Focus centre in common-grid voxels. */
+     center: Vec3f;
++    /**
++     * Optional un-biased focus used for the mandatory finest-detail branch.
++     * `center` may remain biased to stabilise context subdivision.
++     */
++    reserveCenter?: Vec3f;
++    /**
++     * Visible regions that must use one uniform level. The budget pass may
++     * coarsen that level, but never mixes levels inside these bounds.
++     */
++    reserveBounds?: MultiLodBounds[];
+     /**
+      * Focus radius in common-grid voxels. Bricks whose region lies within this
+      * distance of the centre render at the finest level; each further doubling of

@@ -1,5 +1,5 @@
 interface PendingTask<Result> {
-  task: () => Promise<Result>
+  task: (signal: AbortSignal) => Promise<Result>
   resolve: (result: Result | undefined) => void
   reject: (error: unknown) => void
 }
@@ -8,9 +8,15 @@ interface PendingTask<Result> {
 export class LatestTaskQueue {
   private running = false
   private pending: PendingTask<unknown> | null = null
+  private currentController: AbortController | null = null
 
-  run<Result>(task: () => Promise<Result>): Promise<Result | undefined> {
+  run<Result>(
+    task: (signal: AbortSignal) => Promise<Result>,
+  ): Promise<Result | undefined> {
     return new Promise<Result | undefined>((resolve, reject) => {
+      this.currentController?.abort(
+        new DOMException('Task superseded by a newer request', 'AbortError'),
+      )
       this.pending?.resolve(undefined)
       this.pending = {
         task,
@@ -28,10 +34,14 @@ export class LatestTaskQueue {
       while (this.pending) {
         const current = this.pending
         this.pending = null
+        const controller = new AbortController()
+        this.currentController = controller
         try {
-          current.resolve(await current.task())
+          const result = await current.task(controller.signal)
+          current.resolve(controller.signal.aborted ? undefined : result)
         } catch (error) {
-          current.reject(error)
+          if (controller.signal.aborted) current.resolve(undefined)
+          else current.reject(error)
         }
       }
     } finally {

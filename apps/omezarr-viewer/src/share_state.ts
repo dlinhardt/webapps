@@ -10,6 +10,7 @@ export interface ShareableViewState {
   windowLevel: number
   windowWidth: number
   scrollZoomSpeed: number
+  detailBudgetGiB: number
   showCrosshair: boolean
   showScaleBar: boolean
   showStats: boolean
@@ -44,6 +45,7 @@ export function writeShareState(url: URL, state: ShareableViewState): URL {
   url.searchParams.set('wl', compactNumber(state.windowLevel))
   url.searchParams.set('ww', compactNumber(state.windowWidth))
   url.searchParams.set('scrollZoomSpeed', compactNumber(state.scrollZoomSpeed))
+  url.searchParams.set('detailBudget', compactNumber(state.detailBudgetGiB))
   url.searchParams.set('crosshairVisible', state.showCrosshair ? '1' : '0')
   url.searchParams.set('scaleBar', state.showScaleBar ? '1' : '0')
   url.searchParams.set('stats', state.showStats ? '1' : '0')
@@ -60,6 +62,7 @@ export function readShareState(
   const crosshair = numberList(params.get('crosshair'), 3)
   const renderPan = numberList(params.get('renderPan'), 2)
   const scrollZoomSpeed = finiteNumber(params.get('scrollZoomSpeed'))
+  const detailBudgetGiB = finiteNumber(params.get('detailBudget'))
   return {
     ...defaults,
     layout: layout !== null && [0, 1, 2, 3, 4].includes(layout) ? layout : defaults.layout,
@@ -80,9 +83,15 @@ export function readShareState(
     scrollZoomSpeed:
       scrollZoomSpeed !== null &&
       scrollZoomSpeed >= 0.25 &&
-      scrollZoomSpeed <= 4
+      scrollZoomSpeed <= 10
         ? scrollZoomSpeed
         : defaults.scrollZoomSpeed,
+    detailBudgetGiB:
+      detailBudgetGiB !== null &&
+      detailBudgetGiB >= 0.5 &&
+      detailBudgetGiB <= 8
+        ? detailBudgetGiB
+        : defaults.detailBudgetGiB,
     showCrosshair:
       params.get('crosshairVisible') === null
         ? defaults.showCrosshair

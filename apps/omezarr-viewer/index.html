@@ -157,31 +157,11 @@
             <option value="auto" selected>Auto</option>
           </select>
 
-          <label class="slider-field" for="scrollZoomSpeed">
-            <span>Scroll zoom speed</span>
-            <input
-              id="scrollZoomSpeed"
-              type="range"
-              min="0.25"
-              max="4"
-              step="0.25"
-              value="2"
-              aria-describedby="scrollZoomSpeedValue"
-            />
-            <output id="scrollZoomSpeedValue" for="scrollZoomSpeed">2×</output>
-          </label>
-
+          <input id="panX" type="hidden" value="0" />
+          <output id="panXValue" for="panX" hidden>0%</output>
+          <input id="panY" type="hidden" value="0" />
+          <output id="panYValue" for="panY" hidden>0%</output>
           <div class="axis-grid" aria-label="Pan controls">
-            <label class="slider-field" for="panX">
-              <span>Pan X</span>
-              <input id="panX" type="range" min="-100" max="100" step="1" value="0" />
-              <output id="panXValue" for="panX">0%</output>
-            </label>
-            <label class="slider-field" for="panY">
-              <span>Pan Y</span>
-              <input id="panY" type="range" min="-100" max="100" step="1" value="0" />
-              <output id="panYValue" for="panY">0%</output>
-            </label>
             <label class="slider-field" for="panZ">
               <span>Pan Z</span>
               <input id="panZ" type="range" min="-100" max="100" step="1" value="0" />
@@ -312,6 +292,42 @@
           <output id="shareStatus" class="download-status" role="status" aria-live="polite" hidden></output>
           <output id="downloadStatus" class="download-status" role="status" aria-live="polite" hidden></output>
         </section>
+
+        <details class="control-panel advanced-panel">
+          <summary>Advanced</summary>
+          <div class="advanced-controls">
+            <label class="slider-field" for="scrollZoomSpeed">
+              <span>Scroll zoom speed</span>
+              <input
+                id="scrollZoomSpeed"
+                type="range"
+                min="0.25"
+                max="10"
+                step="0.25"
+                value="5"
+                aria-describedby="scrollZoomSpeedValue"
+              />
+              <output id="scrollZoomSpeedValue" for="scrollZoomSpeed">5×</output>
+            </label>
+
+            <label class="slider-field" for="detailBudget">
+              <span>Detail budget</span>
+              <input
+                id="detailBudget"
+                type="range"
+                min="0.5"
+                max="8"
+                step="0.5"
+                value="8"
+                aria-describedby="detailBudgetValue detailBudgetHelp"
+              />
+              <output id="detailBudgetValue" for="detailBudget">8 GiB</output>
+            </label>
+            <small class="zoom-level-help" id="detailBudgetHelp">
+              Higher values allow finer FOV tiles. GPU residency remains capped at 512 MiB.
+            </small>
+          </div>
+        </details>
       </aside>
 
       <main id="viewer" aria-label="OME-Zarr volume viewer">

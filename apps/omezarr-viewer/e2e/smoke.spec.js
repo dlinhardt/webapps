@@ -18,6 +18,14 @@ test("app boots", async ({ page }) => {
   await expect(page.getByLabel("OME-Zarr store URL 1")).toHaveValue("");
   await expect(page).not.toHaveURL(/url=/);
   await expect(page.getByRole("button", { name: "Apply" })).toBeDisabled();
+  await expect(page.locator("#scrollZoomSpeed")).toHaveValue("5");
+  await expect(page.locator("#scrollZoomSpeed")).toHaveAttribute("max", "10");
+  await expect(page.locator("#detailBudget")).toHaveValue("8");
+  await expect(page.locator("#scrollZoomSpeed")).toBeHidden();
+  await expect(page.locator("#detailBudget")).toBeHidden();
+  await expect(page.getByText("Advanced", { exact: true })).toBeVisible();
+  await expect(page.locator("#panX")).toBeHidden();
+  await expect(page.locator("#panY")).toBeHidden();
   const topBar = page.locator(".nd-app-bar:visible");
   await expect(topBar).toHaveCount(1);
   await expect(topBar.locator(".nd-app-bar__identity")).toContainText("ZARRo");
@@ -60,9 +68,18 @@ test("a web worker loads and responds", async ({ page }) => {
 });
 
 test("translated OME-Zarr URLs load as one composite volume", async ({ page }) => {
+  test.setTimeout(60_000);
+  const cancelledChunkErrors = [];
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      message.text().includes("chunk upload failed AbortError")
+    ) {
+      cancelledChunkErrors.push(message.text());
+    }
+  });
   await page.addInitScript(() => {
     window.__locationChangeCount = 0;
-    window.__crosshairAppearance = {};
     window.__copiedText = "";
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -77,12 +94,6 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
       if (event.type === "locationChange") {
         window.__locationChangeCount++;
       }
-      if (
-        event.type === "change" &&
-        ["crosshairWidth", "crosshairGap"].includes(event.detail?.property)
-      ) {
-        window.__crosshairAppearance[event.detail.property] = event.detail.value;
-      }
       return dispatchEvent.call(this, event);
     };
   });
@@ -90,8 +101,8 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   let leftChunkRequests = 0;
   let rightChunkRequests = 0;
   const chunkRequestsByLevel = new Map();
-  let delayLevelMetadata = false;
-  let delayedMetadataRequests = 0;
+  let delayLevelOneChunks = false;
+  let delayedLevelOneChunkRequests = 0;
   const group = JSON.stringify({ zarr_format: 2 });
   await page.route("**/test-mosaic/**", async (route) => {
     const url = new URL(route.request().url());
@@ -122,10 +133,6 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
       });
     } else if (/\/\d+\/\.zarray$/.test(path)) {
       const level = Number(path.match(/\/(\d+)\/\.zarray$/)?.[1] ?? 0);
-      if (delayLevelMetadata) {
-        delayedMetadataRequests++;
-        await new Promise((resolve) => setTimeout(resolve, 800));
-      }
       const size = 16 / 2 ** level;
       await route.fulfill({
         contentType: "application/json",
@@ -145,6 +152,10 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     } else if (/\/\d+\/0\.0\.0$/.test(path)) {
       const level = Number(path.match(/\/(\d+)\/0\.0\.0$/)?.[1] ?? 0);
       const size = 16 / 2 ** level;
+      if (delayLevelOneChunks && level === 1) {
+        delayedLevelOneChunkRequests++;
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
       chunkRequestsByLevel.set(
         level,
         (chunkRequestsByLevel.get(level) ?? 0) + 1,
@@ -160,18 +171,49 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     }
   });
 
-  await page.goto("/?source=custom&level=0&zarrLevel=0");
+  await page.goto("/?source=custom&level=0&zarrLevel=0&stats=1");
   await page.getByLabel("OME-Zarr store URL 1").fill("http://localhost:4173/test-mosaic/left");
   await page.getByRole("button", { name: "Add another URL" }).click();
   await page.getByLabel("OME-Zarr store URL 2").fill("http://localhost:4173/test-mosaic/right");
   await page.getByRole("button", { name: "Load volume" }).click();
 
-  await expect(page.locator("#activeLevel")).toHaveText(/L0 · 2 translated stores/);
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "data-fov-levels",
+    "0",
+    { timeout: 15_000 },
+  );
+  await expect(page.locator("#activeLevel")).toHaveText("L0");
+  expect(await page.locator("#activeLevel").evaluate(
+    (output) => output.scrollWidth <= output.clientWidth,
+  )).toBe(true);
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "title",
+    /Composite of 2 translated stores/,
+  );
   await expect(page.locator("#fallback")).toHaveAttribute("aria-hidden", "true");
   await expect(page).toHaveURL(/url=.*test-mosaic%2Fleft.*url=.*test-mosaic%2Fright/);
   await expect(page.locator("#downloadNifti")).toBeEnabled();
   await expect.poll(() => leftChunkRequests).toBeGreaterThan(0);
   await expect.poll(() => rightChunkRequests).toBeGreaterThan(0);
+  await expect.poll(async () => {
+    const details = await page.locator("#hud").innerText();
+    return Number(details.match(/resident\s+(\d+) resident/)?.[1] ?? 0);
+  }).toBeGreaterThan(0);
+  const boundedPlanSize = Number(
+    (await page.locator("#hud").innerText()).match(/requested\s+\d+\s*\/\s*(\d+)/)?.[1] ?? 0,
+  );
+  expect(boundedPlanSize).toBeGreaterThan(0);
+  expect(boundedPlanSize).toBeLessThanOrEqual(1024);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#downloadNifti").click();
+  const niftiDownload = await downloadPromise;
+  expect(niftiDownload.suggestedFilename()).toBe(
+    "omezarr-mosaic-2-stores-L0-fov.nii",
+  );
+  await expect(page.locator("#downloadStatus")).toHaveText(
+    "Download started: omezarr-mosaic-2-stores-L0-fov.nii",
+  );
 
   const canvasBox = await page.locator("#nv-canvas").boundingBox();
   expect(canvasBox).not.toBeNull();
@@ -275,7 +317,11 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await page.mouse.up();
   await expect(page.locator("#measurementStatus")).toContainText("µm");
   await expect(page.locator("#measurementStatus")).toContainText("right-click to remove");
-  await page.locator("#clearMeasurements").click();
+  await page.mouse.click(
+    (startX + measureEndX) * 0.5,
+    (startY + measureEndY) * 0.5,
+    { button: "right" },
+  );
   await expect(page.locator("#clearMeasurements")).toBeDisabled();
   await expect(page.locator("#measurementStatus")).toHaveText("drag across a structure");
   await measureButton.click();
@@ -289,18 +335,29 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     () => page.evaluate(() => window.__locationChangeCount),
   ).toBeGreaterThan(locationChangesAfterMeasurement);
 
+  await page.getByText("Advanced", { exact: true }).click();
   await page.locator("#scrollZoomSpeed").fill("3");
   await expect(page.locator("#scrollZoomSpeedValue")).toHaveText("3×");
+  await page.locator("#detailBudget").fill("8");
+  await expect(page.locator("#detailBudgetValue")).toHaveText("8 GiB");
+  await expect(page).toHaveURL(/detailBudget=8/);
   await page.locator("#zoom").fill("2");
   await expect(page.locator("#zoomValue")).toHaveText("L2 · pending");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#zoomValue")).toHaveText("L2");
-  await expect(page.locator("#activeLevel")).toContainText(
-    "L2 · 2 translated stores",
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "2");
+  await page.locator("#showScaleBar").uncheck();
+  await expect(page.locator("#visibleLevel")).toBeHidden();
+  await page.locator("#showScaleBar").check();
+  await expect(page.locator("#visibleLevel")).toBeVisible();
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-crosshair-width",
+    "0.00075",
   );
-  await expect.poll(() => page.evaluate(
-    () => window.__crosshairAppearance,
-  )).toEqual({ crosshairWidth: 0.0015, crosshairGap: 0.01 });
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-crosshair-gap",
+    "0.005",
+  );
   const sharedPan = await Promise.all(
     panFields.map((selector) => page.locator(selector).inputValue()),
   );
@@ -314,14 +371,16 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   expect(sharedParams.get("wl")).toBe("60");
   expect(sharedParams.get("ww")).toBe("20");
   expect(sharedParams.get("scrollZoomSpeed")).toBe("3");
+  expect(sharedParams.get("detailBudget")).toBe("8");
   expect(sharedParams.get("pan")).toBeTruthy();
   expect(sharedParams.get("crosshair")).toBeTruthy();
 
   await page.goto(sharedUrl);
-  await expect(page.locator("#activeLevel")).toHaveText(/L2 · 2 translated stores/);
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "2");
   await expect(page.locator("#windowLevel")).toHaveValue("60");
   await expect(page.locator("#windowWidth")).toHaveValue("20");
   await expect(page.locator("#scrollZoomSpeed")).toHaveValue("3");
+  await expect(page.locator("#detailBudget")).toHaveValue("8");
   await expect(page.locator("#zoom")).toHaveValue("2");
   await expect.poll(async () => {
     const restoredPan = await Promise.all(
@@ -335,14 +394,14 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   }).toBeLessThanOrEqual(1);
 
   await expect(page.locator("#zoomValue")).toHaveText("L2");
-  delayLevelMetadata = true;
+  delayLevelOneChunks = true;
   await page.locator("#zoom").fill("1");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toContainText("target L1");
-  await expect.poll(() => delayedMetadataRequests).toBeGreaterThan(0);
+  await expect.poll(() => delayedLevelOneChunkRequests).toBeGreaterThan(0);
 
-  // Start a newer LOD request while L1 metadata is still delayed. The latest
-  // request must win, and a crosshair click made during the swap must survive.
+  // Start a newer LOD request while L1 chunks are still delayed. The latest
+  // plan must win, and a crosshair click made during the swap must survive.
   await page.locator("#zoom").fill("0");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toContainText("target L0");
@@ -358,13 +417,10 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     await page.evaluate(() => window.__copiedText),
   ).searchParams.get("crosshair");
 
-  await expect(page.locator("#activeLevel")).toContainText(
-    "L0 · 2 translated stores",
-  );
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
   await page.waitForTimeout(900);
-  await expect(page.locator("#activeLevel")).toContainText(
-    "L0 · 2 translated stores",
-  );
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
+  expect(cancelledChunkErrors).toEqual([]);
   await expect(page.locator("#visibleLevel")).toHaveText("L0");
   await page.getByLabel("Stream details").check();
   await expect(page.locator("#hud")).toContainText("30 x 16 x 16 uint8");
@@ -483,7 +539,9 @@ test("generic uint16 share contrast is replaced from streamed signal", async ({ 
     `/?source=custom&level=0&url=${storeUrl}&wl=32768&ww=65535&layout=3`,
   );
 
-  await expect(page.locator("#activeLevel")).toContainText("FOV L0");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0", {
+    timeout: 15_000,
+  });
   await expect.poll(async () => Number(await page.locator("#windowWidth").inputValue()))
     .toBeLessThan(10_000);
   await expect.poll(async () => Number(await page.locator("#windowLevel").inputValue()))
@@ -493,7 +551,7 @@ test("generic uint16 share contrast is replaced from streamed signal", async ({ 
   await page.goto(
     `/?source=custom&level=0&url=${storeUrl}&wl=1000&ww=500&layout=3`,
   );
-  await expect(page.locator("#activeLevel")).toContainText("FOV L0");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
   await page.waitForTimeout(500);
   await expect(page.locator("#windowLevel")).toHaveValue("1000");
   await expect(page.locator("#windowWidth")).toHaveValue("500");
@@ -586,10 +644,14 @@ test("zoom control represents OME-Zarr levels directly", async ({ page }) => {
   await expect(page.locator("#zoom")).toHaveValue("6");
   await expect(page.locator("#zoomValue")).toHaveText("L6 · overview");
   await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "6");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-requested-level", "6");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-delivered-level", "6");
   await page.locator("#zoom").fill("4");
   await expect(page.locator("#zoomValue")).toHaveText("L4 · pending");
   await page.getByRole("button", { name: "Apply" }).click();
-  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", /(^|,)4(,|$)/);
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "4");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-requested-level", "4");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-delivered-level", "4");
   await expect(page.locator("#visibleLevel")).toHaveText("L4");
   await expect(page.locator("#zoomValue")).toHaveText("L4");
   await page.getByRole("button", { name: "Copy share link" }).click();
@@ -597,16 +659,16 @@ test("zoom control represents OME-Zarr levels directly", async ({ page }) => {
   await page.goto(levelFourUrl);
   await expect(page.locator("#zoom")).toHaveValue("4");
   await expect(page.locator("#zoomValue")).toHaveText("L4");
-  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", /(^|,)4(,|$)/);
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "4");
   await expect(page.locator("#visibleLevel")).toHaveText("L4");
   await page.locator("#zoom").fill("5");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toHaveAttribute(
     "data-fov-levels",
-    /(^|,)5(,|$)/,
+    "5",
     { timeout: 10_000 },
   );
-  await expect(page.locator("#activeLevel")).toContainText("FOV L5");
+  await expect(page.locator("#activeLevel")).toHaveText("L5");
   await expect(page.locator("#visibleLevel")).toHaveText("L5");
   await expect(page.locator("#zoomValue")).toHaveText("L5");
 });

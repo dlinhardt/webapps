@@ -13,7 +13,8 @@ const state = {
   colormap: 'viridis',
   windowLevel: 500,
   windowWidth: 900,
-  scrollZoomSpeed: 2,
+  scrollZoomSpeed: 5,
+  detailBudgetGiB: 8,
   showCrosshair: false,
   showScaleBar: true,
   showStats: true,
@@ -25,11 +26,12 @@ test('round-trips viewer settings through a share URL', () => {
     state,
   )
   assert.equal(url.searchParams.get('url'), 'https://example.test/a')
-  assert.equal(url.searchParams.get('scrollZoomSpeed'), '2')
+  assert.equal(url.searchParams.get('scrollZoomSpeed'), '5')
+  assert.equal(url.searchParams.get('detailBudget'), '8')
   assert.deepEqual(readShareState(url.searchParams, state), state)
 })
 
-test('ignores invalid shared camera values', () => {
-  const params = new URLSearchParams('layout=99&zoom=nope&pan=1,2')
+test('ignores invalid shared camera and detail budget values', () => {
+  const params = new URLSearchParams('layout=99&zoom=nope&pan=1,2&detailBudget=99')
   assert.deepEqual(readShareState(params, state), state)
 })
