@@ -834,7 +834,11 @@ function scheduleWindowUpdate(): void {
   windowUpdateHandle = window.setTimeout(() => {
     const source = activeSource
     if (!nv || !source || nv.volumes.length === 0) return
-    const win = parseWindow(source.defaultWindow)
+    const win = windowFromLevelWidth(
+      Number(els.windowLevel.value),
+      Number(els.windowWidth.value),
+    )
+    source.defaultWindow = win
     void nv
       .setVolume(0, { calMin: win.min, calMax: win.max })
       .catch((error: unknown) => {
