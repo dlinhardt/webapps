@@ -3,42 +3,39 @@
 // (see playwright.config.js) so it exercises the built, header-served output.
 import { test, expect } from "@playwright/test";
 
-async function clickCanvasUntilLocationChanges(page, x, y, previousCount) {
-  // A fixed point can coincide with the current crosshair after a preceding pan,
-  // which is correctly a no-op. Try nearby points within the same slice and
-  // require at least one of them to produce a real crosshair location change.
-  for (const [dx, dy] of [[0, 0], [20, 20], [-20, 16]]) {
-    await page.mouse.click(x + dx, y + dy);
-    try {
-      await page.waitForFunction(
-        (count) => window.__locationChangeCount > count,
-        previousCount,
-        { timeout: 2_000 },
-      );
-      return;
-    } catch {
-      // Try another point in the same visible slice.
-    }
+async function clickKnownCanvasPointUntilLocationChanges(
+  page,
+  points,
+  previousCount,
+) {
+  for (const point of points) {
+    await page.mouse.click(point.x, point.y);
+    const currentCount = await page.evaluate(() => window.__locationChangeCount);
+    if (currentCount > previousCount) return point;
   }
   throw new Error("Canvas clicks did not change the crosshair location");
 }
 
-async function findInteractiveCanvasPoint(page, canvasBox) {
+async function findInteractiveCanvasPoints(page, canvasBox, count = 4) {
   let previousCount = await page.evaluate(() => window.__locationChangeCount);
+  const points = [];
   // NiiVue letterboxes slice tiles according to volume aspect ratio, so a
   // fixed canvas percentage is not guaranteed to contain image data. Probe a
-  // compact CSS-pixel grid and keep the first point that moves the crosshair.
+  // compact CSS-pixel grid and retain proven points that map to distinct voxels.
   for (let yFraction = 0.1; yFraction < 0.95; yFraction += 0.05) {
     for (let xFraction = 0.1; xFraction < 0.95; xFraction += 0.05) {
       const x = canvasBox.x + canvasBox.width * xFraction;
       const y = canvasBox.y + canvasBox.height * yFraction;
       await page.mouse.click(x, y);
       const currentCount = await page.evaluate(() => window.__locationChangeCount);
-      if (currentCount > previousCount) return { x, y };
+      if (currentCount > previousCount) {
+        points.push({ x, y });
+        if (points.length === count) return points;
+      }
       previousCount = currentCount;
     }
   }
-  throw new Error("No interactive slice point was found on the canvas");
+  throw new Error(`Only ${points.length} interactive canvas points were found`);
 }
 
 test("app boots", async ({ page }) => {
@@ -258,7 +255,8 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
 
   const canvasBox = await page.locator("#nv-canvas").boundingBox();
   expect(canvasBox).not.toBeNull();
-  const interactivePoint = await findInteractiveCanvasPoint(page, canvasBox);
+  const interactivePoints = await findInteractiveCanvasPoints(page, canvasBox);
+  const interactivePoint = interactivePoints[0];
   const startX = interactivePoint.x;
   const startY = interactivePoint.y;
   const dragX = startX < canvasBox.x + canvasBox.width * 0.5 ? 40 : -40;
@@ -284,10 +282,9 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   const locationChangesBefore = await page.evaluate(
     () => window.__locationChangeCount,
   );
-  await clickCanvasUntilLocationChanges(
+  await clickKnownCanvasPointUntilLocationChanges(
     page,
-    startX,
-    startY,
+    interactivePoints,
     locationChangesBefore,
   );
   await expect.poll(async () => Promise.all(
@@ -376,10 +373,9 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   const locationChangesAfterMeasurement = await page.evaluate(
     () => window.__locationChangeCount,
   );
-  await clickCanvasUntilLocationChanges(
+  await clickKnownCanvasPointUntilLocationChanges(
     page,
-    startX + 20,
-    startY + 20,
+    interactivePoints,
     locationChangesAfterMeasurement,
   );
 
@@ -456,10 +452,9 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   const locationChangesBeforeReloadClick = await page.evaluate(
     () => window.__locationChangeCount,
   );
-  await clickCanvasUntilLocationChanges(
+  await clickKnownCanvasPointUntilLocationChanges(
     page,
-    startX + 36,
-    startY + 28,
+    interactivePoints,
     locationChangesBeforeReloadClick,
   );
   await page.getByRole("button", { name: "Copy share link" }).click();
