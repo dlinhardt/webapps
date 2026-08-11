@@ -23,6 +23,24 @@ async function clickCanvasUntilLocationChanges(page, x, y, previousCount) {
   throw new Error("Canvas clicks did not change the crosshair location");
 }
 
+async function findInteractiveCanvasPoint(page, canvasBox) {
+  let previousCount = await page.evaluate(() => window.__locationChangeCount);
+  // NiiVue letterboxes slice tiles according to volume aspect ratio, so a
+  // fixed canvas percentage is not guaranteed to contain image data. Probe a
+  // compact CSS-pixel grid and keep the first point that moves the crosshair.
+  for (let yFraction = 0.1; yFraction < 0.95; yFraction += 0.05) {
+    for (let xFraction = 0.1; xFraction < 0.95; xFraction += 0.05) {
+      const x = canvasBox.x + canvasBox.width * xFraction;
+      const y = canvasBox.y + canvasBox.height * yFraction;
+      await page.mouse.click(x, y);
+      const currentCount = await page.evaluate(() => window.__locationChangeCount);
+      if (currentCount > previousCount) return { x, y };
+      previousCount = currentCount;
+    }
+  }
+  throw new Error("No interactive slice point was found on the canvas");
+}
+
 test("app boots", async ({ page }) => {
   await page.goto("/?source=custom");
   await expect(page.locator(".nd-imaging-workspace")).toBeVisible();
@@ -240,15 +258,18 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
 
   const canvasBox = await page.locator("#nv-canvas").boundingBox();
   expect(canvasBox).not.toBeNull();
-  const startX = canvasBox.x + canvasBox.width * 0.32;
-  const startY = canvasBox.y + canvasBox.height * 0.28;
+  const interactivePoint = await findInteractiveCanvasPoint(page, canvasBox);
+  const startX = interactivePoint.x;
+  const startY = interactivePoint.y;
+  const dragX = startX < canvasBox.x + canvasBox.width * 0.5 ? 40 : -40;
+  const dragY = startY < canvasBox.y + canvasBox.height * 0.5 ? 20 : -20;
   const panFields = ["#panX", "#panY", "#panZ"];
   const panBefore = await Promise.all(
     panFields.map((selector) => page.locator(selector).inputValue()),
   );
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + 80, startY + 36, { steps: 8 });
+  await page.mouse.move(startX + dragX, startY + dragY, { steps: 8 });
   await page.mouse.up();
   await expect.poll(async () => {
     const panAfter = await Promise.all(
@@ -334,8 +355,8 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(measureButton).toHaveAttribute("aria-pressed", "false");
   await measureButton.click();
   await expect(measureButton).toHaveAttribute("aria-pressed", "true");
-  const measureEndX = startX + 64;
-  const measureEndY = startY + 24;
+  const measureEndX = startX + dragX * 0.8;
+  const measureEndY = startY + dragY * 0.8;
   await page.mouse.move(startX, startY);
   await page.mouse.down();
   await page.mouse.move(measureEndX, measureEndY, { steps: 8 });
