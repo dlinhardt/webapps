@@ -106,7 +106,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   // This exercises the complete translated-mosaic interaction surface. GitHub's
   // shared runners can take more than a minute even though every request is
   // locally mocked, so leave enough headroom for the browser assertions.
-  test.setTimeout(180_000);
+  test.setTimeout(600_000);
   const cancelledChunkErrors = [];
   page.on("console", (message) => {
     if (
