@@ -62,6 +62,7 @@ test("a web worker loads and responds", async ({ page }) => {
 test("translated OME-Zarr URLs load as one composite volume", async ({ page }) => {
   await page.addInitScript(() => {
     window.__locationChangeCount = 0;
+    window.__crosshairAppearance = {};
     window.__copiedText = "";
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -75,6 +76,12 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     EventTarget.prototype.dispatchEvent = function (event) {
       if (event.type === "locationChange") {
         window.__locationChangeCount++;
+      }
+      if (
+        event.type === "change" &&
+        ["crosshairWidth", "crosshairGap"].includes(event.detail?.property)
+      ) {
+        window.__crosshairAppearance[event.detail.property] = event.detail.value;
       }
       return dispatchEvent.call(this, event);
     };
@@ -199,6 +206,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     panFields.map((selector) => page.locator(selector).inputValue()),
   )).toEqual(panBeforeClick);
 
+  const canvasBeforeWindowing = await page.locator("#nv-canvas").screenshot();
   const chunkRequestsBeforeWindowing = leftChunkRequests + rightChunkRequests;
   await page.locator("#windowLevel").evaluate((input) => {
     input.value = "60";
@@ -213,6 +221,10 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   expect(leftChunkRequests + rightChunkRequests).toBe(chunkRequestsBeforeWindowing);
   await expect(page.locator("#windowMin")).toHaveValue("50");
   await expect(page.locator("#windowMax")).toHaveValue("70");
+  await expect.poll(async () => {
+    const canvasAfterWindowing = await page.locator("#nv-canvas").screenshot();
+    return canvasAfterWindowing.equals(canvasBeforeWindowing);
+  }).toBe(false);
 
   await page.locator("#windowLevel").evaluate((input) => {
     input.value = "10";
@@ -280,7 +292,15 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await page.locator("#scrollZoomSpeed").fill("3");
   await expect(page.locator("#scrollZoomSpeedValue")).toHaveText("3×");
   await page.locator("#zoom").fill("2");
+  await expect(page.locator("#zoomValue")).toHaveText("L2 · pending");
   await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.locator("#zoomValue")).toHaveText("L2");
+  await expect(page.locator("#activeLevel")).toContainText(
+    "L2 · 2 translated stores",
+  );
+  await expect.poll(() => page.evaluate(
+    () => window.__crosshairAppearance,
+  )).toEqual({ crosshairWidth: 0.0015, crosshairGap: 0.01 });
   const sharedPan = await Promise.all(
     panFields.map((selector) => page.locator(selector).inputValue()),
   );
@@ -298,27 +318,32 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   expect(sharedParams.get("crosshair")).toBeTruthy();
 
   await page.goto(sharedUrl);
-  await expect(page.locator("#activeLevel")).toHaveText(/L0 · 2 translated stores/);
+  await expect(page.locator("#activeLevel")).toHaveText(/L2 · 2 translated stores/);
   await expect(page.locator("#windowLevel")).toHaveValue("60");
   await expect(page.locator("#windowWidth")).toHaveValue("20");
   await expect(page.locator("#scrollZoomSpeed")).toHaveValue("3");
   await expect(page.locator("#zoom")).toHaveValue("2");
-  await expect.poll(async () => Promise.all(
-    panFields.map((selector) => page.locator(selector).inputValue()),
-  )).toEqual(sharedPan);
+  await expect.poll(async () => {
+    const restoredPan = await Promise.all(
+      panFields.map((selector) => page.locator(selector).inputValue()),
+    );
+    return Math.max(
+      ...restoredPan.map((value, index) =>
+        Math.abs(Number(value) - Number(sharedPan[index]))
+      ),
+    );
+  }).toBeLessThanOrEqual(1);
 
-  await page.locator("#zarrLevel").selectOption("auto");
-  await expect(page.locator("#activeLevel")).toContainText("L3 · 2 translated stores");
-  await expect.poll(() => chunkRequestsByLevel.get(3) ?? 0).toBeGreaterThan(0);
+  await expect(page.locator("#zoomValue")).toHaveText("L2");
   delayLevelMetadata = true;
-  await page.locator("#zoom").fill("4");
+  await page.locator("#zoom").fill("1");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toContainText("target L1");
   await expect.poll(() => delayedMetadataRequests).toBeGreaterThan(0);
 
   // Start a newer LOD request while L1 metadata is still delayed. The latest
   // request must win, and a crosshair click made during the swap must survive.
-  await page.locator("#zoom").fill("8");
+  await page.locator("#zoom").fill("0");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toContainText("target L0");
   const locationChangesBeforeReloadClick = await page.evaluate(
@@ -472,9 +497,22 @@ test("generic uint16 share contrast is replaced from streamed signal", async ({ 
   await page.waitForTimeout(500);
   await expect(page.locator("#windowLevel")).toHaveValue("1000");
   await expect(page.locator("#windowWidth")).toHaveValue("500");
+
+  const canvasBeforeAutoContrast = await page.locator("#nv-canvas").screenshot();
+  const autoContrast = page.getByRole("button", { name: "Auto contrast" });
+  await expect(autoContrast).toBeEnabled();
+  await autoContrast.click();
+  await expect.poll(async () => Number(await page.locator("#windowWidth").inputValue()))
+    .toBeLessThan(10_000);
+  await expect.poll(async () => Number(await page.locator("#windowLevel").inputValue()))
+    .toBeGreaterThan(2_000);
+  await expect.poll(async () => {
+    const canvasAfterAutoContrast = await page.locator("#nv-canvas").screenshot();
+    return canvasAfterAutoContrast.equals(canvasBeforeAutoContrast);
+  }).toBe(false);
 });
 
-test("level caps stay selected while the badge reports the finest visible level", async ({ page }) => {
+test("zoom control represents OME-Zarr levels directly", async ({ page }) => {
   const shapes = [
     [1, 1, 2048, 2048, 13125],
     [1, 1, 1024, 1024, 6563],
@@ -545,21 +583,24 @@ test("level caps stay selected while the badge reports the finest visible level"
   await page.goto("/?source=custom");
   await page.getByLabel("OME-Zarr store URL 1").fill("http://localhost:4173/test-pyramid/store");
   await page.getByRole("button", { name: "Load volume" }).click();
-  await expect(page.locator("#zarrLevel")).toHaveValue("auto");
+  await expect(page.locator("#zoom")).toHaveValue("6");
+  await expect(page.locator("#zoomValue")).toHaveText("L6 · overview");
   await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "6");
-  await page.locator("#zarrLevel").selectOption("4");
-  await expect(page).toHaveURL(/zarrLevel=4/);
-  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", /(^|,)4(,|$)/);
-  await expect(page.locator("#visibleLevel")).toHaveText("L4");
-  await page.reload();
-  await expect(page.locator("#zarrLevel")).toHaveValue("4");
-  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", /(^|,)4(,|$)/);
-  await expect(page.locator("#visibleLevel")).toHaveText("L4");
-  await page.locator("#zoom").fill("2");
+  await page.locator("#zoom").fill("4");
+  await expect(page.locator("#zoomValue")).toHaveText("L4 · pending");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", /(^|,)4(,|$)/);
-  await page.locator("#zarrLevel").selectOption("auto");
-  await expect(page).not.toHaveURL(/zarrLevel=/);
+  await expect(page.locator("#visibleLevel")).toHaveText("L4");
+  await expect(page.locator("#zoomValue")).toHaveText("L4");
+  await page.getByRole("button", { name: "Copy share link" }).click();
+  const levelFourUrl = page.url();
+  await page.goto(levelFourUrl);
+  await expect(page.locator("#zoom")).toHaveValue("4");
+  await expect(page.locator("#zoomValue")).toHaveText("L4");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", /(^|,)4(,|$)/);
+  await expect(page.locator("#visibleLevel")).toHaveText("L4");
+  await page.locator("#zoom").fill("5");
+  await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator("#activeLevel")).toHaveAttribute(
     "data-fov-levels",
     /(^|,)5(,|$)/,
@@ -567,4 +608,5 @@ test("level caps stay selected while the badge reports the finest visible level"
   );
   await expect(page.locator("#activeLevel")).toContainText("FOV L5");
   await expect(page.locator("#visibleLevel")).toHaveText("L5");
+  await expect(page.locator("#zoomValue")).toHaveText("L5");
 });

@@ -396,6 +396,18 @@ a:focus-visible {
   font: inherit;
 }
 
+#zoom {
+  direction: rtl;
+}
+
+.zoom-level-help {
+  display: block;
+  margin: -0.15rem 0 0.1rem;
+  color: var(--nd-color-text-dim);
+  font-size: 0.61rem;
+  line-height: 1.35;
+}
+
 #controls .zoom-field button {
   min-height: 30px;
   margin: 0;

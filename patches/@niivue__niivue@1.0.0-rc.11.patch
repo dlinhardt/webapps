@@ -13,7 +13,7 @@ index 7e65858379bcb0eb58cde7ef98137ce8716e7bfd..65287eeebcb502e0a7c029b7e0daa7ed
  export declare enum SHOW_RENDER {
      NEVER = 0,
 diff --git a/dist/NVControlBase-Cq7vd-TD.js b/dist/NVControlBase-Cq7vd-TD.js
-index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43ce244756 100644
+index 233eaa4b018793ea685dedebbd73c0c8a6417728..585325fa84c0638f363e6776a9c4bbb96767cdf8 100644
 --- a/dist/NVControlBase-Cq7vd-TD.js
 +++ b/dist/NVControlBase-Cq7vd-TD.js
 @@ -1836,7 +1836,7 @@ function $e(t, e, n = !1) {
@@ -101,7 +101,126 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
  }
  function Zx(t, e, n = [1, 1, 1]) {
    if (e < 1)
-@@ -19280,7 +19235,9 @@ class _2 {
+@@ -15516,6 +15471,10 @@ class y2 {
+   get residentCount() {
+     return this._resident.size;
+   }
++  /** Current resident chunk indices, in admission order. */
++  residentIndices() {
++    return [...this._resident.keys()];
++  }
+   /** True once every chunk in the plan is resident. */
+   get isFullyResident() {
+     return this._resident.size === this.chunkCount;
+@@ -15625,7 +15584,7 @@ class y2 {
+   /** Destroy every resident chunk's GPU resources and reset all state. */
+   destroy() {
+     for (const e of this._resident.values()) this._hooks.destroy(e.chunk);
+-    this._resident.clear(), this._residentBytes = 0, this._uploadQueue.length = 0, this._inFlightUploads.clear();
++    this._resident.clear(), this._residentBytes = 0, this._uploadQueue.length = 0, this._inFlightUploads.clear(), this._generation++;
+   }
+   _removeQueuedUpload(e) {
+     for (let n = this._uploadQueue.length - 1; n >= 0; n--)
+@@ -16094,7 +16053,7 @@ function Oa(t, e, n, i = () => !0) {
+     throw new Error(
+       "orientChunkedGL: source is non-RAS but missing RAS mapping"
+     );
+-  const x = /* @__PURE__ */ new Map();
++  const x = /* @__PURE__ */ new Map(), rawChunks = /* @__PURE__ */ new Map();
+   function p(b) {
+     const g = n.chunks[b];
+     if (!g)
+@@ -16130,6 +16089,8 @@ function Oa(t, e, n, i = () => !0) {
+   }
+   function y(b) {
+     if (!r) return p(b);
++    const w = rawChunks.get(b);
++    if (w) return Promise.resolve(w);
+     const g = x.get(b);
+     if (g) return g;
+     const v = p(b);
+@@ -16145,7 +16106,7 @@ function Oa(t, e, n, i = () => !0) {
+     if (!g)
+       throw new Error(`orientChunkedGL: chunk index ${b} out of range`);
+     const v = await y(b);
+-    x.delete(b);
++    x.delete(b), r && rawChunks.set(b, v);
+     const w = o ? hA(t, f2(v, s), g.texDims) : _A(t, v, s, g.texDims, e), E = [
+       g.texDims[0],
+       g.texDims[1],
+@@ -16153,7 +16114,16 @@ function Oa(t, e, n, i = () => !0) {
+     ], A = i(), M = A ? zi(t, w, E) : VA(t, E);
+     return { volumeTexture: w, volumeGradientTexture: M, desc: g, hasGradient: A };
+   }
+-  return { uploadChunk: _, prefetchChunk: T, dispose: () => x.clear() };
++  return {
++    uploadChunk: _,
++    prefetchChunk: T,
++    refreshWindow: () => {
++    },
++    releaseChunk: (b) => rawChunks.delete(b),
++    dispose: () => {
++      x.clear(), rawChunks.clear();
++    }
++  };
+ }
+ function $A(t, e) {
+   if (e)
+@@ -16672,6 +16642,9 @@ function qA(t) {
+   const [e, n, i] = t.desc.texDims;
+   return e * n * i * 8;
+ }
++function chunkWindowKey(t) {
++  return `${t.calMin}|${t.calMax}`;
++}
+ function $a(t, e) {
+   const n = t.chunks[e], [i, r, s] = t.volumeDims, [o, a, l] = n.texDims, c = t.levelDims?.[n.sourceLevel ?? 0] ?? t.volumeDims;
+   return {
+@@ -16884,9 +16857,22 @@ let jA = class extends ze {
+         `Volume ${n.name} tiles into ${a.chunks.length} chunks, exceeding the per-tile limit of ${Li}. Use a coarser pyramid level or crop the volume.`
+       );
+     const h = n.url || n.name, d = h ? this._texCache.get(h) : void 0;
+-    if (d && d.kind === "chunked")
+-      return d.volume = n, d;
+-    d && this._destroyTexEntry(e, d);
++    if (d && d.kind === "chunked") {
++      if (d.plan === a) {
++        d.volume = n;
++        const m = chunkWindowKey(n);
++        if (d.windowKey !== m) {
++          const x = d.manager.residentIndices();
++          d.windowKey = m, d.uploader.refreshWindow(), d.manager.destroy();
++          const p = x[0] ?? 0, y = d.manager.generation, T = await d.uploader.uploadChunk(p);
++          d.manager.generation === y ? d.manager.admit(p, T) : (d.manager.discardUpload(p, T), d.uploader.releaseChunk(p));
++          for (const v of x)
++            v !== p && d.manager.requestUpload(v);
++        }
++        return d;
++      }
++      this._destroyTexEntry(e, d), h && this._texCache.delete(h);
++    } else d && (this._destroyTexEntry(e, d), h && this._texCache.delete(h));
+     const u = {
+       kind: "chunked",
+       volume: n,
+@@ -16897,7 +16883,8 @@ let jA = class extends ze {
+         a,
+         () => this.gradientAmount > 0
+       ),
+-      plan: a
++      plan: a,
++      windowKey: chunkWindowKey(n)
+     };
+     u.manager = new y2(
+       a.chunks.length,
+@@ -16905,6 +16892,7 @@ let jA = class extends ze {
+       {
+         bytesOf: qA,
+         destroy: (m) => $A(e, [m]),
++        onEvict: (m) => u.uploader.releaseChunk(m),
+         prefetch: (m) => u.uploader.prefetchChunk(m)
+       }
+     );
+@@ -19280,7 +19268,9 @@ class _2 {
            (O, $, N, q, j, Y, K, J) => this.fontRenderer.buildText(O, $, N, q, j, Y, K, J),
            Pe,
            n.ui.fontColor,
@@ -112,7 +231,99 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
          );
          U && (c.push(...U.labels), E.push(...U.lines));
        }
-@@ -26847,7 +26804,9 @@ class S2 {
+@@ -22835,7 +22825,7 @@ async function Ja(t, e, n, i = () => !0) {
+   ) : null, f = r ? !0 : m2(e), m = e.img2RASstart, x = e.img2RASstep;
+   if (!r && !f && (!x || !m))
+     throw new Error("orientChunked: source is non-RAS but missing RAS mapping");
+-  const p = /* @__PURE__ */ new Map();
++  const p = /* @__PURE__ */ new Map(), rawChunks = /* @__PURE__ */ new Map();
+   function y(v) {
+     const w = n.chunks[v];
+     if (!w)
+@@ -22871,6 +22861,8 @@ async function Ja(t, e, n, i = () => !0) {
+   }
+   function T(v) {
+     if (!r) return y(v);
++    const A = rawChunks.get(v);
++    if (A) return Promise.resolve(A);
+     const w = p.get(v);
+     if (w) return w;
+     const E = y(v);
+@@ -22886,7 +22878,7 @@ async function Ja(t, e, n, i = () => !0) {
+     if (!w)
+       throw new Error(`orientChunked: chunk index ${v} out of range`);
+     const E = await T(v);
+-    p.delete(v);
++    p.delete(v), r && rawChunks.set(v, E);
+     let A;
+     if (o)
+       A = t.createTexture({
+@@ -22952,9 +22944,17 @@ async function Ja(t, e, n, i = () => !0) {
+     };
+   }
+   function g() {
+-    p.clear(), c && (c.uniformBuffer.destroy(), c.colormapTexture.destroy(), c.hasNegativeColormap && c.negativeColormapTexture.destroy(), c.modPlaceholder.destroy());
++    p.clear(), rawChunks.clear(), c && (c.uniformBuffer.destroy(), c.colormapTexture.destroy(), c.hasNegativeColormap && c.negativeColormapTexture.destroy(), c.modPlaceholder.destroy());
+   }
+-  return { uploadChunk: b, prefetchChunk: _, dispose: g };
++  return {
++    uploadChunk: b,
++    prefetchChunk: _,
++    refreshWindow: () => {
++      c && X5(t, c.uniformBuffer, e);
++    },
++    releaseChunk: (v) => rawChunks.delete(v),
++    dispose: g
++  };
+ }
+ function Y5(t) {
+   if (t)
+@@ -23753,9 +23753,22 @@ class t4 extends ze {
+         `Volume ${n.name} tiles into ${l.chunks.length} chunks, exceeding the per-tile limit of ${en}. Use a coarser pyramid level or crop the volume.`
+       );
+     const d = n.url || n.name, u = d ? this._texCache.get(d) : void 0;
+-    if (u && u.kind === "chunked")
+-      return u.volume = n, u;
+-    u && this._destroyTexEntry(u);
++    if (u && u.kind === "chunked") {
++      if (u.plan === l) {
++        u.volume = n;
++        const p = chunkWindowKey(n);
++        if (u.windowKey !== p) {
++          const y = u.manager.residentIndices();
++          u.windowKey = p, u.uploader.refreshWindow(), u.manager.destroy(), u.bindGroups.fill(null), this._invalidateBindGroupCache();
++          const T = y[0] ?? 0, v = u.manager.generation, _ = await u.uploader.uploadChunk(T);
++          u.manager.generation === v ? u.manager.admit(T, _) : (u.manager.discardUpload(T, _), u.uploader.releaseChunk(T));
++          for (const g of y)
++            g !== T && u.manager.requestUpload(g);
++        }
++        return u;
++      }
++      this._destroyTexEntry(u), d && this._texCache.delete(d);
++    } else u && (this._destroyTexEntry(u), d && this._texCache.delete(d));
+     const f = await Ja(
+       e,
+       n,
+@@ -23767,7 +23780,8 @@ class t4 extends ze {
+       manager: void 0,
+       uploader: f,
+       plan: l,
+-      bindGroups: l.chunks.map(() => null)
++      bindGroups: l.chunks.map(() => null),
++      windowKey: chunkWindowKey(n)
+     };
+     m.manager = new y2(
+       l.chunks.length,
+@@ -23776,7 +23790,7 @@ class t4 extends ze {
+         bytesOf: e4,
+         destroy: (p) => Y5([p]),
+         onEvict: (p) => {
+-          m.bindGroups[p] = null, r?.(p);
++          m.uploader.releaseChunk(p), m.bindGroups[p] = null, r?.(p);
+         },
+         prefetch: (p) => m.uploader.prefetchChunk(p),
+         onAdmit: r
+@@ -26847,7 +26861,9 @@ class S2 {
            (q, j, Y, K, J, ne, ce, z) => this.fontRenderer.buildText(q, j, Y, K, J, ne, ce, z),
            Pe,
            e.ui.fontColor,
@@ -123,7 +334,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
          );
          N && (h.push(...N.labels), P.push(...N.lines));
        }
-@@ -32599,6 +32558,11 @@ function to(t, e) {
+@@ -32599,6 +32615,11 @@ function to(t, e) {
    }
    return i.length > 0 && n.push({ ...e, polygons: i }), n;
  }
@@ -135,7 +346,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
  function V4(t, e) {
    return e === 0 ? t.model.interaction.primaryDragMode : e === 2 ? t.model.interaction.secondaryDragMode : ge.none;
  }
-@@ -32776,6 +32740,10 @@ function $4(t) {
+@@ -32776,6 +32797,10 @@ function $4(t) {
  }
  function Sl(t) {
    const e = t._activeDragMode;
@@ -146,7 +357,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
    if (e === ge.angle) {
      if (t._angleState === "drawing_first_line") {
        t._angleFirstLine = [
-@@ -32849,7 +32817,7 @@ function Al(t) {
+@@ -32849,7 +32874,7 @@ function Al(t) {
    e && t.emit("dragRelease", e);
  }
  function Ml(t) {
@@ -155,7 +366,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
  }
  function X4(t) {
    const e = t._pan2DxyzmmAtDragStart;
-@@ -32859,7 +32827,7 @@ function X4(t) {
+@@ -32859,7 +32884,7 @@ function X4(t) {
      t.dragStartXY[0],
      t.dragStartXY[1]
    ), i = Je(t, t.dragEndXY[0], t.dragEndXY[1]);
@@ -164,7 +375,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
  }
  function W4(t) {
    const e = t._pan2DxyzmmAtDragStart;
-@@ -33796,7 +33764,7 @@ function k2(t) {
+@@ -33796,7 +33821,7 @@ function k2(t) {
        }
        if (t.isDragging = !0, t.activeButton = n.button, t.activeTileHit && !t.activeTileHit.isRender) {
          const l = V4(t, n.button);
@@ -173,7 +384,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
            const c = at(
              t.view?.screenSlices ?? [],
              t.model,
-@@ -33805,7 +33773,7 @@ function k2(t) {
+@@ -33805,7 +33830,7 @@ function k2(t) {
              t.activeTileHit
            );
            c && t.setCrosshairPos(c);
@@ -182,7 +393,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
            const c = t.model.scene.pan2Dxyzmm;
            t._pan2DxyzmmAtDragStart = [c[0], c[1], c[2], c[3]];
          } else l === ge.angle && t._angleState !== "drawing_second_line" && (t._angleState = "drawing_first_line");
-@@ -33973,7 +33941,7 @@ function k2(t) {
+@@ -33973,7 +33998,7 @@ function k2(t) {
        button: n.button
      });
    }, t._eventListeners.pointercancel = (e) => {
@@ -191,7 +402,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
      try {
        t._annotation3DActive && Fl(t);
      } finally {
-@@ -34295,6 +34263,11 @@ function k2(t) {
+@@ -34295,6 +34320,11 @@ function k2(t) {
          case ge.pan:
            X4(t), t.drawScene();
            break;
@@ -203,7 +414,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
          case ge.slicer3D:
            W4(t), t.drawScene();
            break;
-@@ -37700,7 +37673,7 @@ function $R(t, e) {
+@@ -37700,7 +37730,7 @@ function $R(t, e) {
  }
  let fD = class extends EventTarget {
    constructor(e = {}, n, i = "both") {
@@ -212,7 +423,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..41efa24975404df039129d87322b0b43
      const r = e.backend ?? "webgpu";
      if (this.opts = {
        backend: r,
-@@ -40186,6 +40159,7 @@ let fD = class extends EventTarget {
+@@ -40186,6 +40216,7 @@ let fD = class extends EventTarget {
          roiSelection: ge.roiSelection,
          angle: ge.angle,
          crosshair: ge.crosshair,

@@ -13,7 +13,7 @@ export interface WindowLevelWidth {
   width: number
 }
 
-export interface ZoomControlDisplay {
+export interface ZoomLevelControlDisplay {
   value: number
   label: string
   canApply: boolean
@@ -30,19 +30,29 @@ const MAX_WHEEL_DELTA_PX = 120
 export const MIN_VIEWER_ZOOM = 0.1
 export const MAX_VIEWER_ZOOM = 128
 
-export function zoomControlDisplay(
-  appliedZoom: number,
-  pendingZoom: number | null,
-): ZoomControlDisplay {
-  const applied =
-    Number.isFinite(appliedZoom) && appliedZoom > 0 ? appliedZoom : 1
-  const hasPending =
-    pendingZoom !== null && Number.isFinite(pendingZoom) && pendingZoom > 0
-  const value = hasPending ? pendingZoom : applied
+export function zoomLevelControlDisplay(
+  appliedLevel: number,
+  pendingLevel: number | null,
+  levelCount: number,
+): ZoomLevelControlDisplay {
+  const maximum = Math.max(0, levelCount - 1)
+  const safeApplied = Number.isFinite(appliedLevel) ? appliedLevel : maximum
+  const applied = Math.min(maximum, Math.max(0, Math.round(safeApplied)))
+  const hasPending = pendingLevel !== null && Number.isFinite(pendingLevel)
+  const value = hasPending
+    ? Math.min(maximum, Math.max(0, Math.round(pendingLevel)))
+    : applied
+  const suffix =
+    value === 0
+      ? ' · finest'
+      : value === maximum
+        ? ' · overview'
+        : ''
+  const changed = hasPending && value !== applied
   return {
     value,
-    label: `${value.toFixed(2)}x${hasPending ? ' pending' : ''}`,
-    canApply: hasPending,
+    label: `L${value}${suffix}${changed ? ' · pending' : ''}`,
+    canApply: changed,
   }
 }
 
@@ -113,6 +123,16 @@ export function detailLevelForZoom(
 ): number {
   const zoomStops = Math.round(Math.log2(Math.max(MIN_VIEWER_ZOOM, zoom)))
   return Math.min(levelCount - 1, Math.max(0, baseLevel - zoomStops))
+}
+
+/** Map a pyramid level to its canonical 2x camera stop from the overview. */
+export function zoomForDetailLevel(level: number, levelCount: number): number {
+  const overviewLevel = Math.max(0, levelCount - 1)
+  const selectedLevel = Math.min(
+    overviewLevel,
+    Math.max(0, Math.round(Number.isFinite(level) ? level : overviewLevel)),
+  )
+  return clampViewerZoom(2 ** (overviewLevel - selectedLevel))
 }
 
 export function rangeBoundsForWindow(

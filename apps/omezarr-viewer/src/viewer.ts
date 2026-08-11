@@ -61,7 +61,8 @@ import {
   wheelZoomValue,
   windowFromLevelWidth,
   windowLevelWidth,
-  zoomControlDisplay,
+  zoomForDetailLevel,
+  zoomLevelControlDisplay,
 } from './viewer_controls'
 import { withInflightReadDeduplication } from './zarr_store'
 
@@ -160,6 +161,7 @@ interface LoadedSourceBase {
   name: string
   shape: Shape3
   spacing: Shape3
+  crosshairSpacing: Shape3
   dtype: SupportedDtype
   datatypeCode: number
   numBitsPerVoxel: number
@@ -286,7 +288,6 @@ const els = {
   zoomValue: el<HTMLOutputElement>('zoomValue'),
   applyZoom: el<HTMLButtonElement>('applyZoom'),
   zarrLevel: el<HTMLSelectElement>('zarrLevel'),
-  zarrLevelControl: el<HTMLElement>('zarrLevelControl'),
   scrollZoomSpeed: el<HTMLInputElement>('scrollZoomSpeed'),
   scrollZoomSpeedValue: el<HTMLOutputElement>('scrollZoomSpeedValue'),
   pan: [
@@ -300,6 +301,7 @@ const els = {
     el<HTMLOutputElement>('panZValue'),
   ],
   colormap: el<HTMLSelectElement>('colormap'),
+  autoContrast: el<HTMLButtonElement>('autoContrast'),
   windowLevel: el<HTMLInputElement>('windowLevel'),
   windowLevelValue: el<HTMLOutputElement>('windowLevelValue'),
   windowWidth: el<HTMLInputElement>('windowWidth'),
@@ -359,7 +361,7 @@ let downloadInProgress = false
 let renderCropGeometry: ExportGeometry | null = null
 let sliceViewBeforeRender: ViewState | null = null
 let windowUpdateHandle = 0
-let pendingZoom: number | null = null
+let pendingZoomLevel: number | null = null
 let dandiSearchController: AbortController | null = null
 let mosaicLodHandle = 0
 let mosaicLodRevision = 0
@@ -374,10 +376,16 @@ let initialSharedView: ViewState | null = null
 let initialSharedSettings: ShareableViewState | null = null
 let manualWindowRevision = 0
 let autoWindowSession: AutoWindowSession | null = null
+let autoContrastState: AutoContrastState | null = null
+
+interface AutoContrastState {
+  source: OmezarrSource | OmezarrMosaicSource
+  estimator: IntensityWindowEstimator
+  window: DisplayWindow | null
+}
 
 interface AutoWindowSession {
   source: OmezarrSource | OmezarrMosaicSource
-  estimator: IntensityWindowEstimator
   manualRevision: number
   observedChunks: number
   lastMaximum: number | null
@@ -672,12 +680,18 @@ function setWindowControls(win: DisplayWindow, dtype: SupportedDtype): void {
 
 function prepareAutoWindow(source: LoadedSource): void {
   autoWindowSession = null
+  autoContrastState = null
+  els.autoContrast.disabled = true
   if (source.kind === 'synthetic') return
+  autoContrastState = {
+    source,
+    estimator: new IntensityWindowEstimator(source.dtype),
+    window: null,
+  }
   const currentWindow = parseWindow(source.defaultWindow)
   if (!isGenericDtypeWindow(source.dtype, currentWindow)) return
   autoWindowSession = {
     source,
-    estimator: new IntensityWindowEstimator(source.dtype),
     manualRevision: manualWindowRevision,
     observedChunks: 0,
     lastMaximum: null,
@@ -688,6 +702,13 @@ function observeChunkForAutoWindow(
   source: OmezarrSource | OmezarrMosaicSource,
   bytes: Uint8Array,
 ): void {
+  const contrast = autoContrastState
+  if (!contrast || contrast.source !== source) return
+  const estimated = contrast.estimator.observe(bytes)
+  if (estimated) {
+    contrast.window = estimated
+    els.autoContrast.disabled = false
+  }
   const session = autoWindowSession
   if (
     !session ||
@@ -697,7 +718,6 @@ function observeChunkForAutoWindow(
     return
   }
   session.observedChunks++
-  const estimated = session.estimator.observe(bytes)
   if (estimated && estimated.max !== session.lastMaximum) {
     session.lastMaximum = estimated.max
     source.defaultWindow = estimated
@@ -716,6 +736,24 @@ function observeChunkForAutoWindow(
   if (session.observedChunks >= AUTO_WINDOW_CHUNK_LIMIT) {
     autoWindowSession = null
   }
+}
+
+function applyAutoContrast(): void {
+  const contrast = autoContrastState
+  if (
+    !contrast?.window ||
+    !activeSource ||
+    activeSource !== contrast.source ||
+    !nv ||
+    nv.volumes.length === 0
+  ) {
+    return
+  }
+  manualWindowRevision++
+  autoWindowSession = null
+  contrast.source.defaultWindow = contrast.window
+  setWindowControls(contrast.window, contrast.source.dtype)
+  scheduleWindowUpdate()
 }
 
 function handleWindowInput(): void {
@@ -1065,7 +1103,6 @@ function pyramidLevels(source: LoadedSource | null): OmezarrLevel[] {
 
 function syncZarrLevelControl(): void {
   const isOmezarr = currentSourceKind() === 'omezarr'
-  els.zarrLevelControl.hidden = !isOmezarr
   const levels = pyramidLevels(activeSource)
   const options = [new Option('Auto — adapt while zooming', 'auto')]
   for (const level of levels) {
@@ -1082,6 +1119,9 @@ function syncZarrLevelControl(): void {
     fixedZarrLevel !== null && levels.some((level) => level.level === fixedZarrLevel)
   els.zarrLevel.value = fixedIsAvailable ? String(fixedZarrLevel) : 'auto'
   els.zarrLevel.disabled = !isOmezarr || levels.length === 0
+  els.zoom.min = '0'
+  els.zoom.max = String(Math.max(0, levels.length - 1))
+  els.zoom.step = '1'
 }
 
 function setDefaultWindowForSelectedSource(): void {
@@ -1355,6 +1395,7 @@ async function loadSyntheticSource(): Promise<RangeSource> {
     name: manifest.name,
     shape: manifest.shape,
     spacing: manifest.spacing,
+    crosshairSpacing: manifest.spacing,
     dtype: manifest.dtype,
     datatypeCode: dtypeInfo.code,
     numBitsPerVoxel: dtypeInfo.bits,
@@ -1453,6 +1494,7 @@ async function openOmezarrSource(
     name: profile.name,
     shape: finest.shape,
     spacing: finest.spacing,
+    crosshairSpacing: finest.spacing,
     dtype,
     datatypeCode: dtypeInfo.code,
     numBitsPerVoxel: dtypeInfo.bits,
@@ -1532,6 +1574,7 @@ async function loadOmezarrSource(): Promise<OmezarrSource | OmezarrMosaicSource>
     name: `${sources.length}-store translated OME-Zarr mosaic`,
     shape: layout.shape,
     spacing: layout.spacing,
+    crosshairSpacing: first.crosshairSpacing,
     dtype: first.dtype,
     datatypeCode: first.datatypeCode,
     numBitsPerVoxel: first.numBitsPerVoxel,
@@ -2671,9 +2714,19 @@ function syncFocusFromPan(): boolean {
 }
 
 function syncViewControls(): void {
-  const zoom = viewerZoom()
-  const zoomDisplay = zoomControlDisplay(zoom, pendingZoom)
-  els.zoom.value = String(clampViewerZoom(zoomDisplay.value))
+  const levels = pyramidLevels(activeSource)
+  const levelCount = levels.length
+  const appliedLevel =
+    levelCount === 0
+      ? 0
+      : fixedZarrLevel ??
+        detailLevelForZoom(levelCount - 1, viewerZoom(), levelCount)
+  const zoomDisplay = zoomLevelControlDisplay(
+    appliedLevel,
+    pendingZoomLevel,
+    levelCount,
+  )
+  els.zoom.value = String(zoomDisplay.value)
   els.zoomValue.value = zoomDisplay.label
   const isRender = nv?.sliceType === SLICE_TYPE.RENDER
   const pan = isRender ? nv?.renderPan : nv?.pan2Dxyzmm
@@ -2694,7 +2747,7 @@ function syncViewControls(): void {
     els.pan[axis].disabled =
       !nv || nv.volumes.length === 0 || (isRender && axis === 2)
   }
-  const zoomDisabled = !nv || nv.volumes.length === 0
+  const zoomDisabled = !nv || nv.volumes.length === 0 || levelCount === 0
   els.zoom.disabled = zoomDisabled
   els.applyZoom.disabled = zoomDisabled || !zoomDisplay.canApply
 }
@@ -2711,16 +2764,19 @@ function syncScrollZoomSpeed(): void {
 }
 
 function updateZoomSelection(): void {
-  const zoom = Number(els.zoom.value)
-  pendingZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : null
+  const level = Number(els.zoom.value)
+  pendingZoomLevel = Number.isInteger(level) && level >= 0 ? level : null
   syncViewControls()
 }
 
 function applyZoomControl(): void {
   if (!nv) return
-  const zoom = pendingZoom
-  if (zoom === null) return
-  pendingZoom = null
+  const level = pendingZoomLevel
+  const levelCount = pyramidLevels(activeSource).length
+  if (level === null || levelCount === 0) return
+  pendingZoomLevel = null
+  fixedZarrLevel = null
+  const zoom = zoomForDetailLevel(level, levelCount)
   if (nv.sliceType === SLICE_TYPE.RENDER) {
     nv.scaleMultiplier = zoom
   } else {
@@ -2729,6 +2785,7 @@ function applyZoomControl(): void {
     nv.scaleMultiplier = zoom
   }
   nv.drawScene()
+  updateUrlFromControls()
   syncViewControls()
   syncDownloadControl()
   scheduleAdaptiveLod()
@@ -2783,7 +2840,11 @@ function handleWheelZoom(event: WheelEvent): void {
   if (!nv) return
   event.preventDefault()
   event.stopImmediatePropagation()
-  pendingZoom = null
+  pendingZoomLevel = null
+  if (fixedZarrLevel !== null) {
+    fixedZarrLevel = null
+    updateUrlFromControls()
+  }
   if (nv.sliceType === SLICE_TYPE.RENDER) {
     nv.scaleMultiplier = wheelZoomValue(
       nv.scaleMultiplier,
@@ -2818,7 +2879,11 @@ function detailLevelForView(source: OmezarrSource, zoom: number): number {
       Math.max(0, fixedZarrLevel),
     )
   }
-  return detailLevelForZoom(source.baseLevel, zoom, source.levels.length)
+  return detailLevelForZoom(
+    source.levels.length - 1,
+    zoom,
+    source.levels.length,
+  )
 }
 
 let currentDetailLevel: number | null = null
@@ -2968,6 +3033,8 @@ async function performReloadVolume(options: ReloadOptions): Promise<void> {
     if (options.reloadSource || !activeSource) {
       activeSource = null
       autoWindowSession = null
+      autoContrastState = null
+      els.autoContrast.disabled = true
       chunkPlan = null
       syncDownloadControl()
       const source = await loadActiveSource()
@@ -2991,7 +3058,9 @@ async function performReloadVolume(options: ReloadOptions): Promise<void> {
     // Preserve the newest camera state immediately before swapping volumes,
     // rather than restoring the stale state captured when the reload started.
     if (options.view === undefined && options.preserveView) view = captureView()
-    const crosshair = crosshairAppearanceForSpacing(activeSource.spacing)
+    const crosshair = crosshairAppearanceForSpacing(
+      activeSource.crosshairSpacing,
+    )
     nv.crosshairWidth = crosshair.width
     nv.crosshairGap = crosshair.gap
     syncCrosshairVisibility()
@@ -3131,6 +3200,7 @@ async function main(): Promise<void> {
   els.colormap.addEventListener('change', () => {
     void reloadVolume()
   })
+  els.autoContrast.addEventListener('click', applyAutoContrast)
   els.windowLevel.addEventListener('input', handleWindowInput)
   els.windowWidth.addEventListener('input', handleWindowInput)
   els.windowMin.addEventListener('input', () => {

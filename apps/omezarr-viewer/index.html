@@ -136,27 +136,26 @@
           </label>
 
           <div class="slider-field zoom-field">
-            <label for="zoom">Zoom</label>
+            <label for="zoom">Zoom level</label>
             <input
               id="zoom"
               type="range"
-              min="0.1"
-              max="128"
-              step="0.01"
-              value="1"
-              aria-describedby="zoomValue"
+              min="0"
+              max="0"
+              step="1"
+              value="0"
+              aria-describedby="zoomValue zoomLevelHelp"
             />
-            <output id="zoomValue" for="zoom" aria-live="polite">1.00×</output>
+            <output id="zoomValue" for="zoom" aria-live="polite">L0</output>
             <button id="applyZoom" type="button" disabled>Apply</button>
           </div>
+          <small class="zoom-level-help" id="zoomLevelHelp">
+            L0 is finest; higher levels show a wider overview.
+          </small>
 
-          <label class="field" id="zarrLevelControl" for="zarrLevel">
-            <span>Zarr level</span>
-            <select id="zarrLevel" disabled>
-              <option value="auto" selected>Auto</option>
-            </select>
-            <small>Auto adapts detail while zooming; choose a level to lock it.</small>
-          </label>
+          <select id="zarrLevel" hidden aria-hidden="true" tabindex="-1">
+            <option value="auto" selected>Auto</option>
+          </select>
 
           <label class="slider-field" for="scrollZoomSpeed">
             <span>Scroll zoom speed</span>
@@ -210,6 +209,10 @@
               <option value="turbo">Turbo</option>
             </select>
           </label>
+
+          <button id="autoContrast" class="secondary-button" type="button" disabled>
+            Auto contrast
+          </button>
 
           <label class="slider-field" for="windowLevel">
             <span>Window level</span>

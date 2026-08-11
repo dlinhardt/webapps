@@ -6,6 +6,8 @@ import {
   wheelZoomValue,
   windowFromLevelWidth,
   windowLevelWidth,
+  zoomForDetailLevel,
+  zoomLevelControlDisplay,
 } from '../src/viewer_controls.ts'
 
 test('min and max round-trip through window level and width', () => {
@@ -30,6 +32,26 @@ test('scroll zoom can cross 10x to reach finer Zarr levels', () => {
   assert.equal(detailLevelForZoom(6, 16, 7), 2)
   assert.equal(detailLevelForZoom(6, 32, 7), 1)
   assert.equal(detailLevelForZoom(6, 64, 7), 0)
+})
+
+test('zoom controls round-trip directly through OME-Zarr levels', () => {
+  for (let level = 0; level <= 6; level++) {
+    const zoom = zoomForDetailLevel(level, 7)
+    assert.equal(detailLevelForZoom(6, zoom, 7), level)
+  }
+  assert.equal(zoomForDetailLevel(6, 7), 1)
+  assert.equal(zoomForDetailLevel(1, 7), 32)
+  assert.equal(zoomForDetailLevel(0, 7), 64)
+  assert.deepEqual(zoomLevelControlDisplay(1, null, 7), {
+    value: 1,
+    label: 'L1',
+    canApply: false,
+  })
+  assert.deepEqual(zoomLevelControlDisplay(1, 0, 7), {
+    value: 0,
+    label: 'L0 · finest · pending',
+    canApply: true,
+  })
 })
 
 test('range bounds expand to preserve the exact level and width window', () => {
