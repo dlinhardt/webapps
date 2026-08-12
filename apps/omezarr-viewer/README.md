@@ -12,6 +12,9 @@ complete dataset.
 - Public OME-Zarr assets can be searched by path directly from any Dandiset and
   selected without copying S3 identifiers by hand. The browser defaults to
   dandiset `000108`, version `draft`.
+- Matching DANDI assets are grouped as subject, sample session, stain, and
+  numerically ordered chunks. A complete stain group can be added in one click,
+  while its individual chunks remain available for selective loading.
 - Custom OME-Zarr v2 and v3 stores can be opened from `https://`, `http://`, or
   `s3://` store-root URLs when the host permits browser CORS requests.
 - Multiple stores can be added to one viewer. ZARRo composes them on a shared

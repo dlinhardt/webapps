@@ -279,7 +279,8 @@ a:focus-visible {
 }
 
 #controls .dandi-search-row button,
-#controls #addDandiSelection {
+#controls #addDandiSelection,
+#controls #clearDandiSelection {
   min-height: 38px;
   margin: 0;
   padding: 0.45rem 0.65rem;
@@ -290,7 +291,8 @@ a:focus-visible {
   font-size: 0.7rem;
 }
 
-#controls #addDandiSelection {
+#controls #addDandiSelection,
+#controls #clearDandiSelection {
   width: 100%;
 }
 
@@ -304,11 +306,127 @@ a:focus-visible {
 
 .dandi-results {
   display: grid;
-  gap: 0.35rem;
-  max-height: 230px;
+  gap: 0.45rem;
+  max-height: 420px;
   overflow-y: auto;
   scrollbar-color: var(--nd-color-border-light) transparent;
   scrollbar-width: thin;
+}
+
+.dandi-subject,
+.dandi-sample {
+  overflow: hidden;
+  border: 1px solid var(--nd-color-border);
+  border-radius: var(--nd-radius-sm);
+}
+
+.dandi-subject > summary,
+.dandi-sample > summary {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.5rem 0.6rem;
+  color: var(--nd-color-text);
+  background: var(--nd-color-surface-elevated);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.dandi-subject > summary strong,
+.dandi-sample > summary strong,
+.dandi-subject > summary small,
+.dandi-sample > summary small {
+  display: block;
+}
+
+.dandi-subject > summary strong {
+  font-size: 0.72rem;
+}
+
+.dandi-subject > summary small,
+.dandi-sample > summary small {
+  color: var(--nd-color-text-dim);
+  font-size: 0.61rem;
+  font-weight: 400;
+}
+
+.dandi-subject[open] > summary {
+  border-bottom: 1px solid var(--nd-color-border);
+}
+
+.dandi-sample {
+  margin: 0.45rem;
+  background: var(--nd-color-bg);
+}
+
+.dandi-sample > summary {
+  background: transparent;
+}
+
+.dandi-sample > summary strong {
+  font-size: 0.68rem;
+}
+
+.dandi-sample[open] > summary {
+  border-bottom: 1px solid var(--nd-color-border);
+}
+
+.dandi-stain-group {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.45rem;
+  padding: 0.5rem;
+  background: var(--nd-color-surface-elevated);
+  border: 1px solid var(--nd-color-border-light);
+  border-radius: var(--nd-radius-sm);
+}
+
+.dandi-stain-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.dandi-stain-heading strong,
+.dandi-stain-heading small {
+  display: block;
+}
+
+.dandi-stain-heading strong {
+  color: var(--nd-color-text);
+  font-size: 0.72rem;
+}
+
+.dandi-stain-heading small {
+  margin-top: 0.12rem;
+  color: var(--nd-color-text-dim);
+  font-size: 0.61rem;
+  font-weight: 400;
+}
+
+#controls .dandi-add-group {
+  min-height: 30px;
+  margin: 0;
+  padding: 0.3rem 0.5rem;
+  color: var(--nd-color-text);
+  background: var(--nd-color-bg);
+  border: 1px solid var(--nd-color-border-light);
+  border-radius: var(--nd-radius-sm);
+  font-size: 0.64rem;
+  white-space: nowrap;
+}
+
+.dandi-chunk-details > summary {
+  color: var(--nd-color-text-muted);
+  cursor: pointer;
+  font-size: 0.63rem;
+  font-weight: 600;
+}
+
+.dandi-chunk-list {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
 }
 
 .dandi-result {

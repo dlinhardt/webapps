@@ -17,7 +17,9 @@ import './styles.css'
 import { AbortableTaskPool } from './abortable_task_pool'
 import { getBackendFromUrl } from './backend'
 import {
+  buildDandiZarrAssetHierarchy,
   searchDandiZarrAssets,
+  type DandiZarrAssetGroup,
   type DandiZarrAsset,
 } from './dandi_archive'
 import {
@@ -366,6 +368,7 @@ const els = {
   dandiSearchStatus: el<HTMLOutputElement>('dandiSearchStatus'),
   dandiResults: el<HTMLDivElement>('dandiResults'),
   addDandiSelection: el<HTMLButtonElement>('addDandiSelection'),
+  clearDandiSelection: el<HTMLButtonElement>('clearDandiSelection'),
   dandiSelectedStores: el<HTMLDivElement>('dandiSelectedStores'),
   showCrosshair: el<HTMLInputElement>('showCrosshair'),
   showStats: el<HTMLInputElement>('showStats'),
@@ -410,6 +413,8 @@ let sliceViewBeforeRender: ViewState | null = null
 let windowUpdateHandle = 0
 let pendingZoomLevel: number | null = null
 let dandiSearchController: AbortController | null = null
+const dandiAssetByStoreUrl = new Map<string, DandiZarrAsset>()
+const dandiGroupByAddButton = new WeakMap<HTMLButtonElement, DandiZarrAssetGroup>()
 const reloadQueue = new LatestTaskQueue()
 let initialSharedView: ViewState | null = null
 let initialSharedSettings: ShareableViewState | null = null
@@ -996,9 +1001,30 @@ function syncDandiSelection(): void {
       : `Add ${selected} selected store${selected === 1 ? '' : 's'}`
 }
 
+function syncDandiGroupActions(): void {
+  const selectedUrls = new Set(selectedDandiStoreUrls)
+  for (const button of els.dandiResults.querySelectorAll<HTMLButtonElement>(
+    '.dandi-add-group',
+  )) {
+    const group = dandiGroupByAddButton.get(button)
+    if (!group) continue
+    const missing = group.members.filter(
+      ({ asset }) => !selectedUrls.has(asset.storeUrl),
+    ).length
+    button.disabled = missing === 0
+    button.textContent =
+      missing === 0
+        ? `All ${group.members.length} added`
+        : missing === group.members.length
+          ? `Add all ${group.members.length}`
+          : `Add remaining ${missing}`
+  }
+}
+
 function renderSelectedDandiStores(): void {
   els.dandiSelectedStores.replaceChildren()
   els.dandiSelectedStores.hidden = selectedDandiStoreUrls.length === 0
+  els.clearDandiSelection.disabled = selectedDandiStoreUrls.length === 0
   if (selectedDandiStoreUrls.length === 0) return
 
   const heading = document.createElement('strong')
@@ -1010,7 +1036,9 @@ function renderSelectedDandiStores(): void {
     const row = document.createElement('div')
     row.className = 'selected-store-row'
     const name = document.createElement('span')
-    name.textContent = customStoreName(storeUrl)
+    const asset = dandiAssetByStoreUrl.get(storeUrl)
+    name.textContent =
+      asset?.path.split('/').at(-1) ?? customStoreName(storeUrl)
     name.title = storeUrl
     const remove = createStoreRemoveButton(`Remove DANDI store ${index + 1}`, () => {
       selectedDandiStoreUrls = selectedDandiStoreUrls.filter(
@@ -1023,6 +1051,7 @@ function renderSelectedDandiStores(): void {
       shouldInitializeCustomSource = true
       renderSelectedDandiStores()
       syncDandiSelection()
+      syncDandiGroupActions()
       els.dandiSearchStatus.value = 'Store removed. Updating the viewer…'
       void reloadAfterStoreRemoval().then(() => {
         els.dandiSearchStatus.value = 'Store removed.'
@@ -1033,25 +1062,184 @@ function renderSelectedDandiStores(): void {
   })
 }
 
-function renderDandiResults(assets: DandiZarrAsset[]): void {
-  els.dandiResults.replaceChildren()
-  for (const asset of assets) {
-    const label = document.createElement('label')
-    label.className = 'dandi-result'
-    const checkbox = document.createElement('input')
-    checkbox.type = 'checkbox'
-    checkbox.value = asset.storeUrl
-    checkbox.addEventListener('change', syncDandiSelection)
-    const copy = document.createElement('span')
-    const title = document.createElement('strong')
-    title.textContent = asset.path.split('/').at(-1) ?? asset.path
-    const metadata = document.createElement('small')
-    metadata.textContent = `${formatBytes(asset.size)} · ${asset.path}`
-    copy.append(title, metadata)
-    label.append(checkbox, copy)
-    els.dandiResults.append(label)
+async function clearSelectedDandiAssets(): Promise<void> {
+  if (selectedDandiStoreUrls.length === 0) return
+  selectedDandiStoreUrls = []
+  for (const input of els.dandiResults.querySelectorAll<HTMLInputElement>(
+    'input[type="checkbox"]:checked',
+  )) {
+    input.checked = false
   }
+  shouldInitializeCustomSource = true
+  renderSelectedDandiStores()
   syncDandiSelection()
+  syncDandiGroupActions()
+  els.dandiSearchStatus.value = 'All selected stores cleared. Updating the viewer…'
+  await reloadAfterStoreRemoval()
+  els.dandiSearchStatus.value = 'All selected stores cleared.'
+}
+
+function createDandiChunkResult(
+  asset: DandiZarrAsset,
+  chunk: number | null = null,
+): HTMLLabelElement {
+  const label = document.createElement('label')
+  label.className = 'dandi-result'
+  const checkbox = document.createElement('input')
+  checkbox.type = 'checkbox'
+  checkbox.value = asset.storeUrl
+  checkbox.addEventListener('change', syncDandiSelection)
+  const copy = document.createElement('span')
+  const title = document.createElement('strong')
+  title.textContent =
+    chunk === null ? (asset.path.split('/').at(-1) ?? asset.path) : `Chunk ${chunk}`
+  const metadata = document.createElement('small')
+  metadata.textContent = `${formatBytes(asset.size)} · ${asset.path.split('/').at(-1) ?? asset.path}`
+  copy.append(title, metadata)
+  label.append(checkbox, copy)
+  return label
+}
+
+function addDandiAssets(assets: DandiZarrAsset[]): void {
+  const existing = new Set(selectedDandiStoreUrls)
+  const added = assets.filter((asset) => !existing.has(asset.storeUrl))
+  if (added.length === 0) {
+    els.dandiSearchStatus.value = 'All stores in this stain group are already selected.'
+    return
+  }
+  selectedDandiStoreUrls = [
+    ...new Set([...selectedDandiStoreUrls, ...added.map((asset) => asset.storeUrl)]),
+  ]
+  shouldInitializeCustomSource = true
+  renderSelectedDandiStores()
+  syncDandiGroupActions()
+  updateUrlFromControls()
+  els.dandiSearchStatus.value = `${added.length} store${added.length === 1 ? '' : 's'} selected. Press Load volume when ready.`
+}
+
+function createDandiStainGroup(group: DandiZarrAssetGroup): HTMLElement {
+  const article = document.createElement('article')
+  article.className = 'dandi-stain-group'
+
+  const header = document.createElement('div')
+  header.className = 'dandi-stain-heading'
+  const copy = document.createElement('span')
+  const title = document.createElement('strong')
+  title.textContent = group.stain
+  const metadata = document.createElement('small')
+  const acquisition = [
+    group.run ? `run ${group.run}` : null,
+    group.variant?.replaceAll('_', ' ') ?? null,
+  ].filter(Boolean)
+  metadata.textContent = `${group.members.length} chunk${group.members.length === 1 ? '' : 's'} · ${formatBytes(group.size)}${acquisition.length > 0 ? ` · ${acquisition.join(' · ')}` : ''}`
+  copy.append(title, metadata)
+
+  const addAll = document.createElement('button')
+  addAll.type = 'button'
+  addAll.className = 'dandi-add-group'
+  addAll.setAttribute(
+    'aria-label',
+    `Add all ${group.members.length} ${group.stain} chunks from sample ${group.sample}`,
+  )
+  dandiGroupByAddButton.set(addAll, group)
+  addAll.addEventListener('click', () => {
+    addDandiAssets(group.members.map(({ asset }) => asset))
+  })
+  header.append(copy, addAll)
+
+  const chunks = document.createElement('details')
+  chunks.className = 'dandi-chunk-details'
+  const summary = document.createElement('summary')
+  summary.textContent = `Review ${group.members.length} chunks`
+  const chunkList = document.createElement('div')
+  chunkList.className = 'dandi-chunk-list'
+  chunkList.append(
+    ...group.members.map(({ asset, chunk }) =>
+      createDandiChunkResult(asset, chunk),
+    ),
+  )
+  chunks.append(summary, chunkList)
+  article.append(header, chunks)
+  return article
+}
+
+function renderDandiResults(assets: DandiZarrAsset[]): {
+  groupCount: number
+  ungroupedCount: number
+} {
+  els.dandiResults.replaceChildren()
+  dandiAssetByStoreUrl.clear()
+  for (const asset of assets) dandiAssetByStoreUrl.set(asset.storeUrl, asset)
+
+  const hierarchy = buildDandiZarrAssetHierarchy(assets)
+  const groupsBySubject = new Map<string, DandiZarrAssetGroup[]>()
+  for (const group of hierarchy.groups) {
+    const subjectGroups = groupsBySubject.get(group.subject) ?? []
+    subjectGroups.push(group)
+    groupsBySubject.set(group.subject, subjectGroups)
+  }
+
+  for (const [subject, subjectGroups] of groupsBySubject) {
+    const subjectDetails = document.createElement('details')
+    subjectDetails.className = 'dandi-subject'
+    subjectDetails.open = groupsBySubject.size === 1
+    const subjectSummary = document.createElement('summary')
+    const subjectName = document.createElement('strong')
+    subjectName.textContent = `Subject ${subject}`
+    const sampleKeys = new Set(
+      subjectGroups.map((group) => `${group.session}\u0000${group.sample}`),
+    )
+    const subjectMetadata = document.createElement('small')
+    subjectMetadata.textContent = `${sampleKeys.size} sample session${sampleKeys.size === 1 ? '' : 's'} · ${subjectGroups.reduce((sum, group) => sum + group.members.length, 0).toLocaleString()} stores`
+    subjectSummary.append(subjectName, subjectMetadata)
+    subjectDetails.append(subjectSummary)
+
+    const groupsBySample = new Map<string, DandiZarrAssetGroup[]>()
+    for (const group of subjectGroups) {
+      const sampleKey = `${group.session}\u0000${group.sample}`
+      const sampleGroups = groupsBySample.get(sampleKey) ?? []
+      sampleGroups.push(group)
+      groupsBySample.set(sampleKey, sampleGroups)
+    }
+
+    for (const sampleGroups of groupsBySample.values()) {
+      const first = sampleGroups[0]!
+      const sampleDetails = document.createElement('details')
+      sampleDetails.className = 'dandi-sample'
+      sampleDetails.open = groupsBySample.size === 1
+      const sampleSummary = document.createElement('summary')
+      const sampleName = document.createElement('strong')
+      sampleName.textContent = `Sample ${first.sample}`
+      const sampleMetadata = document.createElement('small')
+      sampleMetadata.textContent = `Session ${first.session} · ${sampleGroups.length} stain group${sampleGroups.length === 1 ? '' : 's'}`
+      sampleSummary.append(sampleName, sampleMetadata)
+      sampleDetails.append(sampleSummary)
+      for (const group of sampleGroups) {
+        sampleDetails.append(createDandiStainGroup(group))
+      }
+      subjectDetails.append(sampleDetails)
+    }
+    els.dandiResults.append(subjectDetails)
+  }
+
+  if (hierarchy.ungrouped.length > 0) {
+    const ungrouped = document.createElement('details')
+    ungrouped.className = 'dandi-subject'
+    const summary = document.createElement('summary')
+    summary.textContent = `Other results · ${hierarchy.ungrouped.length}`
+    ungrouped.append(summary)
+    for (const asset of hierarchy.ungrouped) {
+      ungrouped.append(createDandiChunkResult(asset))
+    }
+    els.dandiResults.append(ungrouped)
+  }
+
+  syncDandiSelection()
+  syncDandiGroupActions()
+  return {
+    groupCount: hierarchy.groups.length,
+    ungroupedCount: hierarchy.ungrouped.length,
+  }
 }
 
 async function searchDandiAssets(): Promise<void> {
@@ -1070,11 +1258,13 @@ async function searchDandiAssets(): Promise<void> {
       { signal: controller.signal },
     )
     if (controller.signal.aborted) return
-    renderDandiResults(result.assets)
+    const hierarchy = renderDandiResults(result.assets)
     els.dandiSearchStatus.value =
       result.count === 0
         ? 'No matching OME-Zarr assets.'
-        : `Showing ${result.assets.length} of ${result.count.toLocaleString()} matching OME-Zarr assets.`
+        : result.complete
+          ? `Showing ${result.assets.length.toLocaleString()} OME-Zarr stores in ${hierarchy.groupCount.toLocaleString()} stain group${hierarchy.groupCount === 1 ? '' : 's'}${hierarchy.ungroupedCount > 0 ? `, plus ${hierarchy.ungroupedCount.toLocaleString()} other result${hierarchy.ungroupedCount === 1 ? '' : 's'}` : ''}.`
+          : `Showing the first ${result.assets.length.toLocaleString()} of ${result.count.toLocaleString()} matching OME-Zarr stores. Refine the search to browse complete stain groups.`
   } catch (error) {
     if (controller.signal.aborted) return
     els.dandiSearchStatus.value =
@@ -1088,17 +1278,16 @@ async function searchDandiAssets(): Promise<void> {
 }
 
 function addSelectedDandiAssets(): void {
-  const selectedUrls = [
+  const selectedAssets = [
     ...els.dandiResults.querySelectorAll<HTMLInputElement>(
       'input[type="checkbox"]:checked',
     ),
-  ].map((input) => input.value)
-  if (selectedUrls.length === 0) return
-  selectedDandiStoreUrls = [...new Set([...selectedDandiStoreUrls, ...selectedUrls])]
-  shouldInitializeCustomSource = true
-  renderSelectedDandiStores()
-  updateUrlFromControls()
-  els.dandiSearchStatus.value = `${selectedUrls.length} store${selectedUrls.length === 1 ? '' : 's'} selected. Press Load volume when ready.`
+  ].flatMap((input) => {
+    const asset = dandiAssetByStoreUrl.get(input.value)
+    return asset ? [asset] : []
+  })
+  if (selectedAssets.length === 0) return
+  addDandiAssets(selectedAssets)
 }
 
 function normalizeZarrStoreUrl(rawUrl: string): string {
@@ -3759,6 +3948,9 @@ async function main(): Promise<void> {
     })
   }
   els.addDandiSelection.addEventListener('click', addSelectedDandiAssets)
+  els.clearDandiSelection.addEventListener('click', () => {
+    void clearSelectedDandiAssets()
+  })
   els.reload.addEventListener('click', () => {
     void reloadVolume({ reloadSource: true })
   })

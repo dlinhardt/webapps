@@ -541,23 +541,27 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(page.locator("#activeLevel")).not.toContainText("2 translated stores");
 });
 
-test("DANDI assets are searchable and selectable", async ({ page }) => {
-  const zarrId = "56509720-870c-4f43-ae41-7b75f9590722";
+test("DANDI assets are grouped by stain and selectable as a chunk set", async ({ page }) => {
+  const zarrIds = [
+    "56509720-870c-4f43-ae41-7b75f9590722",
+    "b2802fac-cb30-4c25-bd16-09666706c91a",
+    "e8633ce6-0922-4de1-a453-8ffbed48f1d2",
+  ];
   let requestedGlob = "";
   await page.route("https://api.dandiarchive.org/api/dandisets/000108/versions/draft/assets/**", async (route) => {
     requestedGlob = new URL(route.request().url()).searchParams.get("glob") ?? "";
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        count: 1,
+        count: 3,
         next: null,
         previous: null,
-        results: [{
-          asset_id: "f81985a5-8167-4df0-bfc2-46a155214543",
-          path: "sub-MITU01/ses-test/micr/sub-MITU01_sample-127_stain-LEC_chunk-1_SPIM.ome.zarr",
+        results: [10, 2, 1].map((chunk, index) => ({
+          asset_id: `asset-${chunk}`,
+          path: `sub-MITU01/ses-test/micr/sub-MITU01_ses-test_sample-127_stain-LEC_run-1_chunk-${chunk}_SPIM.ome.zarr`,
           size: 37_700_000_000,
-          zarr: zarrId,
-        }],
+          zarr: zarrIds[index],
+        })),
       }),
     });
   });
@@ -565,20 +569,32 @@ test("DANDI assets are searchable and selectable", async ({ page }) => {
   await page.goto("/?source=dandi");
   await expect(page.locator("#dandiArchiveControl")).toBeVisible();
   await expect(page.locator("#zarrUrlControl")).toBeHidden();
-  await page.locator("#dandiQuery").fill("sample-127 LEC chunk-1");
+  await expect(page.getByRole("button", { name: "Clear all selected stores" })).toBeDisabled();
+  await page.locator("#dandiQuery").fill("sample-127 LEC");
   await page.getByRole("button", { name: "Search" }).click();
-  await expect(page.locator("#dandiSearchStatus")).toContainText("Showing 1 of 1");
-  expect(requestedGlob).toBe("*sample-127*LEC*chunk-1*.ome.zarr");
-  await expect(page.locator(".dandi-result")).toContainText("sample-127_stain-LEC_chunk-1");
-  await page.locator(".dandi-result input[type=checkbox]").check();
-  await page.getByRole("button", { name: "Add 1 selected store" }).click();
+  await expect(page.locator("#dandiSearchStatus")).toContainText("Showing 3 OME-Zarr stores in 1 stain group");
+  expect(requestedGlob).toBe("*sample-127*LEC*.ome.zarr");
+  await expect(page.getByText("Subject MITU01", { exact: true })).toBeVisible();
+  await expect(page.getByText("Sample 127", { exact: true })).toBeVisible();
+  await expect(page.locator(".dandi-stain-group")).toContainText("LEC");
+  await page.getByText("Review 3 chunks", { exact: true }).click();
+  await expect(page.locator(".dandi-result strong")).toHaveText([
+    "Chunk 1",
+    "Chunk 2",
+    "Chunk 10",
+  ]);
+  await page.getByRole("button", { name: "Add all 3 LEC chunks from sample 127" }).click();
   await expect(page.locator("#source")).toHaveValue("dandi");
-  await expect(page.locator("#dandiSelectedStores")).toContainText(zarrId);
-  await expect(page).toHaveURL(new RegExp(`url=.*${zarrId}`));
+  await expect(page.locator("#dandiSelectedStores .selected-store-row")).toHaveCount(3);
+  await expect(page.locator("#dandiSelectedStores")).toContainText("chunk-1_SPIM.ome.zarr");
+  await expect(page.getByRole("button", { name: "Clear all selected stores" })).toBeEnabled();
+  await expect(page).toHaveURL(new RegExp(`url=.*${zarrIds[0]}`));
   await expect(page).toHaveURL(/source=dandi/);
-  await page.getByRole("button", { name: "Remove DANDI store 1" }).click();
+  await page.getByRole("button", { name: "Clear all selected stores" }).click();
   await expect(page.locator("#dandiSelectedStores")).toBeHidden();
-  await expect(page).not.toHaveURL(new RegExp(`url=.*${zarrId}`));
+  await expect(page.getByRole("button", { name: "Clear all selected stores" })).toBeDisabled();
+  await expect(page.locator("#dandiSearchStatus")).toHaveText("All selected stores cleared.");
+  await expect(page).not.toHaveURL(new RegExp(`url=.*${zarrIds[0]}`));
 });
 
 test("generic uint16 share contrast is replaced from streamed signal", async ({ page }) => {
