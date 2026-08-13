@@ -70,6 +70,15 @@
           </div>
 
           <div class="field custom-url" id="zarrUrlControl" hidden>
+            <label for="customStainName">
+              <span>Stain name</span>
+              <input
+                id="customStainName"
+                type="text"
+                placeholder="e.g. DAPI"
+                autocomplete="off"
+              />
+            </label>
             <span>Store URLs</span>
             <div id="zarrUrls" class="zarr-url-list">
               <div class="zarr-url-row">
@@ -91,13 +100,28 @@
                 >Remove</button>
               </div>
             </div>
-            <button id="addZarrUrl" class="add-url-button" type="button">+ Add another URL</button>
+            <div class="custom-layer-actions">
+              <button id="addZarrUrl" class="add-url-button" type="button">+ Add another URL</button>
+              <button id="newCustomLayer" class="add-url-button" type="button">+ New stain layer</button>
+            </div>
             <small>Each store is placed from its OME-NGFF translation coordinates. All selected-level voxel spacings must match.</small>
           </div>
 
           <div class="source-actions">
             <button class="primary-button" id="reload" type="button">Load volume</button>
-            <button id="clearDandiSelection" type="button" disabled>Clear all selected stores</button>
+            <button id="clearDandiSelection" type="button" disabled>Clear all layers</button>
+          </div>
+          <div
+            id="stainLayersControl"
+            class="stain-layer-list"
+            aria-label="Loaded stain layers"
+            hidden
+          >
+            <div class="stain-layer-list-heading">
+              <strong>Stain layers</strong>
+              <small>Select a layer to work with it, or blend loaded stains with their opacity sliders.</small>
+            </div>
+            <div id="stainLayers"></div>
           </div>
           <div
             id="dandiSelectedStores"

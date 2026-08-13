@@ -74,7 +74,10 @@ if (typeof window === 'undefined') {
         window.sessionStorage.removeItem("coiReloadedBySelf");
         const coepDegrading = reloadedBySelf === "coepdegrade";
         const coi = {
-            shouldRegister: () => !reloadedBySelf,
+            // A first-install update can reload before clients.claim() gives
+            // the new page a controller. Do not let the one-shot reload marker
+            // suppress the recovery registration in that state.
+            shouldRegister: () => !reloadedBySelf || !navigator.serviceWorker?.controller,
             shouldDeregister: () => false,
             coepCredentialless: () => true,
             coepDegrade: () => true,

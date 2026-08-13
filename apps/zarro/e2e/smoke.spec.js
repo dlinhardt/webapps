@@ -146,11 +146,32 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   const chunkRequestsByLevel = new Map();
   let delayLevelOneChunks = false;
   let delayedLevelOneChunkRequests = 0;
+  let delayDapiMetadata = false;
+  let dapiRootMetadataRequests = 0;
+  let gateLayerRestore = false;
+  let leftChunkSettled = false;
+  let dapiStartedBeforeLeftSettled = false;
+  let gateDualLayerLod = false;
+  let leftLodSettled = false;
+  let dapiLodStartedBeforeLeftSettled = false;
   const group = JSON.stringify({ zarr_format: 2 });
   await page.route("**/test-mosaic/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    const isRight = path.includes("/right/");
+    const isDapi = path.includes("/dapi/");
+    const isRight = path.includes("/right/") || isDapi;
+    if (isDapi && path.endsWith("/.zattrs")) dapiRootMetadataRequests++;
+    if (
+      gateLayerRestore &&
+      isDapi &&
+      path.endsWith("/.zattrs") &&
+      !leftChunkSettled
+    ) {
+      dapiStartedBeforeLeftSettled = true;
+    }
+    if (delayDapiMetadata && isDapi && /\.(?:zattrs|zarray)$/.test(path)) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
     if (path.endsWith("/.zgroup")) {
       await route.fulfill({ contentType: "application/json", body: group });
     } else if (path.endsWith("/.zattrs") && !/\/\d+\/\.zattrs$/.test(path)) {
@@ -168,7 +189,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
               coordinateTransformations: [
                 { type: "scale", scale: [0.001, 0.001, 0.001].map((value) => value * 2 ** level) },
                 // Deliberately fractional and overlapping at every level.
-                { type: "translation", translation: [0, 0, isRight ? 0.0135 : 0] },
+                { type: "translation", translation: [0, 0, isRight && !isDapi ? 0.0135 : 0] },
               ],
             })),
           }],
@@ -198,6 +219,22 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
       if (delayLevelOneChunks && level === 1) {
         delayedLevelOneChunkRequests++;
         await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      if (gateLayerRestore && !isRight) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        leftChunkSettled = true;
+      }
+      if (gateDualLayerLod && level === 1 && !isRight) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        leftLodSettled = true;
+      }
+      if (
+        gateDualLayerLod &&
+        level === 1 &&
+        isDapi &&
+        !leftLodSettled
+      ) {
+        dapiLodStartedBeforeLeftSettled = true;
       }
       chunkRequestsByLevel.set(
         level,
@@ -539,7 +576,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   delayLevelOneChunks = true;
   await page.locator("#zoom").fill("1");
   await page.getByRole("button", { name: "Apply" }).click();
-  await expect(page.locator("#activeLevel")).toContainText("target L1");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-requested-level", "1");
   await expect.poll(() => delayedLevelOneChunkRequests).toBeGreaterThan(0);
   await expect.poll(async () => Number(
     await page.locator("#tileLoading").getAttribute("data-loading"),
@@ -549,7 +586,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   // plan must win, and a crosshair click made during the swap must survive.
   await page.locator("#zoom").fill("0");
   await page.getByRole("button", { name: "Apply" }).click();
-  await expect(page.locator("#activeLevel")).toContainText("target L0");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-requested-level", "0");
   const locationChangesBeforeReloadClick = await page.evaluate(
     () => window.__locationChangeCount,
   );
@@ -563,7 +600,8 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     await page.evaluate(() => window.__copiedText),
   ).searchParams.get("crosshair");
 
-  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-requested-level", "0");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-delivered-level", "0");
   await page.waitForTimeout(900);
   await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
   expect(cancelledChunkErrors).toEqual([]);
@@ -583,6 +621,157 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(page).not.toHaveURL(/test-mosaic%2Fright/);
   await expect(page).toHaveURL(/test-mosaic%2Fleft/);
   await expect(page.locator("#activeLevel")).not.toContainText("2 translated stores");
+
+  await page.getByRole("button", { name: "New stain layer" }).click();
+  await page.getByLabel("Stain name").fill("DAPI");
+  await page.getByLabel("OME-Zarr store URL 1").fill("http://localhost:4173/test-mosaic/dapi");
+  await page.getByRole("button", { name: "Load volume" }).click();
+  await expect(page.getByRole("button", { name: "Show DAPI stain layer" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page).toHaveURL(/test-mosaic%2Fdapi/);
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-requested-level", "0");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-delivered-level", "0");
+  await expect.poll(async () => (
+    (await page.locator("#nv-canvas").getAttribute("data-loaded-stain-layers"))
+      ?.split(",").filter(Boolean).length ?? 0
+  ), { timeout: 30_000 }).toBe(2);
+  const dapiLayerId = new URL(page.url()).searchParams.get("activeLayer");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-niivue-base-stain-layer",
+    dapiLayerId,
+  );
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-niivue-volume-opacities",
+    "1,0",
+  );
+  const requestsBeforeCachedSwitch = {
+    left: leftChunkRequests,
+    right: rightChunkRequests,
+  };
+
+  await page.getByRole("button", { name: "Show left stain layer" }).click();
+  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Show DAPI stain layer" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page).toHaveURL(/test-mosaic%2Fleft/);
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
+  await page.waitForTimeout(400);
+  expect(leftChunkRequests).toBe(requestsBeforeCachedSwitch.left);
+  expect(rightChunkRequests).toBe(requestsBeforeCachedSwitch.right);
+  await page.getByLabel(/Window level/).fill("100");
+  await page.getByLabel(/Window width/).fill("20");
+  const leftAutoContrast = page.getByRole("button", { name: "Auto contrast" });
+  await expect(leftAutoContrast).toBeEnabled();
+  await leftAutoContrast.click();
+  await expect(page.getByLabel(/Window level/)).toHaveValue("30");
+  await expect(page.getByLabel(/Window width/)).toHaveValue("60");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-min", "0");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-max", "60");
+  const leftOnlyCanvas = await page.locator("#nv-canvas").screenshot();
+  await page.getByLabel("DAPI opacity").fill("50");
+  await expect(page.getByLabel("DAPI opacity")).toHaveValue("50");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-visible-stain-layers",
+    /stain-.*,stain-.*/,
+  );
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-niivue-volume-opacities",
+    "1,0.5",
+  );
+  await expect.poll(async () => {
+    const blendedCanvas = await page.locator("#nv-canvas").screenshot();
+    return blendedCanvas.equals(leftOnlyCanvas);
+  }).toBe(false);
+  await page.getByRole("button", { name: "Copy share link" }).click();
+  const layeredShareUrl = await page.evaluate(() => window.__copiedText);
+  expect(new URL(layeredShareUrl).searchParams.get("crosshair")).toBe(clickedCrosshair);
+  gateLayerRestore = true;
+  leftChunkSettled = false;
+  dapiStartedBeforeLeftSettled = false;
+  await page.goto(layeredShareUrl);
+  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Show DAPI stain layer" })).toBeVisible();
+  await expect(page.getByLabel("DAPI opacity")).toHaveValue("50");
+  await expect.poll(async () => (
+    (await page.locator("#nv-canvas").getAttribute("data-loaded-stain-layers"))
+      ?.split(",").filter(Boolean).length ?? 0
+  ), { timeout: 30_000 }).toBe(2);
+  expect(dapiStartedBeforeLeftSettled).toBe(false);
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
+
+  // A shared link can describe an unloaded, transparent stain. Dragging that
+  // stain's opacity must launch one load and preserve the user's active layer,
+  // even though a range input emits many events before metadata arrives.
+  const unloadedLayerUrl = new URL(layeredShareUrl);
+  const sharedLayers = JSON.parse(unloadedLayerUrl.searchParams.get("layers"));
+  const leftLayer = sharedLayers.find((layer) => layer.name === "left");
+  const dapiLayer = sharedLayers.find((layer) => layer.name === "DAPI");
+  for (const layer of sharedLayers) layer.opacity = layer.id === leftLayer.id ? 1 : 0;
+  unloadedLayerUrl.searchParams.set("layers", JSON.stringify(sharedLayers));
+  unloadedLayerUrl.searchParams.set("activeLayer", leftLayer.id);
+  delayDapiMetadata = true;
+  await page.goto(unloadedLayerUrl.toString());
+  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => (
+    (await page.locator("#nv-canvas").getAttribute("data-loaded-stain-layers"))
+      ?.split(",").filter(Boolean).length ?? 0
+  )).toBe(1);
+  const dapiRequestsBeforeDrag = dapiRootMetadataRequests;
+  await page.getByLabel("DAPI opacity").evaluate((input) => {
+    for (const value of [5, 10, 20]) {
+      input.value = String(value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  await page.waitForTimeout(150);
+  await page.getByLabel("DAPI opacity").evaluate((input) => {
+    for (const value of [30, 40]) {
+      input.value = String(value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  await expect(page.getByLabel("DAPI opacity")).toHaveValue("40");
+  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("left opacity")).toHaveValue("100");
+  await expect.poll(async () => (
+    (await page.locator("#nv-canvas").getAttribute("data-loaded-stain-layers"))
+      ?.split(",").filter(Boolean).length ?? 0
+  ), { timeout: 30_000 }).toBe(2);
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-niivue-volume-opacities",
+    "1,0.4",
+  );
+  await expect(page.locator("#tileLoading")).toHaveAttribute(
+    "data-loading",
+    "0",
+    { timeout: 30_000 },
+  );
+  expect(dapiRootMetadataRequests - dapiRequestsBeforeDrag).toBe(5);
+  expect(dapiLayer).toBeTruthy();
+
+  gateDualLayerLod = true;
+  leftLodSettled = false;
+  dapiLodStartedBeforeLeftSettled = false;
+  await page.getByLabel("Zoom level").fill("1");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "data-requested-level",
+    "1",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "data-delivered-level",
+    "1",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator("#tileLoading")).toHaveAttribute(
+    "data-loading",
+    "0",
+    { timeout: 30_000 },
+  );
+  await expect.poll(async () => Number(
+    await page.locator("#nv-canvas").getAttribute("data-stream-resident"),
+  )).toBeGreaterThan(0);
+  expect(dapiLodStartedBeforeLeftSettled).toBe(false);
 });
 
 test("DANDI assets are grouped by stain and selectable as a chunk set", async ({ page }) => {
@@ -616,8 +805,8 @@ test("DANDI assets are grouped by stain and selectable as a chunk set", async ({
   await page.goto("/?source=dandi");
   await expect(page.locator("#dandiArchiveControl")).toBeVisible();
   await expect(page.locator("#zarrUrlControl")).toBeHidden();
-  await expect(page.getByRole("button", { name: "Clear all selected stores" })).toBeDisabled();
-  const clearButtonBox = await page.getByRole("button", { name: "Clear all selected stores" }).boundingBox();
+  await expect(page.getByRole("button", { name: "Clear all layers" })).toBeDisabled();
+  const clearButtonBox = await page.getByRole("button", { name: "Clear all layers" }).boundingBox();
   const loadButtonBox = await page.getByRole("button", { name: "Load volume" }).boundingBox();
   expect(clearButtonBox).not.toBeNull();
   expect(loadButtonBox).not.toBeNull();
@@ -660,13 +849,13 @@ test("DANDI assets are grouped by stain and selectable as a chunk set", async ({
   expect(loadButtonBox.y + loadButtonBox.height).toBeLessThanOrEqual(selectedListBox.y);
   expect(clearButtonBox.y + clearButtonBox.height).toBeLessThanOrEqual(selectedListBox.y);
   await expect(page.locator("#dandiSelectedStores")).toContainText("chunk-1_SPIM.ome.zarr");
-  await expect(page.getByRole("button", { name: "Clear all selected stores" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Clear all layers" })).toBeEnabled();
   await expect(page).toHaveURL(new RegExp(`url=.*${zarrIds[0]}`));
   await expect(page).toHaveURL(/source=dandi/);
-  await page.getByRole("button", { name: "Clear all selected stores" }).click();
+  await page.getByRole("button", { name: "Clear all layers" }).click();
   await expect(page.locator("#dandiSelectedStores")).toBeHidden();
-  await expect(page.getByRole("button", { name: "Clear all selected stores" })).toBeDisabled();
-  await expect(page.locator("#dandiSearchStatus")).toHaveText("All selected stores cleared.");
+  await expect(page.getByRole("button", { name: "Clear all layers" })).toBeDisabled();
+  await expect(page.locator("#dandiSearchStatus")).toHaveText("All stain layers cleared.");
   await expect(page).not.toHaveURL(new RegExp(`url=.*${zarrIds[0]}`));
 });
 

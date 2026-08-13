@@ -66,6 +66,16 @@ import {
   type ShareableViewState,
 } from './share_state'
 import {
+  addStainLayer,
+  parseStainLayers,
+  selectExclusiveStainLayer,
+  serializeStainLayers,
+  setStainLayerOpacity,
+  stainLayerPayloadHasOpacity,
+  updateStainLayer,
+  type StainLayer,
+} from './stain_layers'
+import {
   axialSliceFraction,
   axialSliceIndex,
   crosshairAppearanceForSpacing,
@@ -360,9 +370,11 @@ const els = {
   clearMeasurements: el<HTMLButtonElement>('clearMeasurements'),
   measurementStatus: el<HTMLOutputElement>('measurementStatus'),
   zarrUrl: el<HTMLInputElement>('zarrUrl'),
+  customStainName: el<HTMLInputElement>('customStainName'),
   removeZarrUrl: el<HTMLButtonElement>('removeZarrUrl'),
   zarrUrls: el<HTMLDivElement>('zarrUrls'),
   addZarrUrl: el<HTMLButtonElement>('addZarrUrl'),
+  newCustomLayer: el<HTMLButtonElement>('newCustomLayer'),
   dandiArchiveControl: el<HTMLDivElement>('dandiArchiveControl'),
   zarrUrlControl: el<HTMLDivElement>('zarrUrlControl'),
   dandisetId: el<HTMLInputElement>('dandisetId'),
@@ -373,6 +385,8 @@ const els = {
   dandiResults: el<HTMLDivElement>('dandiResults'),
   clearDandiSelection: el<HTMLButtonElement>('clearDandiSelection'),
   dandiSelectedStores: el<HTMLDivElement>('dandiSelectedStores'),
+  stainLayersControl: el<HTMLDivElement>('stainLayersControl'),
+  stainLayers: el<HTMLDivElement>('stainLayers'),
   showCrosshair: el<HTMLInputElement>('showCrosshair'),
   showStats: el<HTMLInputElement>('showStats'),
   reload: el<HTMLButtonElement>('reload'),
@@ -402,15 +416,22 @@ let pollHandle = 0
 let displayedLoadingTiles = -1
 let displayedCrosshairPath = ''
 let shouldInitializeCustomSource = true
-let selectedDandiStoreUrls: string[] = []
+let stainLayers: StainLayer[] = []
+let activeStainLayerId: string | null = null
 let requestedBaseLevel: number | null = null
 let fixedZarrLevel: number | null = null
 let focusFraction: Shape3 = [0.5, 0.5, 0.5]
 let lastPanForFocus: Shape3 = [0, 0, 0]
 let lastAdaptiveRequestKey: string | null = null
 let suppressAdaptiveEvents = false
+let stainLayerSceneMutationDepth = 0
 let deferredAdaptiveLod = false
 let deferredAdaptiveFocusMoved = false
+let adaptiveLodRunning = false
+let adaptiveLodRequested = false
+let multiStainDetailChangeRequested = false
+let multiStainRebuildPromise: Promise<void> | null = null
+let streamedVolumeRevision = 0
 let downloadInProgress = false
 let renderCropGeometry: ExportGeometry | null = null
 let sliceViewBeforeRender: ViewState | null = null
@@ -419,12 +440,36 @@ let pendingZoomLevel: number | null = null
 let dandiSearchController: AbortController | null = null
 const dandiAssetByStoreUrl = new Map<string, DandiZarrAsset>()
 const dandiGroupByAddButton = new WeakMap<HTMLButtonElement, DandiZarrAssetGroup>()
-const reloadQueue = new LatestTaskQueue()
+// NiiVue renderer mutations must complete once started: aborting a reload can
+// leave queued GPU bricks detached from their cancelled read session.
+const reloadQueue = new LatestTaskQueue(false)
+const stainLayerDisplayQueue = new LatestTaskQueue(false)
 let initialSharedView: ViewState | null = null
 let initialSharedSettings: ShareableViewState | null = null
 let manualWindowRevision = 0
 let autoWindowSession: AutoWindowSession | null = null
-let autoContrastState: AutoContrastState | null = null
+const autoContrastStates = new WeakMap<
+  OmezarrSource | OmezarrMosaicSource,
+  AutoContrastState
+>()
+
+interface StainLayerRuntime {
+  layerId: string
+  source: OmezarrSource | OmezarrMosaicSource
+  readSession: ZarrReadSession
+  chunkedVolume: NVChunkedVolume
+  detailLevel: number
+  lastAdaptiveRequestKey: string | null
+}
+
+const stainLayerRuntimes = new Map<string, StainLayerRuntime>()
+const stainLayerRuntimeLoads = new Map<
+  string,
+  Promise<StainLayerRuntime | null>
+>()
+const stainLayerOpacityHandles = new Map<string, number>()
+const stainLayerOpacityRevisions = new Map<string, number>()
+const STAIN_LAYER_OPACITY_DELAY_MS = 100
 
 interface AutoContrastState {
   source: OmezarrSource | OmezarrMosaicSource
@@ -746,14 +791,14 @@ function setWindowControls(win: DisplayWindow, dtype: SupportedDtype): void {
 
 function prepareAutoWindow(source: LoadedSource): void {
   autoWindowSession = null
-  autoContrastState = null
   els.autoContrast.disabled = true
   if (source.kind === 'synthetic') return
-  autoContrastState = {
+  const contrast: AutoContrastState = {
     source,
     estimator: new IntensityWindowEstimator(source.dtype),
     window: null,
   }
+  autoContrastStates.set(source, contrast)
   const currentWindow = parseWindow(source.defaultWindow)
   if (!isGenericDtypeWindow(source.dtype, currentWindow)) return
   autoWindowSession = {
@@ -768,12 +813,12 @@ function observeChunkForAutoWindow(
   source: OmezarrSource | OmezarrMosaicSource,
   bytes: Uint8Array,
 ): void {
-  const contrast = autoContrastState
-  if (!contrast || contrast.source !== source) return
+  const contrast = autoContrastStates.get(source)
+  if (!contrast) return
   const estimated = contrast.estimator.observe(bytes)
   if (estimated) {
     contrast.window = estimated
-    els.autoContrast.disabled = false
+    if (activeSource === source) els.autoContrast.disabled = false
   }
   const session = autoWindowSession
   if (
@@ -784,14 +829,20 @@ function observeChunkForAutoWindow(
     return
   }
   session.observedChunks++
-  if (estimated && estimated.max !== session.lastMaximum) {
+  if (
+    estimated &&
+    estimated.max !== session.lastMaximum &&
+    activeSource === source
+  ) {
     session.lastMaximum = estimated.max
     source.defaultWindow = estimated
     setWindowControls(estimated, source.dtype)
     window.setTimeout(() => {
       if (!nv || activeSource !== source || nv.volumes.length === 0) return
+      const volumeIndex = activeVolumeIndex()
+      if (volumeIndex < 0) return
       void nv
-        .setVolume(0, { calMin: estimated.min, calMax: estimated.max })
+        .setVolume(volumeIndex, { calMin: estimated.min, calMax: estimated.max })
         .catch((error: unknown) => {
           showFallback(
             `Automatic contrast failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -805,11 +856,14 @@ function observeChunkForAutoWindow(
 }
 
 function applyAutoContrast(): void {
-  const contrast = autoContrastState
+  const source = activeSource
+  const contrast =
+    source && source.kind !== 'synthetic'
+      ? autoContrastStates.get(source)
+      : null
   if (
     !contrast?.window ||
-    !activeSource ||
-    activeSource !== contrast.source ||
+    !source ||
     !nv ||
     nv.volumes.length === 0
   ) {
@@ -843,6 +897,20 @@ function handleWindowRangeInput(changed: 'min' | 'max'): void {
   handleWindowInput()
 }
 
+async function applyColormap(): Promise<void> {
+  if (!nv) return
+  const volumeIndex = activeVolumeIndex()
+  if (volumeIndex < 0) return
+  try {
+    await nv.setVolume(volumeIndex, { colormap: els.colormap.value })
+    updateUrlFromControls()
+  } catch (error) {
+    showFallback(
+      `Colour map update failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 function scheduleWindowUpdate(): void {
   syncWindowControlValues()
   delete els.canvas.dataset.windowMin
@@ -851,6 +919,8 @@ function scheduleWindowUpdate(): void {
   windowUpdateHandle = window.setTimeout(() => {
     const source = activeSource
     if (!nv || !source || nv.volumes.length === 0) return
+    const volumeIndex = activeVolumeIndex()
+    if (volumeIndex < 0) return
     const revision = manualWindowRevision
     const win = windowFromLevelWidth(
       Number(els.windowLevel.value),
@@ -858,7 +928,7 @@ function scheduleWindowUpdate(): void {
     )
     source.defaultWindow = win
     void nv
-      .setVolume(0, { calMin: win.min, calMax: win.max })
+      .setVolume(volumeIndex, { calMin: win.min, calMax: win.max })
       .then(() => {
         if (activeSource !== source || manualWindowRevision !== revision) return
         els.canvas.dataset.windowMin = String(win.min)
@@ -900,9 +970,221 @@ function customProfile(rawUrl: string): OmezarrProfile {
 }
 
 function currentStoreUrls(): string[] {
-  return els.source.value === 'dandi'
-    ? selectedDandiStoreUrls
-    : customStoreUrls()
+  const layer = activeStainLayer()
+  if (layer) return layer.storeUrls
+  return els.source.value === 'custom' ? customStoreUrls() : []
+}
+
+function activeStainLayer(): StainLayer | null {
+  return stainLayers.find(({ id }) => id === activeStainLayerId) ?? null
+}
+
+function activeStainRuntime(): StainLayerRuntime | null {
+  return activeStainLayerId
+    ? (stainLayerRuntimes.get(activeStainLayerId) ?? null)
+    : null
+}
+
+function volumeIndexForRuntime(runtime: StainLayerRuntime): number {
+  if (!nv) return -1
+  return nv.volumes.findIndex(
+    (volume) =>
+      volume === runtime.chunkedVolume.volume ||
+      volume.id === runtime.chunkedVolume.volume.id,
+  )
+}
+
+function activeVolumeIndex(): number {
+  const runtime = activeStainRuntime()
+  if (runtime) return volumeIndexForRuntime(runtime)
+  return nv && nv.volumes.length > 0 ? 0 : -1
+}
+
+function activeVolume(): NVImage | null {
+  const index = activeVolumeIndex()
+  return index >= 0 ? (nv?.volumes[index] ?? null) : null
+}
+
+function syncStainLayerTelemetry(): void {
+  els.canvas.dataset.loadedStainLayers = [...stainLayerRuntimes.keys()].join(',')
+  els.canvas.dataset.visibleStainLayers = stainLayers
+    .filter(({ id, opacity }) => opacity > 0 && stainLayerRuntimes.has(id))
+    .map(({ id }) => id)
+    .join(',')
+  els.canvas.dataset.stainLayerOpacities = stainLayers
+    .map(({ id, opacity }) => `${id}:${Number(opacity.toFixed(2))}`)
+    .join(',')
+  els.canvas.dataset.niivueVolumeOpacities = nv
+    ? nv.volumes.map(({ opacity }) => String(opacity)).join(',')
+    : ''
+  els.canvas.dataset.niivueBaseStainLayer = nv
+    ? ([...stainLayerRuntimes.values()].find(
+        (runtime) => volumeIndexForRuntime(runtime) === 0,
+      )?.layerId ?? '')
+    : ''
+}
+
+function activateStainRuntime(runtime: StainLayerRuntime): void {
+  activeSource = runtime.source
+  activeReadSession = runtime.readSession
+  chunkedVolume = runtime.chunkedVolume
+  chunkPlan = runtime.chunkedVolume.currentPlan
+  currentDetailLevel = runtime.detailLevel
+  lastAdaptiveRequestKey = runtime.lastAdaptiveRequestKey
+  requestedBaseLevel = runtime.source.baseLevel
+  setWindowControls(runtime.source.defaultWindow, runtime.source.dtype)
+  els.autoContrast.disabled = !autoContrastStates.get(runtime.source)?.window
+  els.colormap.value = runtime.chunkedVolume.volume.colormap ?? 'gray'
+  syncZarrLevelControl()
+  syncActiveLodIndicator(chunkPlan)
+  syncViewControls()
+  syncDownloadControl()
+}
+
+function waitForStainLayerUploads(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = performance.now()
+    let sawUploadWork = false
+    let idleSince: number | null = null
+    const check = () => {
+      if (signal?.aborted) {
+        reject(signal.reason)
+        return
+      }
+      const stream = nv?.chunkStreamStats()
+      const elapsed = performance.now() - startedAt
+      const hasUploadWork = Boolean(
+        stream && (stream.pending > 0 || stream.inFlight > 0),
+      )
+      if (hasUploadWork) {
+        sawUploadWork = true
+        idleSince = null
+      } else if (sawUploadWork || elapsed >= 250) {
+        idleSince ??= performance.now()
+        if (performance.now() - idleSince >= 150) {
+          resolve()
+          return
+        }
+      }
+      if (elapsed > 120_000) {
+        reject(new Error('Timed out waiting for streamed stain tiles'))
+        return
+      }
+      window.setTimeout(check, 50)
+    }
+    check()
+  })
+}
+
+async function waitForStainLayerRefocus(
+  controller: NVChunkedVolume,
+  previousPlan: ChunkPlan,
+): Promise<void> {
+  const startedAt = performance.now()
+  while (controller.currentPlan === previousPlan) {
+    if (performance.now() - startedAt > 10_000) {
+      throw new Error('Timed out waiting for a stain detail plan swap')
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 25))
+  }
+
+  // NVChunkedVolume debounces refocus and exposes no public completion promise.
+  // The pinned NiiVue implementation keeps the actual host swap in swapChain;
+  // await it so a second controller cannot enter the shared renderer mid-swap.
+  const internal = controller as unknown as { swapChain?: Promise<void> }
+  await internal.swapChain
+  await waitForStainLayerUploads()
+}
+
+function applyCurrentStainLayerOpacities(
+  baseLayerId?: string | null,
+): Promise<void> {
+  return stainLayerDisplayQueue
+    .run((signal) => updateStainLayerOpacitiesNow(signal, baseLayerId))
+    .then(() => undefined)
+}
+
+async function updateStainLayerOpacitiesNow(
+  signal: AbortSignal,
+  baseLayerId?: string | null,
+): Promise<void> {
+  if (!nv) return
+  const baseRuntime = baseLayerId
+    ? stainLayerRuntimes.get(baseLayerId)
+    : null
+  const baseVolumeIndex = baseRuntime
+    ? volumeIndexForRuntime(baseRuntime)
+    : -1
+  const shouldPromoteBase = baseVolumeIndex > 0
+  const changes = stainLayers.flatMap((layer) => {
+    const runtime = stainLayerRuntimes.get(layer.id)
+    if (!runtime) return []
+    const volumeIndex = volumeIndexForRuntime(runtime)
+    if (volumeIndex < 0) return []
+    const volume = nv!.volumes[volumeIndex]
+    if (!volume || Math.abs((volume.opacity ?? 1) - layer.opacity) < 1e-6) {
+      return []
+    }
+    return [{ volume, opacity: layer.opacity }]
+  })
+  if (changes.length === 0 && !shouldPromoteBase) {
+    syncStainLayerTelemetry()
+    return
+  }
+
+  // A full NiiVue volume update while its asynchronous upload pump is active
+  // can strand pending streamed bricks. Wait for the current working set,
+  // then update every layer in one renderer transaction.
+  await waitForStainLayerUploads(signal)
+  signal.throwIfAborted()
+  for (const { volume, opacity } of changes) volume.opacity = opacity
+  if (shouldPromoteBase) {
+    // The patched NiiVue streamed renderer treats volume 0 as the base and
+    // later volumes as overlays. Keep every controller and its GPU cache,
+    // but put the exclusively selected stain in the base slot so it renders
+    // correctly even when the previous base is fully transparent.
+    await nv.moveVolumeToBottom(baseVolumeIndex)
+  } else {
+    await nv.updateGLVolume()
+  }
+  signal.throwIfAborted()
+  nv.rebakeChunkedOverlays()
+  nv.drawScene()
+  syncStainLayerTelemetry()
+}
+
+async function applyStainLayerOpacity(_layerId: string): Promise<void> {
+  await applyCurrentStainLayerOpacities()
+}
+
+async function applyAllStainLayerOpacities(): Promise<void> {
+  await applyCurrentStainLayerOpacities()
+}
+
+async function removeStainLayerRuntime(layerId: string): Promise<void> {
+  const runtime = stainLayerRuntimes.get(layerId)
+  if (!runtime) return
+  runtime.readSession.abort('Stain layer removed')
+  runtime.chunkedVolume.dispose()
+  const volumeIndex = volumeIndexForRuntime(runtime)
+  stainLayerRuntimes.delete(layerId)
+  if (nv && volumeIndex >= 0) {
+    nv.model.removeVolume(volumeIndex)
+    await nv.updateGLVolume()
+  }
+  syncStainLayerTelemetry()
+}
+
+function selectedStoreUrls(): Set<string> {
+  return new Set(stainLayers.flatMap(({ storeUrls }) => storeUrls))
+}
+
+function layerNameForGroup(group: DandiZarrAssetGroup): string {
+  const detail = [
+    group.run ? `run ${group.run}` : null,
+    group.variant?.replaceAll('_', ' ') ?? null,
+  ].filter(Boolean)
+  return `${group.stain} · sample ${group.sample}${detail.length > 0 ? ` · ${detail.join(' · ')}` : ''}`
 }
 
 function syncUrlRowControls(): void {
@@ -953,13 +1235,52 @@ async function reloadAfterStoreRemoval(): Promise<void> {
   )
 }
 
-function removeCustomUrlRow(row: HTMLElement, input: HTMLInputElement): void {
+function updateActiveCustomLayerFromControls(): void {
+  const layer = activeStainLayer()
+  if (!layer || layer.source !== 'custom') return
+  const storeUrls = customStoreUrls()
+  if (storeUrls.length === 0) return
+  stainLayers = updateStainLayer(stainLayers, layer.id, {
+    name: els.customStainName.value,
+    storeUrls,
+  })
+  renderStainLayers()
+}
+
+async function removeCustomUrlRow(
+  row: HTMLElement,
+  input: HTMLInputElement,
+): Promise<void> {
+  const layerBeforeRemoval = activeStainLayer()
+  const wasLoadedLayer = Boolean(
+    layerBeforeRemoval && stainLayerRuntimes.has(layerBeforeRemoval.id),
+  )
   const rows = [...els.zarrUrls.querySelectorAll<HTMLElement>('.zarr-url-row')]
   if (rows.length === 1) input.value = ''
   else row.remove()
   shouldInitializeCustomSource = true
   syncUrlRowControls()
-  void reloadAfterStoreRemoval()
+  const layer = activeStainLayer()
+  if (layer?.source === 'custom') {
+    stainLayers = updateStainLayer(stainLayers, layer.id, {
+      name: els.customStainName.value,
+      storeUrls: customStoreUrls(),
+    })
+    if (!stainLayers.some(({ id }) => id === layer.id)) {
+      activeStainLayerId = stainLayers[0]?.id ?? null
+      await removeStainLayerRuntime(layer.id)
+      if (activeStainLayerId) {
+        stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
+      }
+    }
+    syncControlsToActiveLayer()
+    renderStainLayers()
+  }
+  if (wasLoadedLayer) {
+    await reloadAfterStoreRemoval()
+  } else {
+    updateUrlFromControls()
+  }
 }
 
 function addCustomUrlInput(value = ''): HTMLInputElement {
@@ -978,6 +1299,8 @@ function addCustomUrlInput(value = ''): HTMLInputElement {
   input.addEventListener('input', () => {
     shouldInitializeCustomSource = true
     syncUrlRowControls()
+    updateActiveCustomLayerFromControls()
+    updateUrlFromControls()
   })
   input.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return
@@ -1000,8 +1323,277 @@ function setCustomStoreUrls(urls: string[]): void {
   syncUrlRowControls()
 }
 
+function renderStainLayers(): void {
+  els.stainLayers.replaceChildren()
+  els.stainLayersControl.hidden = stainLayers.length === 0
+  els.clearDandiSelection.disabled = stainLayers.length === 0
+
+  for (const layer of stainLayers) {
+    const row = document.createElement('div')
+    row.className = 'stain-layer-row'
+    const main = document.createElement('div')
+    main.className = 'stain-layer-main'
+    const select = document.createElement('button')
+    select.type = 'button'
+    select.className = 'stain-layer-select'
+    select.setAttribute('aria-pressed', String(layer.id === activeStainLayerId))
+    select.setAttribute('aria-label', `Show ${layer.name} stain layer`)
+    const name = document.createElement('strong')
+    name.textContent = layer.name
+    const metadata = document.createElement('small')
+    metadata.textContent = `${layer.storeUrls.length} translated chunk${layer.storeUrls.length === 1 ? '' : 's'} · ${layer.source === 'dandi' ? 'DANDI' : 'Custom URL'}`
+    select.append(name, metadata)
+    select.addEventListener('click', () => {
+      void selectStainLayer(layer.id, true)
+    })
+
+    const remove = document.createElement('button')
+    remove.type = 'button'
+    remove.className = 'stain-layer-remove'
+    remove.textContent = 'Remove'
+    remove.setAttribute('aria-label', `Remove ${layer.name} stain layer`)
+    remove.addEventListener('click', () => {
+      void removeStainLayer(layer.id)
+    })
+    main.append(select, remove)
+
+    const opacity = document.createElement('label')
+    opacity.className = 'stain-layer-opacity'
+    const opacityLabel = document.createElement('span')
+    opacityLabel.textContent = 'Opacity'
+    const opacityInput = document.createElement('input')
+    opacityInput.type = 'range'
+    opacityInput.min = '0'
+    opacityInput.max = '100'
+    opacityInput.step = '1'
+    opacityInput.value = String(Math.round(layer.opacity * 100))
+    opacityInput.setAttribute('aria-label', `${layer.name} opacity`)
+    const opacityValue = document.createElement('output')
+    opacityValue.value = `${opacityInput.value}%`
+    opacityInput.addEventListener('input', () => {
+      const value = Number(opacityInput.value) / 100
+      stainLayers = setStainLayerOpacity(stainLayers, layer.id, value)
+      opacityValue.value = `${opacityInput.value}%`
+      updateUrlFromControls()
+      scheduleStainLayerOpacityUpdate(layer.id)
+    })
+    opacity.append(opacityLabel, opacityInput, opacityValue)
+    row.append(main, opacity)
+    els.stainLayers.append(row)
+  }
+}
+
+function scheduleStainLayerOpacityUpdate(id: string): void {
+  const pendingHandle = stainLayerOpacityHandles.get(id)
+  if (pendingHandle !== undefined) window.clearTimeout(pendingHandle)
+  const revision = (stainLayerOpacityRevisions.get(id) ?? 0) + 1
+  stainLayerOpacityRevisions.set(id, revision)
+  const handle = window.setTimeout(() => {
+    stainLayerOpacityHandles.delete(id)
+    const layer = stainLayers.find((candidate) => candidate.id === id)
+    if (!layer) return
+    void ensureStainLayerRuntime(id, layer.opacity > 0)
+      .then(() => {
+        if (stainLayerOpacityRevisions.get(id) !== revision) return
+        return applyStainLayerOpacity(id)
+      })
+      .then(() => {
+        if (stainLayerOpacityRevisions.get(id) !== revision) return
+        const current = stainLayers.find((candidate) => candidate.id === id)
+        if (current && current.opacity > 0) scheduleAdaptiveLod(true)
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        showFallback(
+          `Stain opacity update failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      })
+  }, STAIN_LAYER_OPACITY_DELAY_MS)
+  stainLayerOpacityHandles.set(id, handle)
+}
+
+async function ensureStainLayerRuntime(
+  id: string,
+  shouldLoad: boolean,
+): Promise<StainLayerRuntime | null> {
+  const existing = stainLayerRuntimes.get(id)
+  if (existing || !shouldLoad || !nv) return existing ?? null
+  if (!stainLayers.some((layer) => layer.id === id)) return null
+
+  const pending = stainLayerRuntimeLoads.get(id)
+  if (pending) return pending
+
+  const load = loadStainLayerRuntime(id)
+  stainLayerRuntimeLoads.set(id, load)
+  try {
+    return await load
+  } finally {
+    if (stainLayerRuntimeLoads.get(id) === load) {
+      stainLayerRuntimeLoads.delete(id)
+    }
+  }
+}
+
+async function loadStainLayerRuntime(
+  id: string,
+): Promise<StainLayerRuntime | null> {
+  const existing = stainLayerRuntimes.get(id)
+  if (existing || !nv) return existing ?? null
+  if (!stainLayers.some((layer) => layer.id === id)) return null
+
+  stainLayerSceneMutationDepth++
+  try {
+    await waitForAdaptiveLodIdle()
+  // NiiVue registers an additive chunked volume by rebuilding its renderer.
+  // Doing that while another chunked volume's upload pump is active can leave
+  // the old manager with pending bricks that are never drained. Add stains one
+  // at a time, after the current GPU working set has settled.
+    if (stainLayerRuntimes.size > 0) await waitForStainLayerUploads()
+
+    const selectedId = activeStainLayerId
+    const selectedView = captureView()
+    activeStainLayerId = id
+    shouldInitializeCustomSource = true
+    try {
+      await reloadVolume({ reloadSource: true, preserveView: true })
+    } finally {
+      activeStainLayerId = selectedId
+      const selectedRuntime = activeStainRuntime()
+      if (selectedRuntime) activateStainRuntime(selectedRuntime)
+      syncControlsToActiveLayer()
+      renderStainLayers()
+      updateUrlFromControls()
+      restoreView(selectedView)
+      await applyCurrentStainLayerOpacities(selectedId)
+      nv.drawScene()
+    }
+    return stainLayerRuntimes.get(id) ?? null
+  } finally {
+    stainLayerSceneMutationDepth--
+    flushDeferredAdaptiveLod()
+  }
+}
+
+function syncControlsToActiveLayer(): void {
+  const layer = activeStainLayer()
+  if (!layer) {
+    renderSelectedDandiStores()
+    syncSourceControls()
+    return
+  }
+  els.source.value = layer.source
+  if (layer.source === 'custom') {
+    els.customStainName.value = layer.name
+    setCustomStoreUrls(layer.storeUrls)
+  }
+  renderSelectedDandiStores()
+  syncSourceControls()
+}
+
+async function selectStainLayer(id: string, reload: boolean): Promise<void> {
+  const layer = stainLayers.find((candidate) => candidate.id === id)
+  if (!layer) return
+  resetRenderCropForSourceChange()
+  activeStainLayerId = id
+  stainLayers = selectExclusiveStainLayer(stainLayers, id)
+  shouldInitializeCustomSource = true
+  syncControlsToActiveLayer()
+  renderStainLayers()
+  updateUrlFromControls()
+  const runtime = stainLayerRuntimes.get(id)
+  if (runtime) {
+    activateStainRuntime(runtime)
+    await applyCurrentStainLayerOpacities(id)
+    scheduleAdaptiveLod(true)
+    nv?.drawScene()
+    return
+  }
+  await applyAllStainLayerOpacities()
+  if (!reload || !nv) return
+  await reloadVolume({ reloadSource: true, preserveView: true })
+}
+
+async function removeStainLayer(id: string): Promise<void> {
+  const index = stainLayers.findIndex((layer) => layer.id === id)
+  if (index < 0) return
+  const removedWasActive = activeStainLayerId === id
+  const removedWasLoaded = stainLayerRuntimes.has(id)
+  await removeStainLayerRuntime(id)
+  stainLayers = stainLayers.filter((layer) => layer.id !== id)
+  if (removedWasActive) {
+    activeStainLayerId =
+      stainLayers[Math.min(index, stainLayers.length - 1)]?.id ?? null
+  }
+  if (removedWasActive && activeStainLayerId) {
+    stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
+  }
+  shouldInitializeCustomSource = true
+  syncControlsToActiveLayer()
+  renderStainLayers()
+  syncDandiGroupActions()
+  if (removedWasActive && activeStainLayerId) {
+    await selectStainLayer(activeStainLayerId, true)
+  } else {
+    if (removedWasLoaded) await applyAllStainLayerOpacities()
+    updateUrlFromControls()
+  }
+}
+
+function addLayer(
+  name: string,
+  source: OmezarrSourceId,
+  storeUrls: readonly string[],
+): { layer: StainLayer; added: boolean } {
+  const result = addStainLayer(stainLayers, { name, source, storeUrls })
+  stainLayers = result.layers
+  activeStainLayerId = result.layer.id
+  stainLayers = selectExclusiveStainLayer(stainLayers, result.layer.id)
+  shouldInitializeCustomSource = true
+  syncControlsToActiveLayer()
+  renderStainLayers()
+  syncDandiGroupActions()
+  updateUrlFromControls()
+  void applyAllStainLayerOpacities()
+  return result
+}
+
+function commitCustomLayer(): StainLayer {
+  const urls = customStoreUrls()
+  if (urls.length === 0) {
+    throw new Error('Add at least one OME-Zarr store URL before loading')
+  }
+  const existing = activeStainLayer()
+  if (existing?.source === 'custom') {
+    stainLayers = updateStainLayer(stainLayers, existing.id, {
+      name: els.customStainName.value || customStoreName(urls[0]!),
+      storeUrls: urls,
+    })
+    renderStainLayers()
+    updateUrlFromControls()
+    return activeStainLayer()!
+  }
+  return addLayer(
+    els.customStainName.value || customStoreName(urls[0]!),
+    'custom',
+    urls,
+  ).layer
+}
+
+function startNewCustomLayer(): void {
+  activeStainLayerId = null
+  els.source.value = 'custom'
+  els.customStainName.value = ''
+  setCustomStoreUrls([])
+  shouldInitializeCustomSource = true
+  renderSelectedDandiStores()
+  renderStainLayers()
+  syncSourceControls()
+  updateUrlFromControls()
+  els.customStainName.focus()
+}
+
 function syncDandiGroupActions(): void {
-  const selectedUrls = new Set(selectedDandiStoreUrls)
+  const selectedUrls = selectedStoreUrls()
   for (const button of els.dandiResults.querySelectorAll<HTMLButtonElement>(
     '.dandi-add-store',
   )) {
@@ -1014,29 +1606,30 @@ function syncDandiGroupActions(): void {
   )) {
     const group = dandiGroupByAddButton.get(button)
     if (!group) continue
-    const missing = group.members.filter(
-      ({ asset }) => !selectedUrls.has(asset.storeUrl),
-    ).length
-    button.disabled = missing === 0
+    const groupUrls = group.members.map(({ asset }) => asset.storeUrl)
+    const exists = stainLayers.some(
+      (layer) =>
+        layer.source === 'dandi' &&
+        layer.storeUrls.length === groupUrls.length &&
+        groupUrls.every((url) => layer.storeUrls.includes(url)),
+    )
+    button.disabled = exists
     button.textContent =
-      missing === 0
-        ? `All ${group.members.length} added`
-        : missing === group.members.length
-          ? `Add all ${group.members.length}`
-          : `Add remaining ${missing}`
+      exists ? 'Layer added' : `Add layer · ${group.members.length} chunks`
   }
 }
 
 function renderSelectedDandiStores(): void {
+  const layer = activeStainLayer()
+  const selectedDandiStoreUrls = layer?.source === 'dandi' ? layer.storeUrls : []
   els.dandiSelectedStores.replaceChildren()
   els.dandiSelectedStores.hidden =
     els.source.value !== 'dandi' || selectedDandiStoreUrls.length === 0
-  els.clearDandiSelection.disabled = selectedDandiStoreUrls.length === 0
   if (selectedDandiStoreUrls.length === 0) return
 
   const heading = document.createElement('strong')
   heading.className = 'selected-store-heading'
-  heading.textContent = 'Selected stores'
+  heading.textContent = `${layer?.name ?? 'Selected stain'} chunks`
   els.dandiSelectedStores.append(heading)
 
   const scroll = document.createElement('div')
@@ -1051,17 +1644,26 @@ function renderSelectedDandiStores(): void {
     name.textContent =
       asset?.path.split('/').at(-1) ?? customStoreName(storeUrl)
     name.title = storeUrl
-    const remove = createStoreRemoveButton(`Remove DANDI store ${index + 1}`, () => {
-      selectedDandiStoreUrls = selectedDandiStoreUrls.filter(
-        (selectedUrl) => selectedUrl !== storeUrl,
-      )
+    const remove = createStoreRemoveButton(`Remove DANDI store ${index + 1}`, async () => {
+      if (!layer) return
+      stainLayers = updateStainLayer(stainLayers, layer.id, {
+        name: layer.name,
+        storeUrls: layer.storeUrls.filter((selectedUrl) => selectedUrl !== storeUrl),
+      })
+      if (!stainLayers.some(({ id }) => id === layer.id)) {
+        activeStainLayerId = stainLayers[0]?.id ?? null
+        await removeStainLayerRuntime(layer.id)
+        if (activeStainLayerId) {
+          stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
+        }
+      }
       shouldInitializeCustomSource = true
+      renderStainLayers()
       renderSelectedDandiStores()
       syncDandiGroupActions()
       els.dandiSearchStatus.value = 'Store removed. Updating the viewer…'
-      void reloadAfterStoreRemoval().then(() => {
-        els.dandiSearchStatus.value = 'Store removed.'
-      })
+      await reloadAfterStoreRemoval()
+      els.dandiSearchStatus.value = 'Store removed.'
     })
     row.append(name, remove)
     scroll.append(row)
@@ -1069,19 +1671,22 @@ function renderSelectedDandiStores(): void {
 }
 
 async function clearSelectedDandiAssets(): Promise<void> {
-  if (selectedDandiStoreUrls.length === 0) return
-  selectedDandiStoreUrls = []
+  if (stainLayers.length === 0) return
+  stainLayers = []
+  activeStainLayerId = null
   shouldInitializeCustomSource = true
+  renderStainLayers()
   renderSelectedDandiStores()
   syncDandiGroupActions()
-  els.dandiSearchStatus.value = 'All selected stores cleared. Updating the viewer…'
+  els.dandiSearchStatus.value = 'All stain layers cleared. Updating the viewer…'
   await reloadAfterStoreRemoval()
-  els.dandiSearchStatus.value = 'All selected stores cleared.'
+  els.dandiSearchStatus.value = 'All stain layers cleared.'
 }
 
 function createDandiChunkResult(
   asset: DandiZarrAsset,
   chunk: number | null = null,
+  layerName = asset.path.split('/').at(-1) ?? 'DANDI stain',
 ): HTMLElement {
   const row = document.createElement('div')
   row.className = 'dandi-result'
@@ -1098,26 +1703,41 @@ function createDandiChunkResult(
   add.dataset.storeUrl = asset.storeUrl
   add.textContent = 'Add'
   add.setAttribute('aria-label', `Add ${title.textContent} store`)
-  add.addEventListener('click', () => addDandiAssets([asset]))
+  add.addEventListener('click', () => addDandiAssets(layerName, [asset]))
   row.append(copy, add)
   return row
 }
 
-function addDandiAssets(assets: DandiZarrAsset[]): void {
-  const existing = new Set(selectedDandiStoreUrls)
-  const added = assets.filter((asset) => !existing.has(asset.storeUrl))
-  if (added.length === 0) {
-    els.dandiSearchStatus.value = 'All stores in this stain group are already selected.'
+function addDandiAssets(name: string, assets: DandiZarrAsset[]): void {
+  const matchingLayer = stainLayers.find(
+    (layer) => layer.source === 'dandi' && layer.name === name,
+  )
+  if (matchingLayer) {
+    const nextUrls = [
+      ...new Set([...matchingLayer.storeUrls, ...assets.map(({ storeUrl }) => storeUrl)]),
+    ]
+    const addedCount = nextUrls.length - matchingLayer.storeUrls.length
+    stainLayers = updateStainLayer(stainLayers, matchingLayer.id, {
+      name,
+      storeUrls: nextUrls,
+    })
+    activeStainLayerId = matchingLayer.id
+    stainLayers = selectExclusiveStainLayer(stainLayers, matchingLayer.id)
+    shouldInitializeCustomSource = true
+    syncControlsToActiveLayer()
+    renderStainLayers()
+    syncDandiGroupActions()
+    updateUrlFromControls()
+    void applyAllStainLayerOpacities()
+    els.dandiSearchStatus.value = addedCount > 0
+      ? `${addedCount} chunk${addedCount === 1 ? '' : 's'} added to the ${name} layer. Press Load volume when ready.`
+      : `${name} is already in the stain layer list.`
     return
   }
-  selectedDandiStoreUrls = [
-    ...new Set([...selectedDandiStoreUrls, ...added.map((asset) => asset.storeUrl)]),
-  ]
-  shouldInitializeCustomSource = true
-  renderSelectedDandiStores()
-  syncDandiGroupActions()
-  updateUrlFromControls()
-  els.dandiSearchStatus.value = `${added.length} store${added.length === 1 ? '' : 's'} selected. Press Load volume when ready.`
+  const result = addLayer(name, 'dandi', assets.map(({ storeUrl }) => storeUrl))
+  els.dandiSearchStatus.value = result.added
+    ? `${name} added as a stain layer. Press Load volume when ready.`
+    : `${name} is already in the stain layer list.`
 }
 
 function createDandiStainGroup(group: DandiZarrAssetGroup): HTMLElement {
@@ -1146,7 +1766,10 @@ function createDandiStainGroup(group: DandiZarrAssetGroup): HTMLElement {
   )
   dandiGroupByAddButton.set(addAll, group)
   addAll.addEventListener('click', () => {
-    addDandiAssets(group.members.map(({ asset }) => asset))
+    addDandiAssets(
+      layerNameForGroup(group),
+      group.members.map(({ asset }) => asset),
+    )
   })
   header.append(copy, addAll)
 
@@ -1158,7 +1781,7 @@ function createDandiStainGroup(group: DandiZarrAssetGroup): HTMLElement {
   chunkList.className = 'dandi-chunk-list'
   chunkList.append(
     ...group.members.map(({ asset, chunk }) =>
-      createDandiChunkResult(asset, chunk),
+      createDandiChunkResult(asset, chunk, layerNameForGroup(group)),
     ),
   )
   chunks.append(summary, chunkList)
@@ -1332,8 +1955,9 @@ function syncSourceControls(): void {
   els.dandiArchiveControl.hidden = !isDandi
   els.zarrUrlControl.hidden = els.source.value !== 'custom'
   els.clearDandiSelection.hidden = !isDandi
+  els.clearDandiSelection.disabled = stainLayers.length === 0
   els.dandiSelectedStores.hidden =
-    !isDandi || selectedDandiStoreUrls.length === 0
+    !isDandi || activeStainLayer()?.source !== 'dandi'
   syncZarrLevelControl()
 }
 
@@ -1381,16 +2005,28 @@ function initControlsFromUrl(): void {
   if (requestedSource && isOmezarrSourceId(requestedSource)) {
     els.source.value = requestedSource
   }
-  const storeUrls = params.getAll('url').filter(Boolean)
-  if (storeUrls.length > 0) {
-    if (els.source.value === 'dandi') {
-      selectedDandiStoreUrls = [...new Set(storeUrls)]
-      renderSelectedDandiStores()
-    } else {
-      els.source.value = 'custom'
-      setCustomStoreUrls(storeUrls)
-    }
+  const layerPayload = params.get('layers')
+  stainLayers = parseStainLayers(layerPayload)
+  activeStainLayerId = params.get('activeLayer')
+  if (!stainLayers.some(({ id }) => id === activeStainLayerId)) {
+    activeStainLayerId = stainLayers[0]?.id ?? null
   }
+  if (activeStainLayerId && !stainLayerPayloadHasOpacity(layerPayload)) {
+    stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
+  }
+  const storeUrls = params.getAll('url').filter(Boolean)
+  if (stainLayers.length === 0 && storeUrls.length > 0) {
+    const source = els.source.value === 'dandi' ? 'dandi' : 'custom'
+    const result = addStainLayer([], {
+      name: source === 'dandi' ? 'DANDI stain' : customStoreName(storeUrls[0]!),
+      source,
+      storeUrls,
+    })
+    stainLayers = result.layers
+    activeStainLayerId = result.layer.id
+  }
+  syncControlsToActiveLayer()
+  renderStainLayers()
   els.dandisetId.value = params.get('dandiset') || '000108'
   els.dandiVersion.value = params.get('dandiVersion') || 'draft'
   els.dandiQuery.value = params.get('dandiQuery') || ''
@@ -1453,8 +2089,17 @@ function updateUrlFromControls(): void {
     url.searchParams.delete('zarrLevel')
   }
   url.searchParams.delete('url')
-  if (kind === 'omezarr') {
+  if (stainLayers.length > 0) {
+    url.searchParams.set('layers', serializeStainLayers(stainLayers))
+    if (activeStainLayerId) url.searchParams.set('activeLayer', activeStainLayerId)
+    else url.searchParams.delete('activeLayer')
     for (const storeUrl of currentStoreUrls()) url.searchParams.append('url', storeUrl)
+  } else {
+    url.searchParams.delete('layers')
+    url.searchParams.delete('activeLayer')
+    if (kind === 'omezarr') {
+      for (const storeUrl of currentStoreUrls()) url.searchParams.append('url', storeUrl)
+    }
   }
   if (els.source.value === 'dandi') {
     url.searchParams.set('dandiset', els.dandisetId.value.trim() || '000108')
@@ -1978,21 +2623,53 @@ async function fetchOmezarrRegion(
 ): Promise<Uint8Array> {
   const [x0, y0, z0] = request.texOrigin
   const [sx, sy, sz] = request.texDims
+  const shape = level.array.shape.slice(-3) as [number, number, number]
+  const [nz, ny, nx] = shape
+  const xStart = Math.max(0, x0)
+  const yStart = Math.max(0, y0)
+  const zStart = Math.max(0, z0)
+  const xEnd = Math.min(nx, x0 + sx)
+  const yEnd = Math.min(ny, y0 + sy)
+  const zEnd = Math.min(nz, z0 + sz)
+  const expectedBytes = sx * sy * sz * request.bytesPerVoxel
+  if (xStart >= xEnd || yStart >= yEnd || zStart >= zEnd) {
+    return new Uint8Array(expectedBytes)
+  }
   const selection: Array<number | zarr.Slice> = []
   for (let i = 0; i < level.array.shape.length - 3; i++) selection.push(0)
-  selection.push(zarr.slice(z0, z0 + sz))
-  selection.push(zarr.slice(y0, y0 + sy))
-  selection.push(zarr.slice(x0, x0 + sx))
+  selection.push(zarr.slice(zStart, zEnd))
+  selection.push(zarr.slice(yStart, yEnd))
+  selection.push(zarr.slice(xStart, xEnd))
 
   const view = await zarr.get(level.array, selection, { signal })
   const bytes = bytesFromZarrView(view)
-  const expectedBytes = sx * sy * sz * request.bytesPerVoxel
-  if (bytes.byteLength !== expectedBytes) {
+  const clippedX = xEnd - xStart
+  const clippedY = yEnd - yStart
+  const clippedZ = zEnd - zStart
+  const clippedBytes =
+    clippedX * clippedY * clippedZ * request.bytesPerVoxel
+  if (bytes.byteLength !== clippedBytes) {
     throw new Error(
-      `OME-Zarr L${level.level} region ${request.texOrigin.join(',')} returned ${bytes.byteLength}B, expected ${expectedBytes}B`,
+      `OME-Zarr L${level.level} region ${request.texOrigin.join(',')} returned ${bytes.byteLength}B, expected ${clippedBytes}B`,
     )
   }
-  return bytes
+  if (clippedBytes === expectedBytes) return bytes
+
+  const padded = new Uint8Array(expectedBytes)
+  const xOffset = xStart - x0
+  const yOffset = yStart - y0
+  const zOffset = zStart - z0
+  const rowBytes = clippedX * request.bytesPerVoxel
+  for (let z = 0; z < clippedZ; z++) {
+    for (let y = 0; y < clippedY; y++) {
+      const sourceOffset = (z * clippedY + y) * rowBytes
+      const targetOffset =
+        (((z + zOffset) * sy + y + yOffset) * sx + xOffset) *
+        request.bytesPerVoxel
+      padded.set(bytes.subarray(sourceOffset, sourceOffset + rowBytes), targetOffset)
+    }
+  }
+  return padded
 }
 
 function mosaicRequestKey(
@@ -2808,6 +3485,9 @@ function syncScaleIndicatorVisibility(): void {
 
 function syncTileLoadingIndicator(): void {
   const stream = nv?.chunkStreamStats()
+  els.canvas.dataset.streamResident = String(stream?.resident ?? 0)
+  els.canvas.dataset.streamPending = String(stream?.pending ?? 0)
+  els.canvas.dataset.streamInFlight = String(stream?.inFlight ?? 0)
   const count = loadingTileCount(stream?.pending, stream?.inFlight)
   if (count !== displayedLoadingTiles) {
     displayedLoadingTiles = count
@@ -2929,6 +3609,12 @@ function loadCustomSourceFromInput(): void {
   resetRenderCropForSourceChange()
   shouldInitializeCustomSource = true
   els.source.value = 'custom'
+  try {
+    commitCustomLayer()
+  } catch (error) {
+    showFallback(error instanceof Error ? error.message : String(error))
+    return
+  }
   syncSourceControls()
   updateUrlFromControls()
   void reloadVolume({ reloadSource: true })
@@ -3190,7 +3876,7 @@ function screenSliceStreamingBounds(
   if (!nv || nv.sliceType !== SLICE_TYPE.MULTIPLANAR) return null
   const screenSlices = nv.view?.screenSlices ?? []
   const pan = nv.pan2Dxyzmm
-  const volume = nv.volumes[0]
+  const volume = activeVolume()
   const volumeMin = volume?.extentsMin
   const volumeMax = volume?.extentsMax
   if (!volumeMin || !volumeMax) return null
@@ -3327,7 +4013,7 @@ function syncCrosshairOverlay(): void {
 }
 
 function panExtent(axis: number): number {
-  const volume = nv?.volumes[0]
+  const volume = activeVolume()
   const min = volume?.extentsMin
   const max = volume?.extentsMax
   if (!min || !max) return 1
@@ -3497,13 +4183,20 @@ function syncDetailBudget(): void {
   els.detailBudgetValue.value = `${Number(budget.toFixed(1))} GiB`
 }
 
-function applyDetailBudget(): void {
+async function applyDetailBudget(): Promise<void> {
   syncDetailBudget()
   updateUrlFromControls()
-  if (!chunkedVolume) return
-  activeReadSession?.renew()
+  if (stainLayerRuntimes.size === 0) return
+  if (stainLayerRuntimes.size > 1) {
+    await rebuildMultiStainVolumes()
+    syncDownloadControl()
+    return
+  }
+  for (const runtime of stainLayerRuntimes.values()) {
+    runtime.readSession.renew()
+    runtime.chunkedVolume.setBudget(currentDetailBudgetBytes())
+  }
   setActiveLodLoading(currentDetailLevel ?? undefined)
-  chunkedVolume.setBudget(currentDetailBudgetBytes())
   syncDownloadControl()
 }
 
@@ -3534,6 +4227,7 @@ function applyZoomControl(): void {
   updateUrlFromControls()
   syncViewControls()
   syncDownloadControl()
+  if (stainLayerRuntimes.size > 1) multiStainDetailChangeRequested = true
   scheduleAdaptiveLod()
 }
 
@@ -3543,6 +4237,10 @@ async function applyZarrLevelControl(): Promise<void> {
   requestedBaseLevel = fixedZarrLevel
   updateUrlFromControls()
   els.zarrLevel.disabled = true
+  if (stainLayerRuntimes.size > 1) {
+    await rebuildMultiStainVolumes()
+    return
+  }
   await reloadVolume({ reloadSource: true, preserveView: true })
 }
 
@@ -3570,7 +4268,7 @@ function applyPanControls(): void {
 
 function panForCrosshair(): Shape3 {
   if (!nv) return [0, 0, 0]
-  const volume = nv.volumes[0]
+  const volume = activeVolume()
   const crosshair = nv.crosshairPos
   const min = volume?.extentsMin
   const max = volume?.extentsMax
@@ -3654,6 +4352,14 @@ function handleWheelZoom(event: WheelEvent): void {
   nv.drawScene()
   syncViewControls()
   syncDownloadControl()
+  const runtime = activeStainRuntime()
+  if (
+    stainLayerRuntimes.size > 1 &&
+    runtime &&
+    detailLevelForView(runtime.source, viewerZoom()) !== runtime.detailLevel
+  ) {
+    multiStainDetailChangeRequested = true
+  }
   scheduleAdaptiveLod()
 }
 
@@ -3693,43 +4399,191 @@ function adaptiveRequestKey(
 }
 
 function scheduleAdaptiveLod(focusMoved = false): void {
-  if (suppressAdaptiveEvents) {
+  if (suppressAdaptiveEvents || stainLayerSceneMutationDepth > 0) {
     deferredAdaptiveLod = true
     deferredAdaptiveFocusMoved ||= focusMoved
     return
   }
+  adaptiveLodRequested = true
+  if (!adaptiveLodRunning) void drainAdaptiveLodRequests()
+}
+
+async function waitForAdaptiveLodIdle(): Promise<void> {
+  const startedAt = performance.now()
+  while (adaptiveLodRunning) {
+    if (performance.now() - startedAt > 120_000) {
+      throw new Error('Timed out waiting for stain detail rendering')
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+  }
+}
+
+function flushDeferredAdaptiveLod(): void {
   if (
-    (activeSource?.kind === 'omezarr' ||
-      activeSource?.kind === 'omezarr-mosaic') &&
-    chunkedVolume
+    suppressAdaptiveEvents ||
+    stainLayerSceneMutationDepth > 0 ||
+    !deferredAdaptiveLod
   ) {
-    const target = detailLevelForView(activeSource, viewerZoom())
-    const bounds = currentVisibleFovBounds(activeSource.shape)
-    const requestKey = adaptiveRequestKey(target, focusFraction, bounds)
-    if (requestKey === lastAdaptiveRequestKey) return
-    lastAdaptiveRequestKey = requestKey
-    activeReadSession?.renew()
+    return
+  }
+  const focusMoved = deferredAdaptiveFocusMoved
+  deferredAdaptiveLod = false
+  deferredAdaptiveFocusMoved = false
+  scheduleAdaptiveLod(focusMoved)
+}
+
+async function drainAdaptiveLodRequests(): Promise<void> {
+  adaptiveLodRunning = true
+  try {
+    while (adaptiveLodRequested) {
+      adaptiveLodRequested = false
+      await applyAdaptiveLodRequest()
+    }
+  } catch (error) {
+    showFallback(
+      `Adaptive stain detail failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  } finally {
+    adaptiveLodRunning = false
+    if (adaptiveLodRequested) void drainAdaptiveLodRequests()
+  }
+}
+
+async function applyAdaptiveLodRequest(): Promise<void> {
+  if (!nv) return
+  const runtimes = [...stainLayerRuntimes.values()]
+  const primary = runtimes.find((runtime) => volumeIndexForRuntime(runtime) === 0)
+  if (!primary) return
+
+  const target = detailLevelForView(primary.source, viewerZoom())
+  if (runtimes.length > 1) {
+    if (
+      multiStainDetailChangeRequested &&
+      runtimes.some((runtime) => runtime.detailLevel !== target)
+    ) {
+      multiStainDetailChangeRequested = false
+      await rebuildMultiStainVolumes()
+    } else {
+      // Hot-swapping any chunk plan while a streamed overlay is registered can
+      // detach pending bricks from NiiVue's shared pump. At a stable detail
+      // level keep the resident multi-stain plans rather than refocusing them.
+      for (const runtime of runtimes) {
+        const runtimeBounds = currentVisibleFovBounds(runtime.source.shape)
+        runtime.lastAdaptiveRequestKey = adaptiveRequestKey(
+          target,
+          focusFraction,
+          runtimeBounds,
+        )
+      }
+    }
+    return
+  }
+
+  const bounds = currentVisibleFovBounds(primary.source.shape)
+  const requestKey = adaptiveRequestKey(target, focusFraction, bounds)
+  if (requestKey !== primary.lastAdaptiveRequestKey) {
+    primary.lastAdaptiveRequestKey = requestKey
+    primary.readSession.renew()
+    const previousPlan = primary.chunkedVolume.currentPlan
     const targetChanged = updateAdaptiveLodDetail(
-      chunkedVolume,
-      currentDetailLevel,
+      primary.chunkedVolume,
+      primary.detailLevel,
       target,
     )
-    currentDetailLevel = target
-    if (targetChanged) setActiveLodLoading(target)
-    chunkedVolume.setFocus(
-      focusFraction,
-      bounds,
-    )
-    return
+    primary.detailLevel = target
+    primary.chunkedVolume.setFocus(focusFraction, bounds)
+    if (primary.layerId === activeStainLayerId) {
+      currentDetailLevel = target
+      lastAdaptiveRequestKey = requestKey
+      if (targetChanged) setActiveLodLoading(target)
+    }
+    await waitForStainLayerRefocus(primary.chunkedVolume, previousPlan)
+  }
+
+  const active = activeStainRuntime()
+  if (active) {
+    currentDetailLevel = active.detailLevel
+    lastAdaptiveRequestKey = active.lastAdaptiveRequestKey
+  }
+}
+
+async function rebuildMultiStainVolumes(): Promise<void> {
+  if (!nv || stainLayerRuntimes.size < 2) return
+  if (multiStainRebuildPromise) return multiStainRebuildPromise
+  const rebuild = stainLayerDisplayQueue
+    .run(performMultiStainVolumeRebuild)
+    .then(() => undefined)
+  multiStainRebuildPromise = rebuild
+  try {
+    await rebuild
+  } finally {
+    if (multiStainRebuildPromise === rebuild) multiStainRebuildPromise = null
+  }
+}
+
+async function performMultiStainVolumeRebuild(
+  signal: AbortSignal,
+): Promise<void> {
+  if (!nv || stainLayerRuntimes.size < 2) return
+  // A deferred renderer pump can begin on the animation frame after the
+  // controller was registered. Do not tear down either manager until that
+  // work has appeared and reached a stable idle state.
+  await waitForStainLayerUploads()
+  const selectedId = activeStainLayerId
+  const view = captureView()
+  const runtimes = [...stainLayerRuntimes.values()]
+  const previousSuppression = suppressAdaptiveEvents
+  suppressAdaptiveEvents = true
+  try {
+    for (const runtime of runtimes) runtime.chunkedVolume.dispose()
+    stainLayerRuntimes.clear()
+    await nv.removeAllVolumes()
+    chunkedVolume = null
+
+    for (const runtime of runtimes) {
+      if (!stainLayers.some(({ id }) => id === runtime.layerId)) continue
+      activeStainLayerId = runtime.layerId
+      activeSource = runtime.source
+      chunkedVolume = null
+      runtime.readSession.renew()
+      activeReadSession = runtime.readSession
+      if (runtime.source.kind === 'omezarr') {
+        await loadOmezarrVolume(runtime.source, view, runtime.readSession)
+      } else {
+        await loadMosaicVolume(runtime.source, view, runtime.readSession)
+      }
+      if (!chunkedVolume) continue
+      runtime.chunkedVolume = chunkedVolume
+      runtime.detailLevel = currentDetailLevel ?? runtime.source.baseLevel
+      runtime.lastAdaptiveRequestKey = lastAdaptiveRequestKey
+      stainLayerRuntimes.set(runtime.layerId, runtime)
+      await waitForStainLayerUploads()
+    }
+  } finally {
+    activeStainLayerId = selectedId
+    const selectedRuntime = activeStainRuntime()
+    if (selectedRuntime) activateStainRuntime(selectedRuntime)
+    restoreView(view)
+    await updateStainLayerOpacitiesNow(signal, selectedId)
+    syncControlsToActiveLayer()
+    renderStainLayers()
+    syncStainLayerTelemetry()
+    suppressAdaptiveEvents = previousSuppression
   }
 }
 
 async function disposeChunkedVolume(): Promise<void> {
-  chunkedVolume?.dispose()
+  for (const runtime of stainLayerRuntimes.values()) {
+    runtime.readSession.abort('All stain layers disposed')
+    runtime.chunkedVolume.dispose()
+  }
+  stainLayerRuntimes.clear()
   chunkedVolume = null
+  activeReadSession = null
   currentDetailLevel = null
   lastAdaptiveRequestKey = null
   if (nv && nv.volumes.length > 0) await nv.removeAllVolumes()
+  syncStainLayerTelemetry()
 }
 
 async function loadOmezarrVolume(
@@ -3738,6 +4592,7 @@ async function loadOmezarrVolume(
   readSession: ZarrReadSession,
 ): Promise<void> {
   if (!nv) return
+  const layer = activeStainLayer()
   const win = parseWindow(source.defaultWindow)
   const zoom = view
     ? nv.sliceType === SLICE_TYPE.RENDER
@@ -3745,17 +4600,27 @@ async function loadOmezarrVolume(
       : view.pan2D[3]
     : viewerZoom()
   const minLevel = detailLevelForView(source, zoom)
+  const focusBounds = currentVisibleFovBounds(
+    source.shape,
+    focusFraction,
+    zoom,
+  )
   currentDetailLevel = minLevel
+  const volumeId = `${layer?.id ?? source.id}-render-${++streamedVolumeRevision}`
   chunkedVolume = await nv.loadChunkedVolume(
     createOmezarrPyramidSource(source, readSession),
     {
-      id: source.id,
-      name: source.name,
+      // NiiVue keys its streamed texture cache by volume URL, which defaults
+      // to the id. A controller rebuilt with a disposed id can otherwise reuse
+      // an empty manager and report zero pending work with nothing resident.
+      id: volumeId,
+      name: layer?.name ?? source.name,
       calMin: win.min,
       calMax: win.max,
       colormap: els.colormap.value,
+      opacity: layer?.opacity ?? 1,
       focus: focusFraction,
-      focusBounds: currentVisibleFovBounds(source.shape, focusFraction, zoom),
+      focusBounds,
       radius: fineLodRadiusForShape(source.shape, ADAPTIVE_FINE_RADIUS),
       minLevel,
       budgetBytes: currentDetailBudgetBytes(),
@@ -3771,6 +4636,11 @@ async function loadOmezarrVolume(
   )
   chunkedVolume.volume.chunkExplode = { enabled: false }
   chunkPlan = chunkedVolume.currentPlan
+  lastAdaptiveRequestKey = adaptiveRequestKey(
+    minLevel,
+    focusFraction,
+    focusBounds,
+  )
   syncActiveLodIndicator(chunkPlan)
   restoreView(view)
   syncCrosshairAppearance()
@@ -3783,6 +4653,7 @@ async function loadMosaicVolume(
   readSession: ZarrReadSession,
 ): Promise<void> {
   if (!nv) return
+  const layer = activeStainLayer()
   const win = parseWindow(source.defaultWindow)
   const zoom = view
     ? nv.sliceType === SLICE_TYPE.RENDER
@@ -3790,17 +4661,24 @@ async function loadMosaicVolume(
       : view.pan2D[3]
     : viewerZoom()
   const minLevel = detailLevelForView(source, zoom)
+  const focusBounds = currentVisibleFovBounds(
+    source.shape,
+    focusFraction,
+    zoom,
+  )
   currentDetailLevel = minLevel
+  const volumeId = `${layer?.id ?? source.id}-render-${++streamedVolumeRevision}`
   chunkedVolume = await nv.loadChunkedVolume(
     createMosaicPyramidSource(source, readSession),
     {
-      id: source.id,
-      name: source.name,
+      id: volumeId,
+      name: layer?.name ?? source.name,
       calMin: win.min,
       calMax: win.max,
       colormap: els.colormap.value,
+      opacity: layer?.opacity ?? 1,
       focus: focusFraction,
-      focusBounds: currentVisibleFovBounds(source.shape, focusFraction, zoom),
+      focusBounds,
       radius: fineLodRadiusForShape(source.shape, ADAPTIVE_FINE_RADIUS),
       minLevel,
       budgetBytes: currentDetailBudgetBytes(),
@@ -3814,6 +4692,11 @@ async function loadMosaicVolume(
   )
   chunkedVolume.volume.chunkExplode = { enabled: false }
   chunkPlan = chunkedVolume.currentPlan
+  lastAdaptiveRequestKey = adaptiveRequestKey(
+    minLevel,
+    focusFraction,
+    focusBounds,
+  )
   syncActiveLodIndicator(chunkPlan)
   restoreView(view)
   syncCrosshairAppearance()
@@ -3867,6 +4750,7 @@ async function performReloadVolume(
   taskSignal: AbortSignal,
 ): Promise<void> {
   if (!nv) return
+  const targetLayerId = activeStainLayerId
   hideFallback()
   setDownloadStatus('')
   stats = freshStats()
@@ -3875,16 +4759,21 @@ async function performReloadVolume(
   const nextReadSession = new ZarrReadSession(taskSignal)
   suppressAdaptiveEvents = true
   try {
+    if (options.reloadSource && targetLayerId) {
+      await removeStainLayerRuntime(targetLayerId)
+    }
     if (options.reloadSource || !activeSource) {
       activeSource = null
+      chunkedVolume = null
+      activeReadSession = null
+      currentDetailLevel = null
+      lastAdaptiveRequestKey = null
       autoWindowSession = null
-      autoContrastState = null
       els.autoContrast.disabled = true
       chunkPlan = null
       syncDownloadControl()
       const source = await loadActiveSource(nextReadSession)
       taskSignal.throwIfAborted()
-      activeReadSession?.abort('OME-Zarr source superseded')
       activeReadSession = nextReadSession
       activeSource = source
       syncZarrLevelControl()
@@ -3899,7 +4788,6 @@ async function performReloadVolume(
         renderCropGeometry = { ...cropGeometry, level }
       }
     } else {
-      activeReadSession?.abort('OME-Zarr view superseded')
       activeReadSession = nextReadSession
     }
     if (!activeSource) {
@@ -3910,9 +4798,18 @@ async function performReloadVolume(
     // rather than restoring the stale state captured when the reload started.
     if (options.view === undefined && options.preserveView) view = captureView()
     syncCrosshairVisibility()
-    await disposeChunkedVolume()
+    const needsRenderCrop =
+      activeSource.kind === 'omezarr' &&
+      Boolean(renderCropGeometry) &&
+      nv.sliceType === SLICE_TYPE.RENDER
+    if (needsRenderCrop || !targetLayerId) {
+      await disposeChunkedVolume()
+      activeReadSession = nextReadSession
+    } else if (stainLayerRuntimes.size === 0 && nv.volumes.length > 0) {
+      await nv.removeAllVolumes()
+    }
     if (activeSource.kind === 'omezarr') {
-      if (renderCropGeometry && nv.sliceType === SLICE_TYPE.RENDER) {
+      if (needsRenderCrop && renderCropGeometry) {
         await loadOmezarrRenderCrop(
           activeSource,
           renderCropGeometry,
@@ -3929,6 +4826,24 @@ async function performReloadVolume(
       await nv.loadVolumes([createStreamingVolume(activeSource)])
       syncActiveLodIndicator(chunkPlan)
     }
+    if (
+      targetLayerId &&
+      chunkedVolume &&
+      (activeSource.kind === 'omezarr' || activeSource.kind === 'omezarr-mosaic')
+    ) {
+      const runtime: StainLayerRuntime = {
+        layerId: targetLayerId,
+        source: activeSource,
+        readSession: nextReadSession,
+        chunkedVolume,
+        detailLevel: currentDetailLevel ?? activeSource.baseLevel,
+        lastAdaptiveRequestKey,
+      }
+      stainLayerRuntimes.set(targetLayerId, runtime)
+      activateStainRuntime(runtime)
+      await applyCurrentStainLayerOpacities(targetLayerId)
+      syncStainLayerTelemetry()
+    }
     applyLayout()
     syncViewControls()
   } catch (err) {
@@ -3938,7 +4853,10 @@ async function performReloadVolume(
     }
     nextReadSession.abort('OME-Zarr reload failed')
     if (!activeSource) {
-      await disposeChunkedVolume()
+      chunkedVolume = null
+      activeReadSession = null
+      currentDetailLevel = null
+      lastAdaptiveRequestKey = null
       chunkPlan = null
       setVisibleLevel(null)
     }
@@ -3954,12 +4872,7 @@ async function performReloadVolume(
     if (taskSignal.aborted) {
       deferredAdaptiveLod = false
       deferredAdaptiveFocusMoved = false
-    } else if (deferredAdaptiveLod) {
-      const focusMoved = deferredAdaptiveFocusMoved
-      deferredAdaptiveLod = false
-      deferredAdaptiveFocusMoved = false
-      scheduleAdaptiveLod(focusMoved)
-    }
+    } else flushDeferredAdaptiveLod()
   }
 }
 
@@ -4027,6 +4940,12 @@ async function main(): Promise<void> {
     fixedZarrLevel = null
     shouldInitializeCustomSource = true
     requestedBaseLevel = null
+    activeStainLayerId = null
+    if (els.source.value === 'custom') {
+      els.customStainName.value = ''
+      setCustomStoreUrls([])
+    }
+    renderStainLayers()
     setDefaultWindowForSelectedSource()
     syncSourceControls()
     updateUrlFromControls()
@@ -4063,7 +4982,7 @@ async function main(): Promise<void> {
     control.addEventListener('input', applyPanControls)
   }
   els.colormap.addEventListener('change', () => {
-    void reloadVolume()
+    void applyColormap()
   })
   els.autoContrast.addEventListener('click', applyAutoContrast)
   els.windowLevel.addEventListener('input', handleWindowInput)
@@ -4082,6 +5001,12 @@ async function main(): Promise<void> {
   els.zarrUrl.addEventListener('input', () => {
     shouldInitializeCustomSource = true
     syncUrlRowControls()
+    updateActiveCustomLayerFromControls()
+    updateUrlFromControls()
+  })
+  els.customStainName.addEventListener('input', () => {
+    updateActiveCustomLayerFromControls()
+    updateUrlFromControls()
   })
   els.zarrUrl.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return
@@ -4091,6 +5016,7 @@ async function main(): Promise<void> {
   els.addZarrUrl.addEventListener('click', () => {
     addCustomUrlInput().focus()
   })
+  els.newCustomLayer.addEventListener('click', startNewCustomLayer)
   els.removeZarrUrl.addEventListener('click', () => {
     removeCustomUrlRow(els.zarrUrl.closest<HTMLElement>('.zarr-url-row')!, els.zarrUrl)
   })
@@ -4108,6 +5034,14 @@ async function main(): Promise<void> {
     void clearSelectedDandiAssets()
   })
   els.reload.addEventListener('click', () => {
+    if (els.source.value === 'custom') {
+      try {
+        commitCustomLayer()
+      } catch (error) {
+        showFallback(error instanceof Error ? error.message : String(error))
+        return
+      }
+    }
     void reloadVolume({ reloadSource: true })
   })
   els.downloadNifti.addEventListener('click', () => {
@@ -4134,7 +5068,8 @@ async function main(): Promise<void> {
       manualWindowRevision++
       autoWindowSession = null
       if (activeSource) activeSource.defaultWindow = sharedWindow
-      await nv.setVolume(0, {
+      const volumeIndex = activeVolumeIndex()
+      if (volumeIndex >= 0) await nv.setVolume(volumeIndex, {
         calMin: sharedWindow.min,
         calMax: sharedWindow.max,
       })
@@ -4143,6 +5078,11 @@ async function main(): Promise<void> {
     applyLayout()
     const focusMoved = syncFocusFromPan()
     scheduleAdaptiveLod(focusMoved)
+  }
+  for (const layer of stainLayers) {
+    if (layer.id !== activeStainLayerId && layer.opacity > 0) {
+      await ensureStainLayerRuntime(layer.id, true)
+    }
   }
   startHudPolling()
 }

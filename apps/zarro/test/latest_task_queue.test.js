@@ -68,3 +68,27 @@ test('aborts running work when a newer task supersedes it', async () => {
   assert.equal(obsoleteSignal.aborted, true)
   assert.equal(await latest, 'latest')
 })
+
+test('can preserve running work while still coalescing queued tasks', async () => {
+  const queue = new LatestTaskQueue(false)
+  let releaseFirst
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve
+  })
+  let firstSignal
+
+  const first = queue.run(async (signal) => {
+    firstSignal = signal
+    await firstGate
+    return 'first'
+  })
+  await Promise.resolve()
+  const superseded = queue.run(async () => 'superseded')
+  const latest = queue.run(async () => 'latest')
+  releaseFirst()
+
+  assert.equal(await first, 'first')
+  assert.equal(firstSignal.aborted, false)
+  assert.equal(await superseded, undefined)
+  assert.equal(await latest, 'latest')
+})
