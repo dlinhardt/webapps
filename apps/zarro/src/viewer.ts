@@ -22,6 +22,7 @@ import { AbortableTaskPool } from './abortable_task_pool'
 import { getBackendFromUrl } from './backend'
 import {
   LAYOUT_PRESET,
+  layoutDetailBounds,
   layoutDetailZoom,
   viewerLayoutConfig,
 } from './viewer_layout'
@@ -77,6 +78,9 @@ import {
   updateStainLayer,
   type StainLayer,
 } from './stain_layers'
+import {
+  refocusLoadedStainVolumes,
+} from './stain_rebuild'
 import {
   axialSliceFraction,
   axialSliceIndex,
@@ -437,7 +441,6 @@ let deferredAdaptiveFocusMoved = false
 let adaptiveLodRunning = false
 let adaptiveLodRequested = false
 let multiStainDetailChangeRequested = false
-let multiStainRebuildPromise: Promise<void> | null = null
 let streamedVolumeRevision = 0
 let downloadInProgress = false
 let renderCropGeometry: ExportGeometry | null = null
@@ -3842,6 +3845,17 @@ function currentVisibleFovBounds(
     visibleFovBounds(shape, focus, zoom, sliceAxes)
 }
 
+function currentDetailFovBounds(
+  shape: Shape3,
+  focus: Shape3 = focusFraction,
+  zoom = viewerZoom(),
+): PrototypeFovBounds[] {
+  return layoutDetailBounds(
+    Number(els.layout.value),
+    currentVisibleFovBounds(shape, focus, zoom),
+  )
+}
+
 function screenSliceStreamingBounds(
   shape: Shape3,
   focus: Shape3 = focusFraction,
@@ -4164,11 +4178,6 @@ async function applyDetailBudget(): Promise<void> {
   syncDetailBudget()
   updateUrlFromControls()
   if (stainLayerRuntimes.size === 0) return
-  if (stainLayerRuntimes.size > 1) {
-    await rebuildMultiStainVolumes()
-    syncDownloadControl()
-    return
-  }
   for (const runtime of stainLayerRuntimes.values()) {
     runtime.readSession.renew()
     runtime.chunkedVolume.setBudget(currentDetailBudgetBytes())
@@ -4215,7 +4224,9 @@ async function applyZarrLevelControl(): Promise<void> {
   updateUrlFromControls()
   els.zarrLevel.disabled = true
   if (stainLayerRuntimes.size > 1) {
-    await rebuildMultiStainVolumes()
+    multiStainDetailChangeRequested = true
+    scheduleAdaptiveLod()
+    await waitForAdaptiveLodIdle()
     return
   }
   await reloadVolume({ reloadSource: true, preserveView: true })
@@ -4442,18 +4453,15 @@ async function applyAdaptiveLodRequest(): Promise<void> {
 
   const target = detailLevelForView(primary.source, viewerZoom())
   if (runtimes.length > 1) {
-    if (
-      multiStainDetailChangeRequested &&
-      runtimes.some((runtime) => runtime.detailLevel !== target)
-    ) {
+    if (multiStainDetailChangeRequested) {
       multiStainDetailChangeRequested = false
-      await rebuildMultiStainVolumes()
+      refocusMultiStainVolumes(runtimes)
     } else {
       // Hot-swapping any chunk plan while a streamed overlay is registered can
       // detach pending bricks from NiiVue's shared pump. At a stable detail
       // level keep the resident multi-stain plans rather than refocusing them.
       for (const runtime of runtimes) {
-        const runtimeBounds = currentVisibleFovBounds(runtime.source.shape)
+        const runtimeBounds = currentDetailFovBounds(runtime.source.shape)
         runtime.lastAdaptiveRequestKey = adaptiveRequestKey(
           target,
           focusFraction,
@@ -4464,7 +4472,7 @@ async function applyAdaptiveLodRequest(): Promise<void> {
     return
   }
 
-  const bounds = currentVisibleFovBounds(primary.source.shape)
+  const bounds = currentDetailFovBounds(primary.source.shape)
   const requestKey = adaptiveRequestKey(target, focusFraction, bounds)
   if (requestKey !== primary.lastAdaptiveRequestKey) {
     primary.lastAdaptiveRequestKey = requestKey
@@ -4492,100 +4500,37 @@ async function applyAdaptiveLodRequest(): Promise<void> {
   }
 }
 
-async function rebuildMultiStainVolumes(): Promise<void> {
-  if (!nv || stainLayerRuntimes.size < 2) return
-  if (multiStainRebuildPromise) return multiStainRebuildPromise
-  const rebuild = stainLayerDisplayQueue
-    .run(performMultiStainVolumeRebuild)
-    .then(() => undefined)
-  multiStainRebuildPromise = rebuild
-  try {
-    await rebuild
-  } finally {
-    if (multiStainRebuildPromise === rebuild) multiStainRebuildPromise = null
-  }
-}
+function refocusMultiStainVolumes(runtimes: StainLayerRuntime[]): void {
+  const requests = runtimes.map((runtime) => {
+    const targetLevel = detailLevelForView(runtime.source, viewerZoom())
+    const bounds = currentDetailFovBounds(runtime.source.shape)
+    return {
+      runtime,
+      targetLevel,
+      bounds,
+      requestKey: adaptiveRequestKey(targetLevel, focusFraction, bounds),
+    }
+  })
 
-async function performMultiStainVolumeRebuild(
-  signal: AbortSignal,
-): Promise<void> {
-  if (!nv || stainLayerRuntimes.size < 2) return
-  // A deferred renderer pump can begin on the animation frame after the
-  // controller was registered. Do not tear down either manager until that
-  // work has appeared and reached a stable idle state.
-  await waitForStainLayerUploads()
-  const selectedId = activeStainLayerId
-  const view = captureView()
-  const runtimes = [...stainLayerRuntimes.values()]
-  const retainedWindows = new Map(
-    runtimes.map((runtime) => [runtime.layerId, windowForStainRuntime(runtime)]),
+  refocusLoadedStainVolumes(
+    requests.map(({ runtime, targetLevel, bounds }) => ({
+      readSession: runtime.readSession,
+      controller: runtime.chunkedVolume,
+      targetLevel,
+      focus: focusFraction,
+      bounds,
+    })),
   )
-  const stagedRuntimes = new Map<string, StainLayerRuntime>()
-  const previousSuppression = suppressAdaptiveEvents
-  suppressAdaptiveEvents = true
-  try {
-    for (const runtime of runtimes) {
-      if (!stainLayers.some(({ id }) => id === runtime.layerId)) continue
-      activeStainLayerId = runtime.layerId
-      activeSource = runtime.source
-      chunkedVolume = null
-      runtime.readSession.renew()
-      activeReadSession = runtime.readSession
-      const initialWindow = retainedWindows.get(runtime.layerId)
-      if (runtime.source.kind === 'omezarr') {
-        await loadOmezarrVolume(runtime.source, view, runtime.readSession, {
-          initialWindow,
-          opacity: 0,
-        })
-      } else {
-        await loadMosaicVolume(runtime.source, view, runtime.readSession, {
-          initialWindow,
-          opacity: 0,
-        })
-      }
-      if (!chunkedVolume) continue
-      stagedRuntimes.set(runtime.layerId, {
-        ...runtime,
-        chunkedVolume,
-        detailLevel: currentDetailLevel ?? runtime.source.baseLevel,
-        lastAdaptiveRequestKey,
-      })
-      await waitForStainLayerUploads()
-    }
 
-    // The old selected volume remains the rendered base until every replacement
-    // is resident. Remove the old model entries without drawing, then let the
-    // visibility transaction promote the ready selected replacement atomically.
-    for (const runtime of runtimes) {
-      runtime.chunkedVolume.dispose()
-      const volumeIndex = volumeIndexForRuntime(runtime)
-      if (volumeIndex >= 0) nv.model.removeVolume(volumeIndex)
-    }
-    stainLayerRuntimes.clear()
-    for (const [layerId, runtime] of stagedRuntimes) {
-      stainLayerRuntimes.set(layerId, runtime)
-    }
-  } finally {
-    try {
-      if (stagedRuntimes.size !== runtimes.length) {
-        for (const runtime of stagedRuntimes.values()) {
-          runtime.chunkedVolume.dispose()
-          const volumeIndex = volumeIndexForRuntime(runtime)
-          if (volumeIndex >= 0) nv.model.removeVolume(volumeIndex)
-        }
-        if (stagedRuntimes.size > 0) await nv.updateGLVolume()
-      }
-      activeStainLayerId = selectedId
-      const selectedRuntime = activeStainRuntime()
-      if (selectedRuntime) activateStainRuntime(selectedRuntime)
-      restoreView(view)
-      await updateStainLayerVisibilityNow(signal, selectedId)
-      syncControlsToActiveLayer()
-      renderStainLayers()
-      syncStainLayerTelemetry()
-    } finally {
-      suppressAdaptiveEvents = previousSuppression
-    }
+  for (const { runtime, targetLevel, requestKey } of requests) {
+    runtime.detailLevel = targetLevel
+    runtime.lastAdaptiveRequestKey = requestKey
+  }
+  const active = activeStainRuntime()
+  if (active) {
+    currentDetailLevel = active.detailLevel
+    lastAdaptiveRequestKey = active.lastAdaptiveRequestKey
+    setActiveLodLoading(active.detailLevel)
   }
 }
 
@@ -4618,7 +4563,7 @@ async function loadOmezarrVolume(
       : view.pan2D[3]
     : viewerZoom()
   const minLevel = detailLevelForView(source, zoom)
-  const focusBounds = currentVisibleFovBounds(
+  const focusBounds = currentDetailFovBounds(
     source.shape,
     focusFraction,
     zoom,
@@ -4680,7 +4625,7 @@ async function loadMosaicVolume(
       : view.pan2D[3]
     : viewerZoom()
   const minLevel = detailLevelForView(source, zoom)
-  const focusBounds = currentVisibleFovBounds(
+  const focusBounds = currentDetailFovBounds(
     source.shape,
     focusFraction,
     zoom,

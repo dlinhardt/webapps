@@ -11,6 +11,8 @@ export const LAYOUT_PRESET = {
   EQUAL_SLICES_VERTICAL: 33,
 } as const
 
+const VERTICAL_REFORMAT_CROP_FRACTION = 0.4
+
 export interface ViewerLayoutConfig {
   sliceType: number
   showRender: number
@@ -29,12 +31,35 @@ export function layoutDetailZoom(
   physicalExtents: readonly [number, number, number],
 ): number {
   if (selected !== LAYOUT_PRESET.EQUAL_SLICES_VERTICAL) return zoom
-  const finiteExtents = physicalExtents.filter(
-    (extent) => Number.isFinite(extent) && extent > 0,
+  if (
+    !physicalExtents.every(
+      (extent) => Number.isFinite(extent) && extent > 0,
+    )
+  ) {
+    return zoom
+  }
+
+  const [x, y, z] = physicalExtents
+  const axialFieldOfView = Math.min(x, y)
+  const reformatFieldOfView = Math.min(
+    Math.min(x, z) * VERTICAL_REFORMAT_CROP_FRACTION,
+    Math.min(y, z) * VERTICAL_REFORMAT_CROP_FRACTION,
   )
-  if (finiteExtents.length !== 3) return zoom
-  const magnification = Math.max(...finiteExtents) / Math.min(...finiteExtents)
-  return zoom * Math.min(4, magnification)
+  const magnification = Math.max(1, axialFieldOfView / reformatFieldOfView)
+  return zoom * magnification
+}
+
+export function layoutDetailBounds<T>(
+  selected: number,
+  bounds: readonly T[],
+): T[] {
+  // The vertical layout magnifies the two cropped reformats by roughly 30x.
+  // Reserving the full axial overview at that same level would exhaust the
+  // brick budget and force every panel back to a coarse global level.
+  if (selected === LAYOUT_PRESET.EQUAL_SLICES_VERTICAL && bounds.length === 3) {
+    return bounds.slice(1)
+  }
+  return [...bounds]
 }
 
 export function viewerLayoutConfig(selected: number): ViewerLayoutConfig {
@@ -75,12 +100,12 @@ export function viewerLayoutConfig(selected: number): ViewerLayoutConfig {
         {
           sliceType: SLICE_TYPE.CORONAL,
           position: [0, 1 / 3, 1, 1 / 3],
-          squareCropFraction: 0.4,
+          squareCropFraction: VERTICAL_REFORMAT_CROP_FRACTION,
         },
         {
           sliceType: SLICE_TYPE.SAGITTAL,
           position: [0, 2 / 3, 1, 1 / 3],
-          squareCropFraction: 0.4,
+          squareCropFraction: VERTICAL_REFORMAT_CROP_FRACTION,
         },
       ],
     }

@@ -7,6 +7,7 @@ import {
 } from '@niivue/niivue'
 import {
   LAYOUT_PRESET,
+  layoutDetailBounds,
   layoutDetailZoom,
   viewerLayoutConfig,
 } from '../src/viewer_layout.ts'
@@ -21,14 +22,39 @@ test('equal slices uses three horizontal thirds without a render tile', () => {
   assert.equal(layout.customLayout, null)
 })
 
-test('vertical equal slices request detail for the magnified thin axis', () => {
+test('vertical equal slices match reformat detail to the axial tile', () => {
   assert.equal(
     layoutDetailZoom(LAYOUT_PRESET.EQUAL_SLICES_VERTICAL, 1, [58, 58, 5]),
-    4,
+    29,
+  )
+  assert.equal(
+    layoutDetailZoom(
+      LAYOUT_PRESET.EQUAL_SLICES_VERTICAL,
+      1,
+      [108.64, 67.31, 5.25],
+    ).toFixed(2),
+    '32.05',
   )
   assert.equal(
     layoutDetailZoom(LAYOUT_PRESET.EQUAL_SLICES, 1, [58, 58, 5]),
     1,
+  )
+})
+
+test('vertical equal slices reserve fine detail for the two reformats', () => {
+  const bounds = [
+    { plane: 'axial' },
+    { plane: 'coronal' },
+    { plane: 'sagittal' },
+  ]
+
+  assert.deepEqual(
+    layoutDetailBounds(LAYOUT_PRESET.EQUAL_SLICES_VERTICAL, bounds),
+    [{ plane: 'coronal' }, { plane: 'sagittal' }],
+  )
+  assert.deepEqual(
+    layoutDetailBounds(LAYOUT_PRESET.EQUAL_SLICES, bounds),
+    bounds,
   )
 })
 

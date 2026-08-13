@@ -50,12 +50,41 @@ export class AbortableTaskPool {
         continue
       }
       this.active++
+      let settled = false
+      let released = false
+      const release = (): void => {
+        if (released) return
+        released = true
+        this.active--
+        this.pump()
+      }
+      const onActiveAbort = (): void => {
+        if (!settled) {
+          settled = true
+          queued.reject(queued.signal.reason)
+        }
+        // Fetch cancellation can take time to unwind. Make the slot available
+        // to the replacement plan as soon as cancellation is requested.
+        release()
+      }
+      queued.signal.addEventListener('abort', onActiveAbort, { once: true })
       Promise.resolve()
         .then(queued.task)
-        .then(queued.resolve, queued.reject)
+        .then(
+          (result) => {
+            if (settled) return
+            settled = true
+            queued.resolve(result)
+          },
+          (error) => {
+            if (settled) return
+            settled = true
+            queued.reject(error)
+          },
+        )
         .finally(() => {
-          this.active--
-          this.pump()
+          queued.signal.removeEventListener('abort', onActiveAbort)
+          release()
         })
     }
   }
