@@ -147,13 +147,11 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   let delayLevelOneChunks = false;
   let delayedLevelOneChunkRequests = 0;
   let delayDapiMetadata = false;
+  let delayDapiChunks = false;
   let dapiRootMetadataRequests = 0;
-  let gateLayerRestore = false;
-  let leftChunkSettled = false;
-  let dapiStartedBeforeLeftSettled = false;
   let gateDualLayerLod = false;
-  let leftLodSettled = false;
-  let dapiLodStartedBeforeLeftSettled = false;
+  let gatedLodLevel = 1;
+  let gatedDapiLodRequests = 0;
   const group = JSON.stringify({ zarr_format: 2 });
   await page.route("**/test-mosaic/**", async (route) => {
     const url = new URL(route.request().url());
@@ -161,14 +159,6 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     const isDapi = path.includes("/dapi/");
     const isRight = path.includes("/right/") || isDapi;
     if (isDapi && path.endsWith("/.zattrs")) dapiRootMetadataRequests++;
-    if (
-      gateLayerRestore &&
-      isDapi &&
-      path.endsWith("/.zattrs") &&
-      !leftChunkSettled
-    ) {
-      dapiStartedBeforeLeftSettled = true;
-    }
     if (delayDapiMetadata && isDapi && /\.(?:zattrs|zarray)$/.test(path)) {
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
@@ -204,7 +194,7 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
           zarr_format: 2,
           shape: [size, size, size],
           chunks: [size, size, size],
-          dtype: "|u1",
+          dtype: isDapi ? "<u2" : "|u1",
           compressor: null,
           fill_value: 0,
           order: "C",
@@ -220,21 +210,16 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
         delayedLevelOneChunkRequests++;
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
-      if (gateLayerRestore && !isRight) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        leftChunkSettled = true;
-      }
-      if (gateDualLayerLod && level === 1 && !isRight) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        leftLodSettled = true;
+      if (delayDapiChunks && isDapi) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
       }
       if (
         gateDualLayerLod &&
-        level === 1 &&
-        isDapi &&
-        !leftLodSettled
+        level === gatedLodLevel &&
+        isDapi
       ) {
-        dapiLodStartedBeforeLeftSettled = true;
+        gatedDapiLodRequests++;
+        await new Promise((resolve) => setTimeout(resolve, 400));
       }
       chunkRequestsByLevel.set(
         level,
@@ -242,9 +227,12 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
       );
       if (isRight) rightChunkRequests++;
       else leftChunkRequests++;
+      const body = isDapi
+        ? Buffer.from(new Uint16Array(size ** 3).fill(610).buffer)
+        : Buffer.alloc(size ** 3, isRight ? 180 : 60);
       await route.fulfill({
         contentType: "application/octet-stream",
-        body: Buffer.alloc(size ** 3, isRight ? 180 : 60),
+        body,
       });
     } else {
       await route.fulfill({ status: 404, body: "not found" });
@@ -266,6 +254,10 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(page.locator("#axialSlice")).toHaveAttribute("min", "0");
   await expect(page.locator("#axialSlice")).toHaveAttribute("max", "15");
   await expect(page.locator("#axialSliceHelp")).toContainText("current Zarr level");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-streaming-screen-layout",
+    /^0:/,
+  );
   const axialTile = await page.locator("#nv-canvas").evaluate((canvas) => {
     const tile = (canvas.dataset.streamingScreenLayout ?? "")
       .split(";")
@@ -338,12 +330,13 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(page.locator("#axialSlice")).toBeEnabled();
   await page.locator("#layout").selectOption("33");
   await expect.poll(async () => page.locator("#nv-canvas").evaluate((canvas) => {
-    const widths = (canvas.dataset.streamingScreenLayout ?? "")
+    const sizes = (canvas.dataset.streamingScreenLayout ?? "")
       .split(";")
       .filter(Boolean)
-      .map((tile) => Number(tile.split(":")[1]?.split(",")[2] ?? 0));
-    return Math.max(...widths, 0) / Math.max(1, Math.min(...widths));
-  })).toBeGreaterThan(1.5);
+      .map((tile) => tile.split(":")[1]?.split(",").slice(2).map(Number));
+    const dimensions = sizes.flatMap((size) => size ?? []);
+    return Math.max(...dimensions, 0) - Math.min(...dimensions);
+  })).toBeLessThanOrEqual(1);
   await page.locator("#layout").selectOption("31");
   await expect(page.locator("#nv-canvas")).toHaveAttribute(
     "data-crosshair-visible",
@@ -644,6 +637,21 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     "data-niivue-volume-opacities",
     "1,0",
   );
+  await expect(page.locator("#tileLoading")).toHaveAttribute(
+    "data-loading",
+    "0",
+    { timeout: 30_000 },
+  );
+  await expect(page.getByLabel(/Window level/)).toHaveValue("305");
+  await expect(page.getByLabel(/Window width/)).toHaveValue("610");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-min", "0");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-max", "610");
+  const dapiBeforeAutoContrast = await page.locator("#nv-canvas").screenshot();
+  await page.getByRole("button", { name: "Auto contrast" }).click();
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-min", "0");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-max", "610");
+  const dapiAfterAutoContrast = await page.locator("#nv-canvas").screenshot();
+  expect(dapiAfterAutoContrast.equals(dapiBeforeAutoContrast)).toBe(true);
   const requestsBeforeCachedSwitch = {
     left: leftChunkRequests,
     right: rightChunkRequests,
@@ -666,101 +674,82 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect(page.getByLabel(/Window width/)).toHaveValue("60");
   await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-min", "0");
   await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-max", "60");
-  const leftOnlyCanvas = await page.locator("#nv-canvas").screenshot();
-  await page.getByLabel("DAPI opacity").fill("50");
-  await expect(page.getByLabel("DAPI opacity")).toHaveValue("50");
-  await expect(page.locator("#nv-canvas")).toHaveAttribute(
-    "data-visible-stain-layers",
-    /stain-.*,stain-.*/,
-  );
-  await expect(page.locator("#nv-canvas")).toHaveAttribute(
-    "data-niivue-volume-opacities",
-    "1,0.5",
-  );
-  await expect.poll(async () => {
-    const blendedCanvas = await page.locator("#nv-canvas").screenshot();
-    return blendedCanvas.equals(leftOnlyCanvas);
-  }).toBe(false);
+  await expect(page.getByLabel(/opacity/i)).toHaveCount(0);
   await page.getByRole("button", { name: "Copy share link" }).click();
   const layeredShareUrl = await page.evaluate(() => window.__copiedText);
   expect(new URL(layeredShareUrl).searchParams.get("crosshair")).toBe(clickedCrosshair);
-  gateLayerRestore = true;
-  leftChunkSettled = false;
-  dapiStartedBeforeLeftSettled = false;
+  const sharedLayers = JSON.parse(new URL(layeredShareUrl).searchParams.get("layers"));
+  expect(sharedLayers.every((layer) => !("opacity" in layer))).toBe(true);
+  delayDapiMetadata = true;
   await page.goto(layeredShareUrl);
   await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Show DAPI stain layer" })).toBeVisible();
-  await expect(page.getByLabel("DAPI opacity")).toHaveValue("50");
-  await expect.poll(async () => (
-    (await page.locator("#nv-canvas").getAttribute("data-loaded-stain-layers"))
-      ?.split(",").filter(Boolean).length ?? 0
-  ), { timeout: 30_000 }).toBe(2);
-  expect(dapiStartedBeforeLeftSettled).toBe(false);
-  await expect(page.locator("#activeLevel")).toHaveAttribute("data-fov-levels", "0");
-
-  // A shared link can describe an unloaded, transparent stain. Dragging that
-  // stain's opacity must launch one load and preserve the user's active layer,
-  // even though a range input emits many events before metadata arrives.
-  const unloadedLayerUrl = new URL(layeredShareUrl);
-  const sharedLayers = JSON.parse(unloadedLayerUrl.searchParams.get("layers"));
-  const leftLayer = sharedLayers.find((layer) => layer.name === "left");
-  const dapiLayer = sharedLayers.find((layer) => layer.name === "DAPI");
-  for (const layer of sharedLayers) layer.opacity = layer.id === leftLayer.id ? 1 : 0;
-  unloadedLayerUrl.searchParams.set("layers", JSON.stringify(sharedLayers));
-  unloadedLayerUrl.searchParams.set("activeLayer", leftLayer.id);
-  delayDapiMetadata = true;
-  await page.goto(unloadedLayerUrl.toString());
-  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "true");
   await expect.poll(async () => (
     (await page.locator("#nv-canvas").getAttribute("data-loaded-stain-layers"))
       ?.split(",").filter(Boolean).length ?? 0
   )).toBe(1);
-  const dapiRequestsBeforeDrag = dapiRootMetadataRequests;
-  await page.getByLabel("DAPI opacity").evaluate((input) => {
-    for (const value of [5, 10, 20]) {
-      input.value = String(value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-  });
-  await page.waitForTimeout(150);
-  await page.getByLabel("DAPI opacity").evaluate((input) => {
-    for (const value of [30, 40]) {
-      input.value = String(value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-  });
-  await expect(page.getByLabel("DAPI opacity")).toHaveValue("40");
-  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByLabel("left opacity")).toHaveValue("100");
+  const dapiRequestsBeforeSwitch = dapiRootMetadataRequests;
+  delayDapiChunks = true;
+  await page.getByRole("button", { name: "Show DAPI stain layer" }).click();
+  await expect(page.getByRole("button", { name: "Show left stain layer" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "Show DAPI stain layer" })).toHaveAttribute("aria-pressed", "true");
+  expect(new URL(page.url()).searchParams.get("activeLayer")).toBe(dapiLayerId);
   await expect.poll(async () => (
     (await page.locator("#nv-canvas").getAttribute("data-loaded-stain-layers"))
       ?.split(",").filter(Boolean).length ?? 0
   ), { timeout: 30_000 }).toBe(2);
   await expect(page.locator("#nv-canvas")).toHaveAttribute(
     "data-niivue-volume-opacities",
-    "1,0.4",
+    "1,0",
   );
   await expect(page.locator("#tileLoading")).toHaveAttribute(
     "data-loading",
     "0",
     { timeout: 30_000 },
   );
-  expect(dapiRootMetadataRequests - dapiRequestsBeforeDrag).toBe(5);
-  expect(dapiLayer).toBeTruthy();
+  expect(dapiRootMetadataRequests - dapiRequestsBeforeSwitch).toBe(5);
+  await expect(page.getByLabel(/Window level/)).toHaveValue("305");
+  await expect(page.getByLabel(/Window width/)).toHaveValue("610");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-min", "0");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-max", "610");
+  const restoredDapiBeforeAutoContrast = await page.locator("#nv-canvas").screenshot();
+  await page.getByRole("button", { name: "Auto contrast" }).click();
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-min", "0");
+  await expect(page.locator("#nv-canvas")).toHaveAttribute("data-window-max", "610");
+  const restoredDapiAfterAutoContrast = await page.locator("#nv-canvas").screenshot();
+  expect(restoredDapiAfterAutoContrast.equals(restoredDapiBeforeAutoContrast)).toBe(true);
+  await expect(page.getByLabel(/opacity/i)).toHaveCount(0);
+
+  // Exercise the same equal-slices layout used by the live DANDI report.
+  await page.locator("#layout").selectOption("30");
+  await expect(page.locator("#tileLoading")).toHaveAttribute("data-loading", "0");
+  await expect(page.locator("#activeLevel")).toHaveAttribute("data-delivered-level", "0");
 
   gateDualLayerLod = true;
-  leftLodSettled = false;
-  dapiLodStartedBeforeLeftSettled = false;
-  await page.getByLabel("Zoom level").fill("1");
+  gatedLodLevel = 2;
+  gatedDapiLodRequests = 0;
+  await page.locator("#showStats").evaluate((input) => {
+    input.checked = false;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const dapiWindowBeforeLodSwap = await Promise.all([
+    page.getByLabel(/Window level/).inputValue(),
+    page.getByLabel(/Window width/).inputValue(),
+  ]);
+  await page.getByLabel("Zoom level").fill("2");
   await page.getByRole("button", { name: "Apply" }).click();
+  await expect.poll(() => gatedDapiLodRequests).toBeGreaterThan(0);
+  const dapiDuringLodSwap = await page.locator("#nv-canvas").screenshot();
+  await expect(page.getByLabel(/Window level/)).toHaveValue(dapiWindowBeforeLodSwap[0]);
+  await expect(page.getByLabel(/Window width/)).toHaveValue(dapiWindowBeforeLodSwap[1]);
   await expect(page.locator("#activeLevel")).toHaveAttribute(
     "data-requested-level",
-    "1",
+    "2",
     { timeout: 30_000 },
   );
   await expect(page.locator("#activeLevel")).toHaveAttribute(
     "data-delivered-level",
-    "1",
+    "2",
     { timeout: 30_000 },
   );
   await expect(page.locator("#tileLoading")).toHaveAttribute(
@@ -771,7 +760,8 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   await expect.poll(async () => Number(
     await page.locator("#nv-canvas").getAttribute("data-stream-resident"),
   )).toBeGreaterThan(0);
-  expect(dapiLodStartedBeforeLeftSettled).toBe(false);
+  const dapiAfterLodSwap = await page.locator("#nv-canvas").screenshot();
+  expect(dapiDuringLodSwap.equals(dapiAfterLodSwap)).toBe(true);
 });
 
 test("DANDI assets are grouped by stain and selectable as a chunk set", async ({ page }) => {

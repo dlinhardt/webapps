@@ -5,6 +5,14 @@ export interface IntensityWindow {
   max: number
 }
 
+export function resolveIntensityWindow(
+  stored: IntensityWindow,
+  estimated: IntensityWindow | null,
+  automatic: boolean,
+): IntensityWindow {
+  return automatic && estimated ? estimated : stored
+}
+
 const MAX_SAMPLES_PER_CHUNK = 65_536
 const MIN_SIGNAL_SAMPLES = 64
 const UPPER_PERCENTILE = 0.995

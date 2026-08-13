@@ -19,7 +19,22 @@ export interface ViewerLayoutConfig {
   customLayout: Array<{
     sliceType: number
     position: [number, number, number, number]
+    squareCropFraction?: number
   }> | null
+}
+
+export function layoutDetailZoom(
+  selected: number,
+  zoom: number,
+  physicalExtents: readonly [number, number, number],
+): number {
+  if (selected !== LAYOUT_PRESET.EQUAL_SLICES_VERTICAL) return zoom
+  const finiteExtents = physicalExtents.filter(
+    (extent) => Number.isFinite(extent) && extent > 0,
+  )
+  if (finiteExtents.length !== 3) return zoom
+  const magnification = Math.max(...finiteExtents) / Math.min(...finiteExtents)
+  return zoom * Math.min(4, magnification)
 }
 
 export function viewerLayoutConfig(selected: number): ViewerLayoutConfig {
@@ -50,11 +65,24 @@ export function viewerLayoutConfig(selected: number): ViewerLayoutConfig {
       sliceType: SLICE_TYPE.MULTIPLANAR,
       showRender: SHOW_RENDER.NEVER,
       multiplanarType: MULTIPLANAR_TYPE.COLUMN,
-      // Preserve each plane's physical aspect. Equal-size mode pads all three
-      // planes to the volume's largest extent, which makes thin volumes render
-      // as narrow, centred squares with mostly empty space in a tall column.
       isEqualSize: false,
-      customLayout: null,
+      customLayout: [
+        {
+          sliceType: SLICE_TYPE.AXIAL,
+          position: [0, 0, 1, 1 / 3],
+          squareCropFraction: 1,
+        },
+        {
+          sliceType: SLICE_TYPE.CORONAL,
+          position: [0, 1 / 3, 1, 1 / 3],
+          squareCropFraction: 0.4,
+        },
+        {
+          sliceType: SLICE_TYPE.SAGITTAL,
+          position: [0, 2 / 3, 1, 1 / 3],
+          squareCropFraction: 0.4,
+        },
+      ],
     }
   }
   if (selected === LAYOUT_PRESET.EQUAL_SLICES_RENDER) {

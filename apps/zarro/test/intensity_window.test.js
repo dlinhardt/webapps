@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   IntensityWindowEstimator,
   isGenericDtypeWindow,
+  resolveIntensityWindow,
 } from '../src/intensity_window.ts'
 
 test('recognises the generic uint16 display range from rounded share controls', () => {
@@ -36,4 +37,23 @@ test('estimates a useful uint16 window while ignoring zero background', () => {
 test('waits for signal instead of auto-windowing an empty chunk', () => {
   const estimator = new IntensityWindowEstimator('uint16')
   assert.equal(estimator.observe(new Uint8Array(4096)), null)
+})
+
+test('uses the latest estimate when automatic windowing remains enabled', () => {
+  assert.deepEqual(
+    resolveIntensityWindow(
+      { min: 0, max: 6500 },
+      { min: 0, max: 610 },
+      true,
+    ),
+    { min: 0, max: 610 },
+  )
+  assert.deepEqual(
+    resolveIntensityWindow(
+      { min: 100, max: 500 },
+      { min: 0, max: 610 },
+      false,
+    ),
+    { min: 100, max: 500 },
+  )
 })

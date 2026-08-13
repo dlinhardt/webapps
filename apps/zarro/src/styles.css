@@ -389,28 +389,6 @@ a:focus-visible {
   font-weight: 400;
 }
 
-.stain-layer-opacity {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) 2.8rem;
-  gap: 0.45rem;
-  align-items: center;
-  padding: 0 0.2rem 0.2rem;
-  color: var(--nd-color-text-dim);
-  font-size: 0.62rem;
-  font-weight: 500;
-}
-
-.stain-layer-opacity input {
-  width: 100%;
-  accent-color: var(--nd-color-primary);
-}
-
-.stain-layer-opacity output {
-  color: var(--nd-color-text-muted);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
 #dandiSearchStatus {
   display: block;
   color: var(--nd-color-text-dim);

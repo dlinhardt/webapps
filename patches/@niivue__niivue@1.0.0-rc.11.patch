@@ -13,7 +13,7 @@ index 7e65858379bcb0eb58cde7ef98137ce8716e7bfd..65287eeebcb502e0a7c029b7e0daa7ed
  export declare enum SHOW_RENDER {
      NEVER = 0,
 diff --git a/dist/NVControlBase-Cq7vd-TD.js b/dist/NVControlBase-Cq7vd-TD.js
-index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a2215c3fc18 100644
+index 233eaa4b018793ea685dedebbd73c0c8a6417728..7d3cbf8a9c9020e56a36ec95ee381eb5b0686f7d 100644
 --- a/dist/NVControlBase-Cq7vd-TD.js
 +++ b/dist/NVControlBase-Cq7vd-TD.js
 @@ -1836,7 +1836,7 @@ function $e(t, e, n = !1) {
@@ -25,7 +25,29 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  const Pr = Object.freeze({
    NIFTI_INTENT_NONE: 0,
    NIFTI_INTENT_CORREL: 2,
-@@ -12279,63 +12279,18 @@ function xS(t) {
+@@ -2350,10 +2350,18 @@ function Lb(t) {
+       else {
+         const b = d.sliceType, g = c[b];
+         if (!g?.screen) continue;
+-        const v = g.screen.fovMM, w = Math.min(T / v[0], _ / v[1]), E = v[0] * w, A = v[1] * w, M = Dr(b, s), P = {
+-          leftTopWidthHeight: [p + (T - E) / 2, y + (_ - A) / 2, E, A],
++        const C = xo(g.screen);
++        if (d.squareCropFraction) {
++          const K = Math.min(Math.abs(C.fovMM[0]), Math.abs(C.fovMM[1])) * d.squareCropFraction;
++          for (let J = 0; J < 2; J++) {
++            const ne = (C.mnMM[J] + C.mxMM[J]) / 2;
++            C.mnMM[J] = ne - K / 2, C.mxMM[J] = ne + K / 2, C.fovMM[J] = K;
++          }
++        }
++        const v = C.fovMM, w = Math.min(T / v[0], _ / v[1]), E = v[0] * w, A = v[1] * w, M = Dr(b, s), F = Math.min(T, _), P = {
++          leftTopWidthHeight: d.squareCropFraction ? [p + (T - F) / 2, y + (_ - F) / 2, F, F] : [p + (T - E) / 2, y + (_ - A) / 2, E, A],
+           axCorSag: b,
+-          screen: xo(g.screen),
++          screen: C,
+           azimuth: M.azimuth,
+           elevation: M.elevation
+         };
+@@ -12279,63 +12287,18 @@ function xS(t) {
        return { lengthMM: n, label: `${n} mm` };
    return null;
  }
@@ -101,7 +123,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  }
  function Zx(t, e, n = [1, 1, 1]) {
    if (e < 1)
-@@ -12639,16 +12594,35 @@ function yS(t, e, n, i = {}) {
+@@ -12639,16 +12602,35 @@ function yS(t, e, n, i = {}) {
            R($, N, s);
          }
      return y(I, P);
@@ -140,7 +162,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      if (A.length > b) {
        const M = Math.max(
          1,
-@@ -12656,7 +12630,7 @@ function yS(t, e, n, i = {}) {
+@@ -12656,7 +12638,7 @@ function yS(t, e, n, i = {}) {
        );
        let P = 1;
        for (; A.length > b && P < M; )
@@ -149,7 +171,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      }
    }
    return {
-@@ -15516,6 +15490,10 @@ class y2 {
+@@ -15516,6 +15498,10 @@ class y2 {
    get residentCount() {
      return this._resident.size;
    }
@@ -160,7 +182,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
    /** True once every chunk in the plan is resident. */
    get isFullyResident() {
      return this._resident.size === this.chunkCount;
-@@ -15625,7 +15603,7 @@ class y2 {
+@@ -15625,7 +15611,7 @@ class y2 {
    /** Destroy every resident chunk's GPU resources and reset all state. */
    destroy() {
      for (const e of this._resident.values()) this._hooks.destroy(e.chunk);
@@ -169,7 +191,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
    }
    _removeQueuedUpload(e) {
      for (let n = this._uploadQueue.length - 1; n >= 0; n--)
-@@ -16094,7 +16072,7 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16094,7 +16080,7 @@ function Oa(t, e, n, i = () => !0) {
      throw new Error(
        "orientChunkedGL: source is non-RAS but missing RAS mapping"
      );
@@ -178,7 +200,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
    function p(b) {
      const g = n.chunks[b];
      if (!g)
-@@ -16130,6 +16108,8 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16130,6 +16116,8 @@ function Oa(t, e, n, i = () => !0) {
    }
    function y(b) {
      if (!r) return p(b);
@@ -187,7 +209,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      const g = x.get(b);
      if (g) return g;
      const v = p(b);
-@@ -16145,7 +16125,7 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16145,7 +16133,7 @@ function Oa(t, e, n, i = () => !0) {
      if (!g)
        throw new Error(`orientChunkedGL: chunk index ${b} out of range`);
      const v = await y(b);
@@ -196,7 +218,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      const w = o ? hA(t, f2(v, s), g.texDims) : _A(t, v, s, g.texDims, e), E = [
        g.texDims[0],
        g.texDims[1],
-@@ -16153,7 +16133,16 @@ function Oa(t, e, n, i = () => !0) {
+@@ -16153,7 +16141,16 @@ function Oa(t, e, n, i = () => !0) {
      ], A = i(), M = A ? zi(t, w, E) : VA(t, E);
      return { volumeTexture: w, volumeGradientTexture: M, desc: g, hasGradient: A };
    }
@@ -214,7 +236,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  }
  function $A(t, e) {
    if (e)
-@@ -16672,6 +16661,9 @@ function qA(t) {
+@@ -16672,6 +16669,9 @@ function qA(t) {
    const [e, n, i] = t.desc.texDims;
    return e * n * i * 8;
  }
@@ -224,7 +246,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  function $a(t, e) {
    const n = t.chunks[e], [i, r, s] = t.volumeDims, [o, a, l] = n.texDims, c = t.levelDims?.[n.sourceLevel ?? 0] ?? t.volumeDims;
    return {
-@@ -16884,9 +16876,22 @@ let jA = class extends ze {
+@@ -16884,9 +16884,22 @@ let jA = class extends ze {
          `Volume ${n.name} tiles into ${a.chunks.length} chunks, exceeding the per-tile limit of ${Li}. Use a coarser pyramid level or crop the volume.`
        );
      const h = n.url || n.name, d = h ? this._texCache.get(h) : void 0;
@@ -250,7 +272,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      const u = {
        kind: "chunked",
        volume: n,
-@@ -16897,7 +16902,8 @@ let jA = class extends ze {
+@@ -16897,7 +16910,8 @@ let jA = class extends ze {
          a,
          () => this.gradientAmount > 0
        ),
@@ -260,7 +282,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      };
      u.manager = new y2(
        a.chunks.length,
-@@ -16905,6 +16911,7 @@ let jA = class extends ze {
+@@ -16905,6 +16919,7 @@ let jA = class extends ze {
        {
          bytesOf: qA,
          destroy: (m) => $A(e, [m]),
@@ -268,7 +290,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
          prefetch: (m) => u.uploader.prefetchChunk(m)
        }
      );
-@@ -17211,7 +17218,7 @@ let jA = class extends ze {
+@@ -17211,7 +17226,7 @@ let jA = class extends ze {
              const h = await l.uploadChunk(a);
              s.manager.generation === c ? (h.hasGradient || (this._uploadedUnlit = !0), s.manager.admit(a, h)) : s.manager.discardUpload(a, h);
            } catch (h) {
@@ -277,7 +299,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
              continue;
            }
            e = !0, n++, r = !0;
-@@ -19280,7 +19287,9 @@ class _2 {
+@@ -19280,7 +19295,9 @@ class _2 {
            (O, $, N, q, j, Y, K, J) => this.fontRenderer.buildText(O, $, N, q, j, Y, K, J),
            Pe,
            n.ui.fontColor,
@@ -288,7 +310,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
          );
          U && (c.push(...U.labels), E.push(...U.lines));
        }
-@@ -22835,7 +22844,7 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22835,7 +22852,7 @@ async function Ja(t, e, n, i = () => !0) {
    ) : null, f = r ? !0 : m2(e), m = e.img2RASstart, x = e.img2RASstep;
    if (!r && !f && (!x || !m))
      throw new Error("orientChunked: source is non-RAS but missing RAS mapping");
@@ -297,7 +319,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
    function y(v) {
      const w = n.chunks[v];
      if (!w)
-@@ -22871,6 +22880,8 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22871,6 +22888,8 @@ async function Ja(t, e, n, i = () => !0) {
    }
    function T(v) {
      if (!r) return y(v);
@@ -306,7 +328,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      const w = p.get(v);
      if (w) return w;
      const E = y(v);
-@@ -22886,7 +22897,7 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22886,7 +22905,7 @@ async function Ja(t, e, n, i = () => !0) {
      if (!w)
        throw new Error(`orientChunked: chunk index ${v} out of range`);
      const E = await T(v);
@@ -315,7 +337,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      let A;
      if (o)
        A = t.createTexture({
-@@ -22952,9 +22963,17 @@ async function Ja(t, e, n, i = () => !0) {
+@@ -22952,9 +22971,17 @@ async function Ja(t, e, n, i = () => !0) {
      };
    }
    function g() {
@@ -335,7 +357,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  }
  function Y5(t) {
    if (t)
-@@ -23753,9 +23772,22 @@ class t4 extends ze {
+@@ -23753,9 +23780,22 @@ class t4 extends ze {
          `Volume ${n.name} tiles into ${l.chunks.length} chunks, exceeding the per-tile limit of ${en}. Use a coarser pyramid level or crop the volume.`
        );
      const d = n.url || n.name, u = d ? this._texCache.get(d) : void 0;
@@ -361,7 +383,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      const f = await Ja(
        e,
        n,
-@@ -23767,7 +23799,8 @@ class t4 extends ze {
+@@ -23767,7 +23807,8 @@ class t4 extends ze {
        manager: void 0,
        uploader: f,
        plan: l,
@@ -371,7 +393,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      };
      m.manager = new y2(
        l.chunks.length,
-@@ -23776,7 +23809,7 @@ class t4 extends ze {
+@@ -23776,7 +23817,7 @@ class t4 extends ze {
          bytesOf: e4,
          destroy: (p) => Y5([p]),
          onEvict: (p) => {
@@ -380,7 +402,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
          },
          prefetch: (p) => m.uploader.prefetchChunk(p),
          onAdmit: r
-@@ -24093,7 +24126,7 @@ class t4 extends ze {
+@@ -24093,7 +24134,7 @@ class t4 extends ze {
              const h = await l.uploadChunk(a);
              s.manager.generation === c ? (h.hasGradient || (this._uploadedUnlit = !0), s.manager.admit(a, h)) : s.manager.discardUpload(a, h);
            } catch (h) {
@@ -389,7 +411,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
              continue;
            }
            e = !0, n++, r = !0;
-@@ -26847,7 +26880,9 @@ class S2 {
+@@ -26847,7 +26888,9 @@ class S2 {
            (q, j, Y, K, J, ne, ce, z) => this.fontRenderer.buildText(q, j, Y, K, J, ne, ce, z),
            Pe,
            e.ui.fontColor,
@@ -400,7 +422,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
          );
          N && (h.push(...N.labels), P.push(...N.lines));
        }
-@@ -32599,6 +32634,11 @@ function to(t, e) {
+@@ -32599,6 +32642,11 @@ function to(t, e) {
    }
    return i.length > 0 && n.push({ ...e, polygons: i }), n;
  }
@@ -412,7 +434,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  function V4(t, e) {
    return e === 0 ? t.model.interaction.primaryDragMode : e === 2 ? t.model.interaction.secondaryDragMode : ge.none;
  }
-@@ -32776,6 +32816,10 @@ function $4(t) {
+@@ -32776,6 +32824,10 @@ function $4(t) {
  }
  function Sl(t) {
    const e = t._activeDragMode;
@@ -423,7 +445,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
    if (e === ge.angle) {
      if (t._angleState === "drawing_first_line") {
        t._angleFirstLine = [
-@@ -32849,7 +32893,7 @@ function Al(t) {
+@@ -32849,7 +32901,7 @@ function Al(t) {
    e && t.emit("dragRelease", e);
  }
  function Ml(t) {
@@ -432,7 +454,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  }
  function X4(t) {
    const e = t._pan2DxyzmmAtDragStart;
-@@ -32859,7 +32903,7 @@ function X4(t) {
+@@ -32859,7 +32911,7 @@ function X4(t) {
      t.dragStartXY[0],
      t.dragStartXY[1]
    ), i = Je(t, t.dragEndXY[0], t.dragEndXY[1]);
@@ -441,7 +463,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
  }
  function W4(t) {
    const e = t._pan2DxyzmmAtDragStart;
-@@ -33796,7 +33840,7 @@ function k2(t) {
+@@ -33796,7 +33848,7 @@ function k2(t) {
        }
        if (t.isDragging = !0, t.activeButton = n.button, t.activeTileHit && !t.activeTileHit.isRender) {
          const l = V4(t, n.button);
@@ -450,7 +472,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
            const c = at(
              t.view?.screenSlices ?? [],
              t.model,
-@@ -33805,7 +33849,7 @@ function k2(t) {
+@@ -33805,7 +33857,7 @@ function k2(t) {
              t.activeTileHit
            );
            c && t.setCrosshairPos(c);
@@ -459,7 +481,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
            const c = t.model.scene.pan2Dxyzmm;
            t._pan2DxyzmmAtDragStart = [c[0], c[1], c[2], c[3]];
          } else l === ge.angle && t._angleState !== "drawing_second_line" && (t._angleState = "drawing_first_line");
-@@ -33973,7 +34017,7 @@ function k2(t) {
+@@ -33973,7 +34025,7 @@ function k2(t) {
        button: n.button
      });
    }, t._eventListeners.pointercancel = (e) => {
@@ -468,7 +490,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      try {
        t._annotation3DActive && Fl(t);
      } finally {
-@@ -34295,6 +34339,11 @@ function k2(t) {
+@@ -34295,6 +34347,11 @@ function k2(t) {
          case ge.pan:
            X4(t), t.drawScene();
            break;
@@ -480,7 +502,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
          case ge.slicer3D:
            W4(t), t.drawScene();
            break;
-@@ -37403,9 +37452,9 @@ function MR(t, e) {
+@@ -37403,9 +37460,9 @@ function MR(t, e) {
    const i = G.create();
    return G.transformMat4(i, G.fromValues(e[0], e[1], e[2]), n), [Ss(i[0]), Ss(i[1]), Ss(i[2])];
  }
@@ -493,7 +515,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      cellEdge: i.cellEdge,
      haloSize: i.halo,
      detail: i.detail,
-@@ -37470,7 +37519,7 @@ class IR {
+@@ -37470,7 +37527,7 @@ class IR {
        deviceLimit: i.deviceLimit ?? LR(e) ?? 256,
        renderCentering: i.renderCentering ?? "none",
        debounceMs: i.debounceMs ?? 150
@@ -502,7 +524,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      const r = i.focus ?? "crosshair";
      this.followCrosshair = r === "crosshair", this.focusFrac = Array.isArray(r) ? [r[0], r[1], r[2]] : [0.5, 0.5, 0.5], this.onLocationChange = () => this.handleLocationChange();
      const s = n.levels[0];
-@@ -37515,8 +37564,8 @@ class IR {
+@@ -37515,8 +37572,8 @@ class IR {
      return this.plan;
    }
    /** Move the focus and rebuild+swap the plan (debounced). */
@@ -513,7 +535,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
    }
    /** Cap the finest level the octree may use (index into `source.levels`). */
    setMaxDetail(e) {
-@@ -37551,7 +37600,8 @@ class IR {
+@@ -37551,7 +37608,8 @@ class IR {
        this.source,
        this.focusFrac,
        this.currentRadius(),
@@ -523,7 +545,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      );
    }
    currentRadius() {
-@@ -37700,7 +37750,7 @@ function $R(t, e) {
+@@ -37700,7 +37758,7 @@ function $R(t, e) {
  }
  let fD = class extends EventTarget {
    constructor(e = {}, n, i = "both") {
@@ -532,7 +554,7 @@ index 233eaa4b018793ea685dedebbd73c0c8a6417728..65c5eb015ea1cf9fa4b3649ed48b2a22
      const r = e.backend ?? "webgpu";
      if (this.opts = {
        backend: r,
-@@ -40186,6 +40236,7 @@ let fD = class extends EventTarget {
+@@ -40186,6 +40244,7 @@ let fD = class extends EventTarget {
          roiSelection: ge.roiSelection,
          angle: ge.angle,
          crosshair: ge.crosshair,
@@ -552,6 +574,19 @@ index e06d564ce9e6464e8d161031563abafcc8deb0c3..a57460dad2dce1da5a513117e35da944
      _annotationUndoStack: AnnotationUndoStack;
      _annotationBrushPath: AnnotationPoint[];
      _frozenLoopPoints: AnnotationPoint[] | null;
+diff --git a/dist/NVTypes.d.ts b/dist/NVTypes.d.ts
+index 56c9890990fee1d0fa1124c617b4805e2fcde883..ff88cf1b9c4cb121547fee4a95ce286d6307ff1d 100644
+--- a/dist/NVTypes.d.ts
++++ b/dist/NVTypes.d.ts
+@@ -518,6 +518,8 @@ export type CustomLayoutTile = {
+     sliceType: number;
+     position: [number, number, number, number];
+     sliceMM?: number;
++    /** Crop the in-plane field of view to this fraction of the shorter extent. */
++    squareCropFraction?: number;
+ };
+ export type LayoutConfig = {
+     sliceType: number;
 diff --git a/dist/index.d.ts b/dist/index.d.ts
 index 5969cdb8c613b57598252135179af9fb5795c0aa..3bef44f9ba1ae5fbe94c122c1e71c7f93c8d9a78 100644
 --- a/dist/index.d.ts

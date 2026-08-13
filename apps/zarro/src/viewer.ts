@@ -20,7 +20,11 @@ import {
 } from './adaptive_streaming_fov_prototype.ts'
 import { AbortableTaskPool } from './abortable_task_pool'
 import { getBackendFromUrl } from './backend'
-import { LAYOUT_PRESET, viewerLayoutConfig } from './viewer_layout'
+import {
+  LAYOUT_PRESET,
+  layoutDetailZoom,
+  viewerLayoutConfig,
+} from './viewer_layout'
 import {
   buildDandiZarrAssetHierarchy,
   searchDandiZarrAssets,
@@ -30,6 +34,7 @@ import {
 import {
   IntensityWindowEstimator,
   isGenericDtypeWindow,
+  resolveIntensityWindow,
 } from './intensity_window'
 import {
   DecodedChunkCache,
@@ -68,10 +73,7 @@ import {
 import {
   addStainLayer,
   parseStainLayers,
-  selectExclusiveStainLayer,
   serializeStainLayers,
-  setStainLayerOpacity,
-  stainLayerPayloadHasOpacity,
   updateStainLayer,
   type StainLayer,
 } from './stain_layers'
@@ -190,6 +192,11 @@ interface OmezarrRootAttributes {
 interface DisplayWindow {
   min: number
   max: number
+}
+
+interface StreamedVolumeLoadOptions {
+  initialWindow?: DisplayWindow
+  opacity?: number
 }
 
 interface LoadedSourceBase {
@@ -467,14 +474,12 @@ const stainLayerRuntimeLoads = new Map<
   string,
   Promise<StainLayerRuntime | null>
 >()
-const stainLayerOpacityHandles = new Map<string, number>()
-const stainLayerOpacityRevisions = new Map<string, number>()
-const STAIN_LAYER_OPACITY_DELAY_MS = 100
 
 interface AutoContrastState {
   source: OmezarrSource | OmezarrMosaicSource
   estimator: IntensityWindowEstimator
   window: DisplayWindow | null
+  automatic: boolean
 }
 
 interface AutoWindowSession {
@@ -793,14 +798,16 @@ function prepareAutoWindow(source: LoadedSource): void {
   autoWindowSession = null
   els.autoContrast.disabled = true
   if (source.kind === 'synthetic') return
+  const currentWindow = parseWindow(source.defaultWindow)
+  const automatic = isGenericDtypeWindow(source.dtype, currentWindow)
   const contrast: AutoContrastState = {
     source,
     estimator: new IntensityWindowEstimator(source.dtype),
     window: null,
+    automatic,
   }
   autoContrastStates.set(source, contrast)
-  const currentWindow = parseWindow(source.defaultWindow)
-  if (!isGenericDtypeWindow(source.dtype, currentWindow)) return
+  if (!automatic) return
   autoWindowSession = {
     source,
     manualRevision: manualWindowRevision,
@@ -839,7 +846,7 @@ function observeChunkForAutoWindow(
     setWindowControls(estimated, source.dtype)
     window.setTimeout(() => {
       if (!nv || activeSource !== source || nv.volumes.length === 0) return
-      const volumeIndex = activeVolumeIndex()
+      const volumeIndex = volumeIndexForSource(source)
       if (volumeIndex < 0) return
       void nv
         .setVolume(volumeIndex, { calMin: estimated.min, calMax: estimated.max })
@@ -871,14 +878,38 @@ function applyAutoContrast(): void {
   }
   manualWindowRevision++
   autoWindowSession = null
+  contrast.automatic = true
   contrast.source.defaultWindow = contrast.window
   setWindowControls(contrast.window, contrast.source.dtype)
-  scheduleWindowUpdate()
+  window.clearTimeout(windowUpdateHandle)
+  const volumeIndex = volumeIndexForSource(contrast.source)
+  if (volumeIndex < 0) return
+  const exactWindow = contrast.window
+  void nv
+    .setVolume(volumeIndex, {
+      calMin: exactWindow.min,
+      calMax: exactWindow.max,
+    })
+    .then(() => {
+      if (activeSource !== source) return
+      els.canvas.dataset.windowMin = String(exactWindow.min)
+      els.canvas.dataset.windowMax = String(exactWindow.max)
+    })
+    .catch((error: unknown) => {
+      showFallback(
+        `Automatic contrast failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    })
 }
 
 function handleWindowInput(): void {
   manualWindowRevision++
   autoWindowSession = null
+  const source = activeSource
+  if (source && source.kind !== 'synthetic') {
+    const contrast = autoContrastStates.get(source)
+    if (contrast) contrast.automatic = false
+  }
   scheduleWindowUpdate()
 }
 
@@ -994,6 +1025,29 @@ function volumeIndexForRuntime(runtime: StainLayerRuntime): number {
   )
 }
 
+function volumeIndexForSource(
+  source: OmezarrSource | OmezarrMosaicSource,
+): number {
+  const runtime = [...stainLayerRuntimes.values()].find(
+    (candidate) => candidate.source === source,
+  )
+  if (runtime) return volumeIndexForRuntime(runtime)
+  if (!nv || activeSource !== source || !chunkedVolume) return -1
+  return nv.volumes.findIndex(
+    (volume) =>
+      volume === chunkedVolume?.volume || volume.id === chunkedVolume?.volume.id,
+  )
+}
+
+function windowForStainRuntime(runtime: StainLayerRuntime): DisplayWindow {
+  const contrast = autoContrastStates.get(runtime.source)
+  return resolveIntensityWindow(
+    runtime.source.defaultWindow,
+    contrast?.window ?? null,
+    contrast?.automatic ?? false,
+  )
+}
+
 function activeVolumeIndex(): number {
   const runtime = activeStainRuntime()
   if (runtime) return volumeIndexForRuntime(runtime)
@@ -1007,13 +1061,10 @@ function activeVolume(): NVImage | null {
 
 function syncStainLayerTelemetry(): void {
   els.canvas.dataset.loadedStainLayers = [...stainLayerRuntimes.keys()].join(',')
-  els.canvas.dataset.visibleStainLayers = stainLayers
-    .filter(({ id, opacity }) => opacity > 0 && stainLayerRuntimes.has(id))
-    .map(({ id }) => id)
-    .join(',')
-  els.canvas.dataset.stainLayerOpacities = stainLayers
-    .map(({ id, opacity }) => `${id}:${Number(opacity.toFixed(2))}`)
-    .join(',')
+  els.canvas.dataset.visibleStainLayers =
+    activeStainLayerId && stainLayerRuntimes.has(activeStainLayerId)
+      ? activeStainLayerId
+      : ''
   els.canvas.dataset.niivueVolumeOpacities = nv
     ? nv.volumes.map(({ opacity }) => String(opacity)).join(',')
     : ''
@@ -1032,7 +1083,9 @@ function activateStainRuntime(runtime: StainLayerRuntime): void {
   currentDetailLevel = runtime.detailLevel
   lastAdaptiveRequestKey = runtime.lastAdaptiveRequestKey
   requestedBaseLevel = runtime.source.baseLevel
-  setWindowControls(runtime.source.defaultWindow, runtime.source.dtype)
+  const win = windowForStainRuntime(runtime)
+  runtime.source.defaultWindow = win
+  setWindowControls(win, runtime.source.dtype)
   els.autoContrast.disabled = !autoContrastStates.get(runtime.source)?.window
   els.colormap.value = runtime.chunkedVolume.volume.colormap ?? 'gray'
   syncZarrLevelControl()
@@ -1096,38 +1149,40 @@ async function waitForStainLayerRefocus(
   await waitForStainLayerUploads()
 }
 
-function applyCurrentStainLayerOpacities(
-  baseLayerId?: string | null,
+function applyCurrentStainLayerVisibility(
+  activeLayerId?: string | null,
 ): Promise<void> {
   return stainLayerDisplayQueue
-    .run((signal) => updateStainLayerOpacitiesNow(signal, baseLayerId))
+    .run((signal) => updateStainLayerVisibilityNow(signal, activeLayerId))
     .then(() => undefined)
 }
 
-async function updateStainLayerOpacitiesNow(
+async function updateStainLayerVisibilityNow(
   signal: AbortSignal,
-  baseLayerId?: string | null,
+  activeLayerId?: string | null,
 ): Promise<void> {
   if (!nv) return
-  const baseRuntime = baseLayerId
-    ? stainLayerRuntimes.get(baseLayerId)
+  const selectedLayerId = activeLayerId ?? activeStainLayerId
+  const selectedRuntime = selectedLayerId
+    ? (stainLayerRuntimes.get(selectedLayerId) ?? null)
     : null
-  const baseVolumeIndex = baseRuntime
-    ? volumeIndexForRuntime(baseRuntime)
+  const selectedVolumeIndex = selectedRuntime
+    ? volumeIndexForRuntime(selectedRuntime)
     : -1
-  const shouldPromoteBase = baseVolumeIndex > 0
+  const shouldPromoteSelected = selectedVolumeIndex > 0
   const changes = stainLayers.flatMap((layer) => {
     const runtime = stainLayerRuntimes.get(layer.id)
     if (!runtime) return []
     const volumeIndex = volumeIndexForRuntime(runtime)
     if (volumeIndex < 0) return []
     const volume = nv!.volumes[volumeIndex]
-    if (!volume || Math.abs((volume.opacity ?? 1) - layer.opacity) < 1e-6) {
+    const visible = layer.id === selectedLayerId ? 1 : 0
+    if (!volume || Math.abs((volume.opacity ?? 1) - visible) < 1e-6) {
       return []
     }
-    return [{ volume, opacity: layer.opacity }]
+    return [{ volume, opacity: visible }]
   })
-  if (changes.length === 0 && !shouldPromoteBase) {
+  if (changes.length === 0 && !shouldPromoteSelected && !selectedRuntime) {
     syncStainLayerTelemetry()
     return
   }
@@ -1138,27 +1193,38 @@ async function updateStainLayerOpacitiesNow(
   await waitForStainLayerUploads(signal)
   signal.throwIfAborted()
   for (const { volume, opacity } of changes) volume.opacity = opacity
-  if (shouldPromoteBase) {
-    // The patched NiiVue streamed renderer treats volume 0 as the base and
-    // later volumes as overlays. Keep every controller and its GPU cache,
-    // but put the exclusively selected stain in the base slot so it renders
-    // correctly even when the previous base is fully transparent.
-    await nv.moveVolumeToBottom(baseVolumeIndex)
-  } else {
+  if (shouldPromoteSelected) {
+    // NiiVue treats volume 0 as the streamed base. Keep all stain runtimes and
+    // their GPU caches, but move the exclusively selected stain into that slot.
+    await nv.moveVolumeToBottom(selectedVolumeIndex)
+  } else if (changes.length > 0) {
     await nv.updateGLVolume()
   }
   signal.throwIfAborted()
   nv.rebakeChunkedOverlays()
+  // Resolve the window after streamed uploads settle so a stain whose useful
+  // signal arrives in a later chunk receives the estimator's final range.
+  const selectedWindow = selectedRuntime
+    ? windowForStainRuntime(selectedRuntime)
+    : null
+  if (selectedRuntime && selectedWindow) {
+    const activeIndex = volumeIndexForRuntime(selectedRuntime)
+    if (activeIndex >= 0) {
+      selectedRuntime.source.defaultWindow = selectedWindow
+      await nv.setVolume(activeIndex, {
+        calMin: selectedWindow.min,
+        calMax: selectedWindow.max,
+      })
+      signal.throwIfAborted()
+      if (selectedLayerId === activeStainLayerId) {
+        setWindowControls(selectedWindow, selectedRuntime.source.dtype)
+        els.canvas.dataset.windowMin = String(selectedWindow.min)
+        els.canvas.dataset.windowMax = String(selectedWindow.max)
+      }
+    }
+  }
   nv.drawScene()
   syncStainLayerTelemetry()
-}
-
-async function applyStainLayerOpacity(_layerId: string): Promise<void> {
-  await applyCurrentStainLayerOpacities()
-}
-
-async function applyAllStainLayerOpacities(): Promise<void> {
-  await applyCurrentStainLayerOpacities()
 }
 
 async function removeStainLayerRuntime(layerId: string): Promise<void> {
@@ -1269,9 +1335,6 @@ async function removeCustomUrlRow(
     if (!stainLayers.some(({ id }) => id === layer.id)) {
       activeStainLayerId = stainLayers[0]?.id ?? null
       await removeStainLayerRuntime(layer.id)
-      if (activeStainLayerId) {
-        stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
-      }
     }
     syncControlsToActiveLayer()
     renderStainLayers()
@@ -1357,73 +1420,32 @@ function renderStainLayers(): void {
     })
     main.append(select, remove)
 
-    const opacity = document.createElement('label')
-    opacity.className = 'stain-layer-opacity'
-    const opacityLabel = document.createElement('span')
-    opacityLabel.textContent = 'Opacity'
-    const opacityInput = document.createElement('input')
-    opacityInput.type = 'range'
-    opacityInput.min = '0'
-    opacityInput.max = '100'
-    opacityInput.step = '1'
-    opacityInput.value = String(Math.round(layer.opacity * 100))
-    opacityInput.setAttribute('aria-label', `${layer.name} opacity`)
-    const opacityValue = document.createElement('output')
-    opacityValue.value = `${opacityInput.value}%`
-    opacityInput.addEventListener('input', () => {
-      const value = Number(opacityInput.value) / 100
-      stainLayers = setStainLayerOpacity(stainLayers, layer.id, value)
-      opacityValue.value = `${opacityInput.value}%`
-      updateUrlFromControls()
-      scheduleStainLayerOpacityUpdate(layer.id)
-    })
-    opacity.append(opacityLabel, opacityInput, opacityValue)
-    row.append(main, opacity)
+    row.append(main)
     els.stainLayers.append(row)
   }
 }
 
-function scheduleStainLayerOpacityUpdate(id: string): void {
-  const pendingHandle = stainLayerOpacityHandles.get(id)
-  if (pendingHandle !== undefined) window.clearTimeout(pendingHandle)
-  const revision = (stainLayerOpacityRevisions.get(id) ?? 0) + 1
-  stainLayerOpacityRevisions.set(id, revision)
-  const handle = window.setTimeout(() => {
-    stainLayerOpacityHandles.delete(id)
-    const layer = stainLayers.find((candidate) => candidate.id === id)
-    if (!layer) return
-    void ensureStainLayerRuntime(id, layer.opacity > 0)
-      .then(() => {
-        if (stainLayerOpacityRevisions.get(id) !== revision) return
-        return applyStainLayerOpacity(id)
-      })
-      .then(() => {
-        if (stainLayerOpacityRevisions.get(id) !== revision) return
-        const current = stainLayers.find((candidate) => candidate.id === id)
-        if (current && current.opacity > 0) scheduleAdaptiveLod(true)
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return
-        showFallback(
-          `Stain opacity update failed: ${error instanceof Error ? error.message : String(error)}`,
-        )
-      })
-  }, STAIN_LAYER_OPACITY_DELAY_MS)
-  stainLayerOpacityHandles.set(id, handle)
-}
-
-async function ensureStainLayerRuntime(
+async function loadSelectedStainLayerRuntime(
   id: string,
-  shouldLoad: boolean,
 ): Promise<StainLayerRuntime | null> {
   const existing = stainLayerRuntimes.get(id)
-  if (existing || !shouldLoad || !nv) return existing ?? null
-  if (!stainLayers.some((layer) => layer.id === id)) return null
-
+  if (existing || !nv) return existing ?? null
   const pending = stainLayerRuntimeLoads.get(id)
   if (pending) return pending
 
-  const load = loadStainLayerRuntime(id)
+  const load = (async () => {
+    stainLayerSceneMutationDepth++
+    try {
+      await waitForAdaptiveLodIdle()
+      if (stainLayerRuntimes.size > 0) await waitForStainLayerUploads()
+      await applyCurrentStainLayerVisibility(id)
+      await reloadVolume({ reloadSource: true, preserveView: true })
+      return stainLayerRuntimes.get(id) ?? null
+    } finally {
+      stainLayerSceneMutationDepth--
+      flushDeferredAdaptiveLod()
+    }
+  })()
   stainLayerRuntimeLoads.set(id, load)
   try {
     return await load
@@ -1431,46 +1453,6 @@ async function ensureStainLayerRuntime(
     if (stainLayerRuntimeLoads.get(id) === load) {
       stainLayerRuntimeLoads.delete(id)
     }
-  }
-}
-
-async function loadStainLayerRuntime(
-  id: string,
-): Promise<StainLayerRuntime | null> {
-  const existing = stainLayerRuntimes.get(id)
-  if (existing || !nv) return existing ?? null
-  if (!stainLayers.some((layer) => layer.id === id)) return null
-
-  stainLayerSceneMutationDepth++
-  try {
-    await waitForAdaptiveLodIdle()
-  // NiiVue registers an additive chunked volume by rebuilding its renderer.
-  // Doing that while another chunked volume's upload pump is active can leave
-  // the old manager with pending bricks that are never drained. Add stains one
-  // at a time, after the current GPU working set has settled.
-    if (stainLayerRuntimes.size > 0) await waitForStainLayerUploads()
-
-    const selectedId = activeStainLayerId
-    const selectedView = captureView()
-    activeStainLayerId = id
-    shouldInitializeCustomSource = true
-    try {
-      await reloadVolume({ reloadSource: true, preserveView: true })
-    } finally {
-      activeStainLayerId = selectedId
-      const selectedRuntime = activeStainRuntime()
-      if (selectedRuntime) activateStainRuntime(selectedRuntime)
-      syncControlsToActiveLayer()
-      renderStainLayers()
-      updateUrlFromControls()
-      restoreView(selectedView)
-      await applyCurrentStainLayerOpacities(selectedId)
-      nv.drawScene()
-    }
-    return stainLayerRuntimes.get(id) ?? null
-  } finally {
-    stainLayerSceneMutationDepth--
-    flushDeferredAdaptiveLod()
   }
 }
 
@@ -1495,7 +1477,6 @@ async function selectStainLayer(id: string, reload: boolean): Promise<void> {
   if (!layer) return
   resetRenderCropForSourceChange()
   activeStainLayerId = id
-  stainLayers = selectExclusiveStainLayer(stainLayers, id)
   shouldInitializeCustomSource = true
   syncControlsToActiveLayer()
   renderStainLayers()
@@ -1503,14 +1484,14 @@ async function selectStainLayer(id: string, reload: boolean): Promise<void> {
   const runtime = stainLayerRuntimes.get(id)
   if (runtime) {
     activateStainRuntime(runtime)
-    await applyCurrentStainLayerOpacities(id)
+    await applyCurrentStainLayerVisibility(id)
     scheduleAdaptiveLod(true)
     nv?.drawScene()
     return
   }
-  await applyAllStainLayerOpacities()
+  await applyCurrentStainLayerVisibility()
   if (!reload || !nv) return
-  await reloadVolume({ reloadSource: true, preserveView: true })
+  await loadSelectedStainLayerRuntime(id)
 }
 
 async function removeStainLayer(id: string): Promise<void> {
@@ -1524,9 +1505,6 @@ async function removeStainLayer(id: string): Promise<void> {
     activeStainLayerId =
       stainLayers[Math.min(index, stainLayers.length - 1)]?.id ?? null
   }
-  if (removedWasActive && activeStainLayerId) {
-    stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
-  }
   shouldInitializeCustomSource = true
   syncControlsToActiveLayer()
   renderStainLayers()
@@ -1534,7 +1512,7 @@ async function removeStainLayer(id: string): Promise<void> {
   if (removedWasActive && activeStainLayerId) {
     await selectStainLayer(activeStainLayerId, true)
   } else {
-    if (removedWasLoaded) await applyAllStainLayerOpacities()
+    if (removedWasLoaded) await applyCurrentStainLayerVisibility()
     updateUrlFromControls()
   }
 }
@@ -1547,13 +1525,11 @@ function addLayer(
   const result = addStainLayer(stainLayers, { name, source, storeUrls })
   stainLayers = result.layers
   activeStainLayerId = result.layer.id
-  stainLayers = selectExclusiveStainLayer(stainLayers, result.layer.id)
   shouldInitializeCustomSource = true
   syncControlsToActiveLayer()
   renderStainLayers()
   syncDandiGroupActions()
   updateUrlFromControls()
-  void applyAllStainLayerOpacities()
   return result
 }
 
@@ -1653,9 +1629,6 @@ function renderSelectedDandiStores(): void {
       if (!stainLayers.some(({ id }) => id === layer.id)) {
         activeStainLayerId = stainLayers[0]?.id ?? null
         await removeStainLayerRuntime(layer.id)
-        if (activeStainLayerId) {
-          stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
-        }
       }
       shouldInitializeCustomSource = true
       renderStainLayers()
@@ -1722,13 +1695,11 @@ function addDandiAssets(name: string, assets: DandiZarrAsset[]): void {
       storeUrls: nextUrls,
     })
     activeStainLayerId = matchingLayer.id
-    stainLayers = selectExclusiveStainLayer(stainLayers, matchingLayer.id)
     shouldInitializeCustomSource = true
     syncControlsToActiveLayer()
     renderStainLayers()
     syncDandiGroupActions()
     updateUrlFromControls()
-    void applyAllStainLayerOpacities()
     els.dandiSearchStatus.value = addedCount > 0
       ? `${addedCount} chunk${addedCount === 1 ? '' : 's'} added to the ${name} layer. Press Load volume when ready.`
       : `${name} is already in the stain layer list.`
@@ -2010,9 +1981,6 @@ function initControlsFromUrl(): void {
   activeStainLayerId = params.get('activeLayer')
   if (!stainLayers.some(({ id }) => id === activeStainLayerId)) {
     activeStainLayerId = stainLayers[0]?.id ?? null
-  }
-  if (activeStainLayerId && !stainLayerPayloadHasOpacity(layerPayload)) {
-    stainLayers = selectExclusiveStainLayer(stainLayers, activeStainLayerId)
   }
   const storeUrls = params.getAll('url').filter(Boolean)
   if (stainLayers.length === 0 && storeUrls.length > 0) {
@@ -3609,15 +3577,18 @@ function loadCustomSourceFromInput(): void {
   resetRenderCropForSourceChange()
   shouldInitializeCustomSource = true
   els.source.value = 'custom'
+  let layer: StainLayer
   try {
-    commitCustomLayer()
+    layer = commitCustomLayer()
   } catch (error) {
     showFallback(error instanceof Error ? error.message : String(error))
     return
   }
   syncSourceControls()
   updateUrlFromControls()
-  void reloadVolume({ reloadSource: true })
+  void (stainLayerRuntimes.has(layer.id)
+    ? reloadVolume({ reloadSource: true })
+    : loadSelectedStainLayerRuntime(layer.id))
 }
 
 function chunkShapeFromPlan(plan: ChunkPlan): Shape3 {
@@ -3667,6 +3638,9 @@ function applyLayout(): void {
   nv.customLayout = layout.customLayout
   requestAnimationFrame(() => {
     syncPrototypeStreamingState()
+    if (stainLayerRuntimes.size > 1) {
+      multiStainDetailChangeRequested = true
+    }
     scheduleAdaptiveLod(true)
   })
   syncCrosshairVisibility()
@@ -4118,11 +4092,14 @@ function handleAxialSliceKeys(event: KeyboardEvent): void {
 function syncViewControls(): void {
   const levels = pyramidLevels(activeSource)
   const levelCount = levels.length
+  const adaptiveLevel =
+    activeSource?.kind === 'omezarr' || activeSource?.kind === 'omezarr-mosaic'
+      ? detailLevelForView(activeSource, viewerZoom())
+      : detailLevelForZoom(levelCount - 1, viewerZoom(), levelCount)
   const appliedLevel =
     levelCount === 0
       ? 0
-      : fixedZarrLevel ??
-        detailLevelForZoom(levelCount - 1, viewerZoom(), levelCount)
+      : fixedZarrLevel ?? adaptiveLevel
   const zoomDisplay = zoomLevelControlDisplay(
     appliedLevel,
     pendingZoomLevel,
@@ -4373,9 +4350,17 @@ function detailLevelForView(
       Math.max(0, fixedZarrLevel),
     )
   }
+  const physicalExtents = source.shape.map(
+    (length, axis) => length * source.spacing[axis],
+  ) as Shape3
+  const detailZoom = layoutDetailZoom(
+    Number(els.layout.value),
+    zoom,
+    physicalExtents,
+  )
   return detailLevelForZoom(
     source.levels.length - 1,
-    zoom,
+    detailZoom,
     source.levels.length,
   )
 }
@@ -4532,14 +4517,13 @@ async function performMultiStainVolumeRebuild(
   const selectedId = activeStainLayerId
   const view = captureView()
   const runtimes = [...stainLayerRuntimes.values()]
+  const retainedWindows = new Map(
+    runtimes.map((runtime) => [runtime.layerId, windowForStainRuntime(runtime)]),
+  )
+  const stagedRuntimes = new Map<string, StainLayerRuntime>()
   const previousSuppression = suppressAdaptiveEvents
   suppressAdaptiveEvents = true
   try {
-    for (const runtime of runtimes) runtime.chunkedVolume.dispose()
-    stainLayerRuntimes.clear()
-    await nv.removeAllVolumes()
-    chunkedVolume = null
-
     for (const runtime of runtimes) {
       if (!stainLayers.some(({ id }) => id === runtime.layerId)) continue
       activeStainLayerId = runtime.layerId
@@ -4547,28 +4531,61 @@ async function performMultiStainVolumeRebuild(
       chunkedVolume = null
       runtime.readSession.renew()
       activeReadSession = runtime.readSession
+      const initialWindow = retainedWindows.get(runtime.layerId)
       if (runtime.source.kind === 'omezarr') {
-        await loadOmezarrVolume(runtime.source, view, runtime.readSession)
+        await loadOmezarrVolume(runtime.source, view, runtime.readSession, {
+          initialWindow,
+          opacity: 0,
+        })
       } else {
-        await loadMosaicVolume(runtime.source, view, runtime.readSession)
+        await loadMosaicVolume(runtime.source, view, runtime.readSession, {
+          initialWindow,
+          opacity: 0,
+        })
       }
       if (!chunkedVolume) continue
-      runtime.chunkedVolume = chunkedVolume
-      runtime.detailLevel = currentDetailLevel ?? runtime.source.baseLevel
-      runtime.lastAdaptiveRequestKey = lastAdaptiveRequestKey
-      stainLayerRuntimes.set(runtime.layerId, runtime)
+      stagedRuntimes.set(runtime.layerId, {
+        ...runtime,
+        chunkedVolume,
+        detailLevel: currentDetailLevel ?? runtime.source.baseLevel,
+        lastAdaptiveRequestKey,
+      })
       await waitForStainLayerUploads()
     }
+
+    // The old selected volume remains the rendered base until every replacement
+    // is resident. Remove the old model entries without drawing, then let the
+    // visibility transaction promote the ready selected replacement atomically.
+    for (const runtime of runtimes) {
+      runtime.chunkedVolume.dispose()
+      const volumeIndex = volumeIndexForRuntime(runtime)
+      if (volumeIndex >= 0) nv.model.removeVolume(volumeIndex)
+    }
+    stainLayerRuntimes.clear()
+    for (const [layerId, runtime] of stagedRuntimes) {
+      stainLayerRuntimes.set(layerId, runtime)
+    }
   } finally {
-    activeStainLayerId = selectedId
-    const selectedRuntime = activeStainRuntime()
-    if (selectedRuntime) activateStainRuntime(selectedRuntime)
-    restoreView(view)
-    await updateStainLayerOpacitiesNow(signal, selectedId)
-    syncControlsToActiveLayer()
-    renderStainLayers()
-    syncStainLayerTelemetry()
-    suppressAdaptiveEvents = previousSuppression
+    try {
+      if (stagedRuntimes.size !== runtimes.length) {
+        for (const runtime of stagedRuntimes.values()) {
+          runtime.chunkedVolume.dispose()
+          const volumeIndex = volumeIndexForRuntime(runtime)
+          if (volumeIndex >= 0) nv.model.removeVolume(volumeIndex)
+        }
+        if (stagedRuntimes.size > 0) await nv.updateGLVolume()
+      }
+      activeStainLayerId = selectedId
+      const selectedRuntime = activeStainRuntime()
+      if (selectedRuntime) activateStainRuntime(selectedRuntime)
+      restoreView(view)
+      await updateStainLayerVisibilityNow(signal, selectedId)
+      syncControlsToActiveLayer()
+      renderStainLayers()
+      syncStainLayerTelemetry()
+    } finally {
+      suppressAdaptiveEvents = previousSuppression
+    }
   }
 }
 
@@ -4590,10 +4607,11 @@ async function loadOmezarrVolume(
   source: OmezarrSource,
   view: ViewState | null,
   readSession: ZarrReadSession,
+  options: StreamedVolumeLoadOptions = {},
 ): Promise<void> {
   if (!nv) return
   const layer = activeStainLayer()
-  const win = parseWindow(source.defaultWindow)
+  const win = options.initialWindow ?? parseWindow(source.defaultWindow)
   const zoom = view
     ? nv.sliceType === SLICE_TYPE.RENDER
       ? view.scale
@@ -4618,7 +4636,7 @@ async function loadOmezarrVolume(
       calMin: win.min,
       calMax: win.max,
       colormap: els.colormap.value,
-      opacity: layer?.opacity ?? 1,
+      opacity: options.opacity ?? (layer?.id === activeStainLayerId ? 1 : 0),
       focus: focusFraction,
       focusBounds,
       radius: fineLodRadiusForShape(source.shape, ADAPTIVE_FINE_RADIUS),
@@ -4651,10 +4669,11 @@ async function loadMosaicVolume(
   source: OmezarrMosaicSource,
   view: ViewState | null,
   readSession: ZarrReadSession,
+  options: StreamedVolumeLoadOptions = {},
 ): Promise<void> {
   if (!nv) return
   const layer = activeStainLayer()
-  const win = parseWindow(source.defaultWindow)
+  const win = options.initialWindow ?? parseWindow(source.defaultWindow)
   const zoom = view
     ? nv.sliceType === SLICE_TYPE.RENDER
       ? view.scale
@@ -4676,7 +4695,7 @@ async function loadMosaicVolume(
       calMin: win.min,
       calMax: win.max,
       colormap: els.colormap.value,
-      opacity: layer?.opacity ?? 1,
+      opacity: options.opacity ?? (layer?.id === activeStainLayerId ? 1 : 0),
       focus: focusFraction,
       focusBounds,
       radius: fineLodRadiusForShape(source.shape, ADAPTIVE_FINE_RADIUS),
@@ -4841,7 +4860,7 @@ async function performReloadVolume(
       }
       stainLayerRuntimes.set(targetLayerId, runtime)
       activateStainRuntime(runtime)
-      await applyCurrentStainLayerOpacities(targetLayerId)
+      await applyCurrentStainLayerVisibility(targetLayerId)
       syncStainLayerTelemetry()
     }
     applyLayout()
@@ -5034,15 +5053,18 @@ async function main(): Promise<void> {
     void clearSelectedDandiAssets()
   })
   els.reload.addEventListener('click', () => {
+    let customLayer: StainLayer | null = null
     if (els.source.value === 'custom') {
       try {
-        commitCustomLayer()
+        customLayer = commitCustomLayer()
       } catch (error) {
         showFallback(error instanceof Error ? error.message : String(error))
         return
       }
     }
-    void reloadVolume({ reloadSource: true })
+    void (customLayer && !stainLayerRuntimes.has(customLayer.id)
+      ? loadSelectedStainLayerRuntime(customLayer.id)
+      : reloadVolume({ reloadSource: true }))
   })
   els.downloadNifti.addEventListener('click', () => {
     void downloadNifti()
@@ -5067,7 +5089,13 @@ async function main(): Promise<void> {
     if (preserveSharedWindow) {
       manualWindowRevision++
       autoWindowSession = null
-      if (activeSource) activeSource.defaultWindow = sharedWindow
+      if (activeSource) {
+        activeSource.defaultWindow = sharedWindow
+        if (activeSource.kind !== 'synthetic') {
+          const contrast = autoContrastStates.get(activeSource)
+          if (contrast) contrast.automatic = false
+        }
+      }
       const volumeIndex = activeVolumeIndex()
       if (volumeIndex >= 0) await nv.setVolume(volumeIndex, {
         calMin: sharedWindow.min,
@@ -5078,11 +5106,6 @@ async function main(): Promise<void> {
     applyLayout()
     const focusMoved = syncFocusFromPan()
     scheduleAdaptiveLod(focusMoved)
-  }
-  for (const layer of stainLayers) {
-    if (layer.id !== activeStainLayerId && layer.opacity > 0) {
-      await ensureStainLayerRuntime(layer.id, true)
-    }
   }
   startHudPolling()
 }

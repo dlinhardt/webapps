@@ -5,7 +5,6 @@ export interface StainLayer {
   name: string
   source: StainLayerSource
   storeUrls: string[]
-  opacity: number
 }
 
 interface SerializedStainLayer {
@@ -13,11 +12,6 @@ interface SerializedStainLayer {
   name: string
   source: StainLayerSource
   storeUrls: string[]
-  opacity: number
-}
-
-export function clampStainLayerOpacity(opacity: number): number {
-  return Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1
 }
 
 function normalizedUrls(storeUrls: readonly string[]): string[] {
@@ -67,25 +61,8 @@ export function addStainLayer(
     name: input.name.trim() || `Stain ${layers.length + 1}`,
     source: input.source,
     storeUrls,
-    opacity: layers.length === 0 ? 1 : 0,
   }
   return { layers: [...layers, layer], layer, added: true }
-}
-
-export function setStainLayerOpacity(
-  layers: readonly StainLayer[],
-  id: string,
-  opacity: number,
-): StainLayer[] {
-  const value = clampStainLayerOpacity(opacity)
-  return layers.map((layer) => (layer.id === id ? { ...layer, opacity: value } : layer))
-}
-
-export function selectExclusiveStainLayer(
-  layers: readonly StainLayer[],
-  id: string,
-): StainLayer[] {
-  return layers.map((layer) => ({ ...layer, opacity: layer.id === id ? 1 : 0 }))
 }
 
 export function updateStainLayer(
@@ -108,31 +85,14 @@ export function updateStainLayer(
 
 export function serializeStainLayers(layers: readonly StainLayer[]): string {
   const serialized: SerializedStainLayer[] = layers.map(
-    ({ id, name, source, storeUrls, opacity }) => ({
+    ({ id, name, source, storeUrls }) => ({
       id,
       name,
       source,
       storeUrls,
-      opacity,
     }),
   )
   return JSON.stringify(serialized)
-}
-
-export function stainLayerPayloadHasOpacity(value: string | null): boolean {
-  if (!value) return false
-  try {
-    const parsed: unknown = JSON.parse(value)
-    return Array.isArray(parsed) && parsed.some(
-      (candidate) =>
-        typeof candidate === 'object' &&
-        candidate !== null &&
-        'opacity' in candidate &&
-        typeof candidate.opacity === 'number',
-    )
-  } catch {
-    return false
-  }
 }
 
 export function parseStainLayers(value: string | null): StainLayer[] {
@@ -178,10 +138,6 @@ export function parseStainLayers(value: string | null): StainLayer[] {
           ? {
               ...layer,
               id,
-              opacity:
-                'opacity' in candidate && typeof candidate.opacity === 'number'
-                  ? clampStainLayerOpacity(candidate.opacity)
-                  : layer.opacity,
             }
           : layer,
       )

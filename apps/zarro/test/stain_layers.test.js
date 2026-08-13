@@ -2,11 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   addStainLayer,
-  selectExclusiveStainLayer,
   parseStainLayers,
   serializeStainLayers,
-  setStainLayerOpacity,
-  stainLayerPayloadHasOpacity,
   updateStainLayer,
 } from '../src/stain_layers.ts'
 
@@ -19,7 +16,6 @@ test('keeps translated chunk stores together within a stain layer', () => {
 
   assert.equal(result.added, true)
   assert.equal(result.layer.name, 'LEC')
-  assert.equal(result.layer.opacity, 1)
   assert.deepEqual(result.layer.storeUrls, [
     'https://example.test/chunk-1/',
     'https://example.test/chunk-2/',
@@ -67,26 +63,6 @@ test('updates and removes a stain without changing the other layers', () => {
   assert.deepEqual(removed[0].storeUrls, ['lec', 'lec-2'])
 })
 
-test('switches layers exclusively and clamps manual opacity', () => {
-  const first = addStainLayer([], {
-    name: 'LEC',
-    source: 'dandi',
-    storeUrls: ['lec'],
-  })
-  const second = addStainLayer(first.layers, {
-    name: 'DAPI',
-    source: 'dandi',
-    storeUrls: ['dapi'],
-  })
-
-  assert.deepEqual(second.layers.map(({ opacity }) => opacity), [1, 0])
-  const selected = selectExclusiveStainLayer(second.layers, second.layer.id)
-  assert.deepEqual(selected.map(({ opacity }) => opacity), [0, 1])
-  const blended = setStainLayerOpacity(selected, first.layer.id, 0.35)
-  assert.deepEqual(blended.map(({ opacity }) => opacity), [0.35, 1])
-  assert.equal(setStainLayerOpacity(blended, first.layer.id, 2)[0].opacity, 1)
-})
-
 test('round-trips layers through the share-link payload', () => {
   let layers = addStainLayer([], {
     name: 'LEC',
@@ -102,38 +78,34 @@ test('round-trips layers through the share-link payload', () => {
   const restored = parseStainLayers(serializeStainLayers(layers))
   assert.deepEqual(restored.map(({ id }) => id), layers.map(({ id }) => id))
   assert.deepEqual(
-    restored.map(({ name, source, storeUrls, opacity }) => ({
+    restored.map(({ name, source, storeUrls }) => ({
       name,
       source,
       storeUrls,
-      opacity,
     })),
-    layers.map(({ name, source, storeUrls, opacity }) => ({
+    layers.map(({ name, source, storeUrls }) => ({
       name,
       source,
       storeUrls,
-      opacity,
     })),
   )
   assert.deepEqual(parseStainLayers('not json'), [])
 })
 
-test('distinguishes legacy layer links that predate opacity', () => {
-  const legacy = JSON.stringify([{
-    id: 'stain-legacy',
-    name: 'Legacy stain',
+test('ignores removed opacity values in old share links', () => {
+  const oldPayload = JSON.stringify([{
+    id: 'stain-old',
+    name: 'Old stain',
     source: 'dandi',
-    storeUrls: ['legacy'],
-  }])
-  const current = JSON.stringify([{
-    id: 'stain-current',
-    name: 'Current stain',
-    source: 'dandi',
-    storeUrls: ['current'],
+    storeUrls: ['old'],
     opacity: 0.4,
   }])
-
-  assert.equal(stainLayerPayloadHasOpacity(legacy), false)
-  assert.equal(stainLayerPayloadHasOpacity(current), true)
-  assert.equal(stainLayerPayloadHasOpacity('not json'), false)
+  const restored = parseStainLayers(oldPayload)
+  assert.deepEqual(restored, [{
+    id: 'stain-old',
+    name: 'Old stain',
+    source: 'dandi',
+    storeUrls: ['old'],
+  }])
+  assert.equal(serializeStainLayers(restored).includes('opacity'), false)
 })
