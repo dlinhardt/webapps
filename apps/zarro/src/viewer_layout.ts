@@ -11,8 +11,6 @@ export const LAYOUT_PRESET = {
   EQUAL_SLICES_VERTICAL: 33,
 } as const
 
-const VERTICAL_REFORMAT_CROP_FRACTION = 0.4
-
 export interface ViewerLayoutConfig {
   sliceType: number
   showRender: number
@@ -25,44 +23,29 @@ export interface ViewerLayoutConfig {
   }> | null
 }
 
-export function layoutDetailZoom(
-  selected: number,
-  zoom: number,
-  physicalExtents: readonly [number, number, number],
-): number {
-  if (selected !== LAYOUT_PRESET.EQUAL_SLICES_VERTICAL) return zoom
+function verticalCropFractions(
+  physicalExtents: readonly [number, number, number] | undefined,
+): [number, number, number] {
   if (
-    !physicalExtents.every(
+    !physicalExtents?.every(
       (extent) => Number.isFinite(extent) && extent > 0,
     )
   ) {
-    return zoom
+    return [1, 1, 1]
   }
-
   const [x, y, z] = physicalExtents
-  const axialFieldOfView = Math.min(x, y)
-  const reformatFieldOfView = Math.min(
-    Math.min(x, z) * VERTICAL_REFORMAT_CROP_FRACTION,
-    Math.min(y, z) * VERTICAL_REFORMAT_CROP_FRACTION,
-  )
-  const magnification = Math.max(1, axialFieldOfView / reformatFieldOfView)
-  return zoom * magnification
+  const commonFieldOfView = Math.min(x, y)
+  return [
+    1,
+    commonFieldOfView / Math.min(x, z),
+    commonFieldOfView / Math.min(y, z),
+  ]
 }
 
-export function layoutDetailBounds<T>(
+export function viewerLayoutConfig(
   selected: number,
-  bounds: readonly T[],
-): T[] {
-  // The vertical layout magnifies the two cropped reformats by roughly 30x.
-  // Reserving the full axial overview at that same level would exhaust the
-  // brick budget and force every panel back to a coarse global level.
-  if (selected === LAYOUT_PRESET.EQUAL_SLICES_VERTICAL && bounds.length === 3) {
-    return bounds.slice(1)
-  }
-  return [...bounds]
-}
-
-export function viewerLayoutConfig(selected: number): ViewerLayoutConfig {
+  physicalExtents?: readonly [number, number, number],
+): ViewerLayoutConfig {
   if (selected === LAYOUT_PRESET.AXIAL_FOCUS) {
     return {
       sliceType: SLICE_TYPE.MULTIPLANAR,
@@ -86,6 +69,7 @@ export function viewerLayoutConfig(selected: number): ViewerLayoutConfig {
     }
   }
   if (selected === LAYOUT_PRESET.EQUAL_SLICES_VERTICAL) {
+    const cropFractions = verticalCropFractions(physicalExtents)
     return {
       sliceType: SLICE_TYPE.MULTIPLANAR,
       showRender: SHOW_RENDER.NEVER,
@@ -95,17 +79,17 @@ export function viewerLayoutConfig(selected: number): ViewerLayoutConfig {
         {
           sliceType: SLICE_TYPE.AXIAL,
           position: [0, 0, 1, 1 / 3],
-          squareCropFraction: 1,
+          squareCropFraction: cropFractions[0],
         },
         {
           sliceType: SLICE_TYPE.CORONAL,
           position: [0, 1 / 3, 1, 1 / 3],
-          squareCropFraction: VERTICAL_REFORMAT_CROP_FRACTION,
+          squareCropFraction: cropFractions[1],
         },
         {
           sliceType: SLICE_TYPE.SAGITTAL,
           position: [0, 2 / 3, 1, 1 / 3],
-          squareCropFraction: VERTICAL_REFORMAT_CROP_FRACTION,
+          squareCropFraction: cropFractions[2],
         },
       ],
     }

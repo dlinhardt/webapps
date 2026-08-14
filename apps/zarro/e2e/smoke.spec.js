@@ -337,6 +337,59 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     const dimensions = sizes.flatMap((size) => size ?? []);
     return Math.max(...dimensions, 0) - Math.min(...dimensions);
   })).toBeLessThanOrEqual(1);
+  await expect.poll(async () => page.locator("#nv-canvas").evaluate((canvas) => {
+    const inPlaneSpans = (canvas.dataset.streamingSlabSpans ?? "")
+      .split(";")
+      .filter(Boolean)
+      .flatMap((slab) => slab.split("x").map(Number).filter((span) => span > 0.001));
+    return Math.max(...inPlaneSpans, 0) - Math.min(...inPlaneSpans);
+  })).toBeLessThanOrEqual(0.001);
+  await expect.poll(async () => {
+    const path = await page.locator("#crosshairLines").getAttribute("d");
+    return path?.match(/M/g)?.length ?? 0;
+  }).toBe(12);
+  const verticalCanvasBox = await page.locator("#nv-canvas").boundingBox();
+  expect(verticalCanvasBox).not.toBeNull();
+  const verticalAxialTile = await page.locator("#nv-canvas").evaluate((canvas) => {
+    const tile = (canvas.dataset.streamingScreenLayout ?? "")
+      .split(";")
+      .find((entry) => entry.startsWith("0:"));
+    const values = tile?.slice(2).split(",").map(Number) ?? [];
+    return {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      left: values[0],
+      top: values[1],
+      width: values[2],
+      height: values[3],
+    };
+  });
+  const verticalCursorX = verticalCanvasBox.x +
+    ((verticalAxialTile.left + verticalAxialTile.width * 0.75) /
+      verticalAxialTile.canvasWidth) * verticalCanvasBox.width;
+  const verticalCursorY = verticalCanvasBox.y +
+    ((verticalAxialTile.top + verticalAxialTile.height * 0.5) /
+      verticalAxialTile.canvasHeight) * verticalCanvasBox.height;
+  for (let index = 0; index < 5; index++) {
+    await page.locator("#nv-canvas").dispatchEvent("wheel", {
+      clientX: verticalCursorX,
+      clientY: verticalCursorY,
+      deltaY: -120,
+      deltaMode: 0,
+    });
+  }
+  await expect.poll(async () => {
+    const path = await page.locator("#crosshairLines").getAttribute("d");
+    return path?.match(/M/g)?.length ?? 0;
+  }).toBe(12);
+  for (let index = 0; index < 5; index++) {
+    await page.locator("#nv-canvas").dispatchEvent("wheel", {
+      clientX: verticalCursorX,
+      clientY: verticalCursorY,
+      deltaY: 120,
+      deltaMode: 0,
+    });
+  }
   await page.locator("#layout").selectOption("31");
   await expect(page.locator("#nv-canvas")).toHaveAttribute(
     "data-crosshair-visible",

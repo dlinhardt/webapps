@@ -122,15 +122,36 @@ if (typeof window === 'undefined') {
         navigatorApi.serviceWorker.register(window.document.currentScript.src).then(
             (registration) => {
                 !coi.quiet && console.log("COOP/COEP Service Worker registered", registration.scope);
+                let reloadRequested = false;
+                const reloadOnce = (reason) => {
+                    if (reloadRequested) return;
+                    reloadRequested = true;
+                    !coi.quiet && console.log("Reloading page to make use of updated COOP/COEP Service Worker.");
+                    window.sessionStorage.setItem("coiReloadedBySelf", reason);
+                    coi.doReload();
+                };
+                const reloadWhenActive = (worker, reason) => {
+                    if (!worker) {
+                        navigatorApi.serviceWorker.ready.then(() => reloadOnce(reason));
+                        return;
+                    }
+                    if (worker.state === "activated") {
+                        reloadOnce(reason);
+                        return;
+                    }
+                    worker.addEventListener("statechange", () => {
+                        if (worker.state === "activated") reloadOnce(reason);
+                    });
+                };
                 registration.addEventListener("updatefound", () => {
-                    !coi.quiet && console.log("Reloading page to make use of updated COOP/COEP Service Worker.");
-                    window.sessionStorage.setItem("coiReloadedBySelf", "updatefound");
-                    coi.doReload();
+                    reloadWhenActive(registration.installing, "updatefound");
                 });
-                if (registration.active && !navigatorApi.serviceWorker.controller) {
-                    !coi.quiet && console.log("Reloading page to make use of updated COOP/COEP Service Worker.");
-                    window.sessionStorage.setItem("coiReloadedBySelf", "notcontrolling");
-                    coi.doReload();
+                if (!navigatorApi.serviceWorker.controller) {
+                    // register() may resolve after updatefound has already fired.
+                    // Observe the worker returned by the registration as well so
+                    // a clean first visit cannot remain unisolated indefinitely.
+                    const worker = registration.installing || registration.waiting || registration.active;
+                    reloadWhenActive(worker, "notcontrolling");
                 }
             },
             (error) => !coi.quiet && console.error("COOP/COEP Service Worker failed to register:", error)

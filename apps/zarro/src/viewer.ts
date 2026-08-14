@@ -22,8 +22,6 @@ import { AbortableTaskPool } from './abortable_task_pool'
 import { getBackendFromUrl } from './backend'
 import {
   LAYOUT_PRESET,
-  layoutDetailBounds,
-  layoutDetailZoom,
   viewerLayoutConfig,
 } from './viewer_layout'
 import {
@@ -3623,7 +3621,13 @@ function startHudPolling(): void {
 }
 
 function selectedLayoutConfig() {
-  return viewerLayoutConfig(Number(els.layout.value))
+  const source = activeSource
+  const physicalExtents = source
+    ? source.shape.map(
+        (length, axis) => length * source.spacing[axis],
+      ) as Shape3
+    : undefined
+  return viewerLayoutConfig(Number(els.layout.value), physicalExtents)
 }
 
 function selectedSliceType(): number {
@@ -3639,6 +3643,9 @@ function applyLayout(): void {
   nv.isEqualSize = layout.isEqualSize
   nv.sliceType = layout.sliceType
   nv.customLayout = layout.customLayout
+  if (Number(els.layout.value) === LAYOUT_PRESET.EQUAL_SLICES_VERTICAL) {
+    nv.pan2Dxyzmm = crosshairCenteredPan(viewerZoom())
+  }
   requestAnimationFrame(() => {
     syncPrototypeStreamingState()
     if (stainLayerRuntimes.size > 1) {
@@ -3850,10 +3857,7 @@ function currentDetailFovBounds(
   focus: Shape3 = focusFraction,
   zoom = viewerZoom(),
 ): PrototypeFovBounds[] {
-  return layoutDetailBounds(
-    Number(els.layout.value),
-    currentVisibleFovBounds(shape, focus, zoom),
-  )
+  return currentVisibleFovBounds(shape, focus, zoom)
 }
 
 function screenSliceStreamingBounds(
@@ -4204,7 +4208,10 @@ function applyZoomControl(): void {
     nv.scaleMultiplier = zoom
   } else {
     const pan = nv.pan2Dxyzmm
-    nv.pan2Dxyzmm = [pan[0], pan[1], pan[2], zoom]
+    nv.pan2Dxyzmm =
+      Number(els.layout.value) === LAYOUT_PRESET.EQUAL_SLICES_VERTICAL
+        ? crosshairCenteredPan(zoom)
+        : [pan[0], pan[1], pan[2], zoom]
     nv.scaleMultiplier = zoom
   }
   syncCrosshairAppearance()
@@ -4268,6 +4275,13 @@ function panForCrosshair(): Shape3 {
   ]
 }
 
+function crosshairCenteredPan(
+  zoom: number,
+): [number, number, number, number] {
+  const centered = panForCrosshair()
+  return [centered[0], centered[1], centered[2], zoom]
+}
+
 function cursorAnchoredPan(
   event: WheelEvent,
   zoom: number,
@@ -4326,13 +4340,17 @@ function handleWheelZoom(event: WheelEvent): void {
       els.canvas.clientHeight,
       currentScrollZoomSpeed(),
     )
-    const anchoredPan = cursorAnchoredPan(event, zoom)
     const currentPan = nv.pan2Dxyzmm
-    nv.pan2Dxyzmm = anchoredPan ?? (
-      zoom > 1
-        ? [currentPan[0], currentPan[1], currentPan[2], zoom]
-        : [0, 0, 0, zoom]
-    )
+    if (Number(els.layout.value) === LAYOUT_PRESET.EQUAL_SLICES_VERTICAL) {
+      nv.pan2Dxyzmm = crosshairCenteredPan(zoom)
+    } else {
+      const anchoredPan = cursorAnchoredPan(event, zoom)
+      nv.pan2Dxyzmm = anchoredPan ?? (
+        zoom > 1
+          ? [currentPan[0], currentPan[1], currentPan[2], zoom]
+          : [0, 0, 0, zoom]
+      )
+    }
     nv.scaleMultiplier = zoom
   }
   syncCrosshairAppearance()
@@ -4361,17 +4379,9 @@ function detailLevelForView(
       Math.max(0, fixedZarrLevel),
     )
   }
-  const physicalExtents = source.shape.map(
-    (length, axis) => length * source.spacing[axis],
-  ) as Shape3
-  const detailZoom = layoutDetailZoom(
-    Number(els.layout.value),
-    zoom,
-    physicalExtents,
-  )
   return detailLevelForZoom(
     source.levels.length - 1,
-    detailZoom,
+    zoom,
     source.levels.length,
   )
 }
