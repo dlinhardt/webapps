@@ -4465,7 +4465,7 @@ async function applyAdaptiveLodRequest(): Promise<void> {
   if (runtimes.length > 1) {
     if (multiStainDetailChangeRequested) {
       multiStainDetailChangeRequested = false
-      refocusMultiStainVolumes(runtimes)
+      await refocusMultiStainVolumes(runtimes)
     } else {
       // Hot-swapping any chunk plan while a streamed overlay is registered can
       // detach pending bricks from NiiVue's shared pump. At a stable detail
@@ -4510,7 +4510,9 @@ async function applyAdaptiveLodRequest(): Promise<void> {
   }
 }
 
-function refocusMultiStainVolumes(runtimes: StainLayerRuntime[]): void {
+async function refocusMultiStainVolumes(
+  runtimes: StainLayerRuntime[],
+): Promise<void> {
   const requests = runtimes.map((runtime) => {
     const targetLevel = detailLevelForView(runtime.source, viewerZoom())
     const bounds = currentDetailFovBounds(runtime.source.shape)
@@ -4522,7 +4524,16 @@ function refocusMultiStainVolumes(runtimes: StainLayerRuntime[]): void {
     }
   })
 
-  refocusLoadedStainVolumes(
+  const activeRequest = requests.find(
+    ({ runtime }) => runtime.layerId === activeStainLayerId,
+  )
+  if (activeRequest) {
+    currentDetailLevel = activeRequest.targetLevel
+    lastAdaptiveRequestKey = activeRequest.requestKey
+    setActiveLodLoading(activeRequest.targetLevel)
+  }
+
+  await refocusLoadedStainVolumes(
     requests.map(({ runtime, targetLevel, bounds }) => ({
       readSession: runtime.readSession,
       controller: runtime.chunkedVolume,
@@ -4530,6 +4541,8 @@ function refocusMultiStainVolumes(runtimes: StainLayerRuntime[]): void {
       focus: focusFraction,
       bounds,
     })),
+    (controller, previousPlan) =>
+      waitForStainLayerRefocus(controller, previousPlan),
   )
 
   for (const { runtime, targetLevel, requestKey } of requests) {
@@ -4540,7 +4553,8 @@ function refocusMultiStainVolumes(runtimes: StainLayerRuntime[]): void {
   if (active) {
     currentDetailLevel = active.detailLevel
     lastAdaptiveRequestKey = active.lastAdaptiveRequestKey
-    setActiveLodLoading(active.detailLevel)
+    chunkPlan = active.chunkedVolume.currentPlan
+    syncActiveLodIndicator(chunkPlan)
   }
 }
 

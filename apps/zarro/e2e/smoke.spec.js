@@ -815,6 +815,46 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   )).toBeGreaterThan(0);
   const dapiAfterLodSwap = await page.locator("#nv-canvas").screenshot();
   expect(dapiDuringLodSwap.equals(dapiAfterLodSwap)).toBe(true);
+
+  // Supersede a delayed multi-stain swap. The controllers share one NiiVue
+  // upload pump, so the newer request must wait for the current swap and then
+  // become the final delivered plan instead of leaving the pump idle/stale.
+  gateDualLayerLod = true;
+  gatedLodLevel = 3;
+  gatedDapiLodRequests = 0;
+  await page.getByLabel("Zoom level").fill("3");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect.poll(() => gatedDapiLodRequests).toBeGreaterThan(0);
+  await page.getByLabel("Zoom level").fill("1");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "data-requested-level",
+    "1",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "data-delivered-level",
+    "1",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator("#activeLevel")).toHaveAttribute(
+    "data-fov-levels",
+    "1",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator("#tileLoading")).toHaveAttribute(
+    "data-loading",
+    "0",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-stream-pending",
+    "0",
+  );
+  await expect(page.locator("#nv-canvas")).toHaveAttribute(
+    "data-stream-in-flight",
+    "0",
+  );
 });
 
 test("DANDI assets are grouped by stain and selectable as a chunk set", async ({ page }) => {

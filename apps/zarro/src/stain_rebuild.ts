@@ -5,30 +5,45 @@ export interface RenewableReadSession {
   renew(): void
 }
 
-export interface RefocusableStainVolume {
+export interface RefocusableStainVolume<Plan = unknown> {
+  readonly currentPlan: Plan
   setMaxDetail(levelIndex: number): void
   setFocus(focus: Shape3, bounds?: PrototypeFovBounds[]): void
 }
 
-export interface StainRefocusRequest {
+export interface StainRefocusRequest<
+  Controller extends RefocusableStainVolume = RefocusableStainVolume,
+> {
   readSession: RenewableReadSession
-  controller: RefocusableStainVolume
+  controller: Controller
   targetLevel: number
   focus: Shape3
   bounds: PrototypeFovBounds[]
 }
 
+export type WaitForStainRefocus<
+  Controller extends RefocusableStainVolume = RefocusableStainVolume,
+> = (
+  controller: Controller,
+  previousPlan: Controller['currentPlan'],
+) => Promise<void>
+
 /**
  * Cancel every obsolete read before scheduling any replacement plan. NiiVue
- * debounces these controller calls, so a newer layout/zoom can replace the
- * pending plan before it reaches the renderer.
+ * has one shared renderer upload pump, so settle each controller's debounced
+ * plan swap before allowing the next controller to enter that pump.
  */
-export function refocusLoadedStainVolumes(
-  requests: readonly StainRefocusRequest[],
-): void {
+export async function refocusLoadedStainVolumes<
+  Controller extends RefocusableStainVolume,
+>(
+  requests: readonly StainRefocusRequest<Controller>[],
+  waitForRefocus: WaitForStainRefocus<Controller>,
+): Promise<void> {
   for (const request of requests) request.readSession.renew()
   for (const request of requests) {
+    const previousPlan = request.controller.currentPlan
     request.controller.setMaxDetail(request.targetLevel)
     request.controller.setFocus(request.focus, request.bounds)
+    await waitForRefocus(request.controller, previousPlan)
   }
 }
