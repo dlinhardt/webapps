@@ -314,6 +314,18 @@
             <button id="clearMeasurements" type="button" disabled>Clear</button>
           </div>
 
+          <label class="field" for="niftiLevel">
+            <span>NIfTI resolution</span>
+            <select id="niftiLevel" disabled>
+              <option value="current" selected>Current displayed level</option>
+            </select>
+          </label>
+          <output
+            id="niftiEstimate"
+            class="nifti-estimate"
+            for="niftiLevel"
+            aria-live="polite"
+          >Load a volume to estimate the export.</output>
           <button class="secondary-button" id="downloadNifti" type="button" disabled>
             Download NIfTI
           </button>

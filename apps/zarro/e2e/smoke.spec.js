@@ -3,6 +3,59 @@
 // (see playwright.config.js) so it exercises the built, header-served output.
 import { test, expect } from "@playwright/test";
 
+async function readDownload(download) {
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+function parseNiftiHeader(buffer) {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const headerSize = view.getInt32(0, true);
+  if (headerSize === 348) {
+    return {
+      version: 1,
+      shape: [42, 44, 46].map((offset) => view.getInt16(offset, true)),
+      voxelOffset: view.getFloat32(108, true),
+    };
+  }
+  if (headerSize === 540) {
+    return {
+      version: 2,
+      shape: [24, 32, 40].map((offset) =>
+        Number(view.getBigInt64(offset, true)),
+      ),
+      voxelOffset: Number(view.getBigInt64(168, true)),
+    };
+  }
+  throw new Error(`Unexpected NIfTI header size ${headerSize}`);
+}
+
+async function niftiEstimate(page) {
+  return page.locator("#niftiEstimate").evaluate((output) => ({
+    level: Number(output.dataset.level),
+    shape: (output.dataset.shape ?? "").split(",").map(Number),
+    bytes: Number(output.dataset.bytes),
+    version: Number(output.dataset.version),
+  }));
+}
+
+async function downloadAndVerifyNifti(page, expectedFilename) {
+  const estimate = await niftiEstimate(page);
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#downloadNifti").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(expectedFilename);
+  const bytes = await readDownload(download);
+  const header = parseNiftiHeader(bytes);
+  expect(bytes.byteLength).toBe(estimate.bytes);
+  expect(header.version).toBe(estimate.version);
+  expect(header.shape).toEqual(estimate.shape);
+  expect(header.voxelOffset).toBe(estimate.version === 1 ? 352 : 544);
+  return { estimate, bytes, header };
+}
+
 async function clickKnownCanvasPointUntilLocationChanges(
   page,
   points,
@@ -82,6 +135,10 @@ test("app boots", async ({ page }) => {
   await expect(page.getByText("Chunk spacing", { exact: true })).toHaveCount(0);
   await expect(page.locator("#status")).toBeHidden();
   await expect(page.getByText("Active detail", { exact: true })).toHaveCount(0);
+  await expect(page.locator("#niftiLevel")).toBeDisabled();
+  await expect(page.locator("#niftiEstimate")).toHaveText(
+    "Load a volume to estimate the export.",
+  );
 });
 
 test("page is cross-origin isolated (COOP/COEP active)", async ({ page }) => {
@@ -158,48 +215,65 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     const path = url.pathname;
     const isDapi = path.includes("/dapi/");
     const isRight = path.includes("/right/") || isDapi;
+    const rootAttributes = {
+      multiscales: [{
+        axes: [
+          { name: "z", unit: "millimeter" },
+          { name: "y", unit: "millimeter" },
+          { name: "x", unit: "millimeter" },
+        ],
+        datasets: [0, 1, 2, 3].map((level) => ({
+          path: String(level),
+          coordinateTransformations: [
+            { type: "scale", scale: [0.001, 0.001, 0.001].map((value) => value * 2 ** level) },
+            // Deliberately fractional and overlapping at every level.
+            { type: "translation", translation: [0, 0, isRight && !isDapi ? 0.0135 : 0] },
+          ],
+        })),
+      }],
+    };
+    const arrayMetadata = (level) => {
+      const size = 16 / 2 ** level;
+      return {
+        zarr_format: 2,
+        shape: [size, size, size],
+        chunks: [size, size, size],
+        dtype: isDapi ? "<u2" : "|u1",
+        compressor: null,
+        fill_value: 0,
+        order: "C",
+        filters: null,
+      };
+    };
     if (isDapi && path.endsWith("/.zattrs")) dapiRootMetadataRequests++;
     if (delayDapiMetadata && isDapi && /\.(?:zattrs|zarray)$/.test(path)) {
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
-    if (path.endsWith("/.zgroup")) {
+    if (path.endsWith("/.zmetadata") && !isDapi) {
+      const metadata = {
+        ".zgroup": { zarr_format: 2 },
+        ".zattrs": rootAttributes,
+      };
+      for (let level = 0; level < 4; level++) {
+        metadata[`${level}/.zarray`] = arrayMetadata(level);
+        metadata[`${level}/.zattrs`] = {};
+      }
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ zarr_consolidated_format: 1, metadata }),
+      });
+    } else if (path.endsWith("/.zgroup")) {
       await route.fulfill({ contentType: "application/json", body: group });
     } else if (path.endsWith("/.zattrs") && !/\/\d+\/\.zattrs$/.test(path)) {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
-          multiscales: [{
-            axes: [
-              { name: "z", unit: "millimeter" },
-              { name: "y", unit: "millimeter" },
-              { name: "x", unit: "millimeter" },
-            ],
-            datasets: [0, 1, 2, 3].map((level) => ({
-              path: String(level),
-              coordinateTransformations: [
-                { type: "scale", scale: [0.001, 0.001, 0.001].map((value) => value * 2 ** level) },
-                // Deliberately fractional and overlapping at every level.
-                { type: "translation", translation: [0, 0, isRight && !isDapi ? 0.0135 : 0] },
-              ],
-            })),
-          }],
-        }),
+        body: JSON.stringify(rootAttributes),
       });
     } else if (/\/\d+\/\.zarray$/.test(path)) {
       const level = Number(path.match(/\/(\d+)\/\.zarray$/)?.[1] ?? 0);
-      const size = 16 / 2 ** level;
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
-          zarr_format: 2,
-          shape: [size, size, size],
-          chunks: [size, size, size],
-          dtype: isDapi ? "<u2" : "|u1",
-          compressor: null,
-          fill_value: 0,
-          order: "C",
-          filters: null,
-        }),
+        body: JSON.stringify(arrayMetadata(level)),
       });
     } else if (/\/\d+\/\.zattrs$/.test(path)) {
       await route.fulfill({ contentType: "application/json", body: "{}" });
@@ -251,6 +325,14 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     { timeout: 15_000 },
   );
   await expect(page.locator("#activeLevel")).toHaveText("L0");
+  await expect(page.locator("#niftiLevel")).toBeEnabled();
+  await expect(page.locator("#niftiLevel option")).toHaveText([
+    "Current displayed level",
+    "L0 — finest",
+    "L1",
+    "L2",
+    "L3 — overview",
+  ]);
   await expect(page.locator("#axialSlice")).toHaveAttribute("min", "0");
   await expect(page.locator("#axialSlice")).toHaveAttribute("max", "15");
   await expect(page.locator("#axialSliceHelp")).toContainText("current Zarr level");
@@ -423,15 +505,51 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
   expect(boundedPlanSize).toBeGreaterThan(0);
   expect(boundedPlanSize).toBeLessThanOrEqual(1024);
 
-  const downloadPromise = page.waitForEvent("download");
-  await page.locator("#downloadNifti").click();
-  const niftiDownload = await downloadPromise;
-  expect(niftiDownload.suggestedFilename()).toBe(
-    "omezarr-mosaic-2-stores-L0-fov.nii",
+  const fullResolution = await downloadAndVerifyNifti(
+    page,
+    "left-L0-fov.nii",
   );
   await expect(page.locator("#downloadStatus")).toHaveText(
-    "Download started: omezarr-mosaic-2-stores-L0-fov.nii",
+    "Download started: left-L0-fov.nii",
   );
+
+  await page.locator("#niftiLevel").selectOption("2");
+  await expect(page.locator("#activeLevel")).toHaveText("L0");
+  await expect(page.locator("#niftiEstimate")).toContainText("NIfTI-1");
+  const coarseResolution = await downloadAndVerifyNifti(
+    page,
+    "left-L2-fov.nii",
+  );
+  expect(coarseResolution.estimate.level).toBe(2);
+  expect(coarseResolution.estimate.bytes).toBeLessThan(
+    fullResolution.estimate.bytes,
+  );
+
+  await page.locator("#niftiLevel").selectOption("0");
+  const uncroppedBytes = (await niftiEstimate(page)).bytes;
+  for (let index = 0; index < 4; index++) {
+    await page.locator("#nv-canvas").dispatchEvent("wheel", {
+      deltaY: -120,
+      deltaMode: 0,
+    });
+  }
+  await expect.poll(async () => (await niftiEstimate(page)).bytes).toBeLessThan(
+    uncroppedBytes,
+  );
+  const croppedResolution = await downloadAndVerifyNifti(
+    page,
+    "left-L0-fov.nii",
+  );
+  expect(croppedResolution.estimate.shape).not.toEqual(
+    fullResolution.estimate.shape,
+  );
+  for (let index = 0; index < 4; index++) {
+    await page.locator("#nv-canvas").dispatchEvent("wheel", {
+      deltaY: 120,
+      deltaMode: 0,
+    });
+  }
+  await page.locator("#niftiLevel").selectOption("current");
 
   const canvasBox = await page.locator("#nv-canvas").boundingBox();
   expect(canvasBox).not.toBeNull();
@@ -694,6 +812,14 @@ test("translated OME-Zarr URLs load as one composite volume", async ({ page }) =
     "data-loading",
     "0",
     { timeout: 30_000 },
+  );
+  await expect(page.locator("#niftiEstimate")).toContainText("DAPI");
+  const dapiExport = await downloadAndVerifyNifti(
+    page,
+    "DAPI-L0-fov.nii",
+  );
+  expect(dapiExport.estimate.bytes).toBe(
+    352 + dapiExport.estimate.shape.reduce((size, axis) => size * axis, 2),
   );
   await expect(page.getByLabel(/Window level/)).toHaveValue("305");
   await expect(page.getByLabel(/Window width/)).toHaveValue("610");

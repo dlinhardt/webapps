@@ -28,7 +28,13 @@ complete dataset.
 - Window level/width and a synchronized dual-thumb visible min/max control,
   colour maps, physical scale bars, crosshairs, and distance measurements are
   handled in the browser.
-- The current field of view can be exported as NIfTI.
+- The active stain's current physical field of view can be exported as NIfTI
+  at either the displayed Zarr level or any other pyramid level. ZARRo shows
+  the mapped voxel dimensions, spacing, approximate complete file size, and
+  NIfTI version before export. The selected level is fetched directly from the
+  OME-Zarr store; it does not have to pass through the viewer or GPU first.
+- Large exports use bounded tiles and the browser's streaming file writer.
+  Dimensions beyond NIfTI-1's signed 16-bit limit are written as NIfTI-2.
 - Share links reopen the selected store or translated store collection and
   restore layout, camera, crosshair, pan, zoom, Zarr level, scroll zoom speed,
   contrast, colour map, and overlay visibility.

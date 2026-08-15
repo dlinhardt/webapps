@@ -8,7 +8,6 @@ import NiiVue, {
   type NVImage,
   SLICE_TYPE,
   type VolumeChunkSource,
-  writeVolume,
 } from '@niivue/niivue'
 import '@neurodesk/webapp-components/styles/base.css'
 import { mountImagingWorkspace } from '@neurodesk/webapp-components/core/mount-imaging-workspace'
@@ -45,6 +44,17 @@ import {
   niftiDatatype,
   type Shape3,
 } from './logical_volume'
+import {
+  createNiftiHeader,
+  formatApproxBytes,
+  geometryForWorldBounds,
+  niftiFileBytes,
+  niftiImageBytes,
+  niftiVersionForShape,
+  worldBoundsForGeometry,
+  type ExportGridLevel,
+  type NiftiExportGeometry,
+} from './nifti_export'
 import { LatestTaskQueue } from './latest_task_queue'
 import { measurementIndexAtCanvasPoint } from './measurement_hit_test'
 import {
@@ -400,6 +410,8 @@ const els = {
   showStats: el<HTMLInputElement>('showStats'),
   reload: el<HTMLButtonElement>('reload'),
   downloadNifti: el<HTMLButtonElement>('downloadNifti'),
+  niftiLevel: el<HTMLSelectElement>('niftiLevel'),
+  niftiEstimate: el<HTMLOutputElement>('niftiEstimate'),
   copyShareLink: el<HTMLButtonElement>('copyShareLink'),
   shareStatus: el<HTMLOutputElement>('shareStatus'),
   downloadStatus: el<HTMLOutputElement>('downloadStatus'),
@@ -615,6 +627,8 @@ interface ExportGeometry {
   spacing: Shape3
   origin: Shape3
   level: OmezarrLevel | null
+  levelIndex: number | null
+  worldOrigin: Shape3
 }
 
 function activeExportLevel(
@@ -643,6 +657,8 @@ function currentFovGeometry(source: OmezarrSource): ExportGeometry {
     spacing: crop.spacing,
     origin: crop.origin,
     level,
+    levelIndex: level.level,
+    worldOrigin: level.translation,
   }
 }
 
@@ -663,7 +679,14 @@ function currentMosaicFovGeometry(source: OmezarrMosaicSource): ExportGeometry {
     focusFraction,
     viewerZoom(),
   )
-  return { shape: crop.shape, spacing: crop.spacing, origin: crop.origin, level }
+  return {
+    shape: crop.shape,
+    spacing: crop.spacing,
+    origin: crop.origin,
+    level,
+    levelIndex: mosaicLevel.level,
+    worldOrigin: mosaicLevel.worldOrigin,
+  }
 }
 
 function sourceExportGeometry(source: LoadedSource): ExportGeometry {
@@ -673,35 +696,150 @@ function sourceExportGeometry(source: LoadedSource): ExportGeometry {
       spacing: source.spacing,
       origin: [0, 0, 0],
       level: null,
+      levelIndex: null,
+      worldOrigin: [0, 0, 0],
     }
   }
   if (source.kind === 'omezarr-mosaic') return currentMosaicFovGeometry(source)
   return renderCropGeometry ?? currentFovGeometry(source)
 }
 
+function exportGridLevel(
+  source: OmezarrSource | OmezarrMosaicSource,
+  levelIndex: number,
+): ExportGridLevel | null {
+  if (source.kind === 'omezarr-mosaic') {
+    const level = source.levels[levelIndex]
+    return level
+      ? {
+          level: level.level,
+          shape: level.shape,
+          spacing: level.spacing,
+          worldOrigin: level.worldOrigin,
+        }
+      : null
+  }
+  const level = source.levels[levelIndex]
+  return level
+    ? {
+        level: level.level,
+        shape: level.shape,
+        spacing: level.spacing,
+        worldOrigin: level.translation,
+      }
+    : null
+}
+
+function selectedExportGeometry(source: LoadedSource): ExportGeometry {
+  const current = sourceExportGeometry(source)
+  if (source.kind === 'synthetic' || els.niftiLevel.value === 'current') {
+    return current
+  }
+  const targetIndex = Number(els.niftiLevel.value)
+  if (!Number.isInteger(targetIndex)) return current
+  const target = exportGridLevel(source, targetIndex)
+  if (!target) return current
+  const currentGrid: NiftiExportGeometry = {
+    level: current.levelIndex ?? 0,
+    shape: current.shape,
+    spacing: current.spacing,
+    origin: current.origin,
+    worldOrigin: current.worldOrigin,
+  }
+  const mapped = geometryForWorldBounds(
+    worldBoundsForGeometry(currentGrid),
+    target,
+  )
+  const readableLevel =
+    source.kind === 'omezarr-mosaic'
+      ? source.levels[targetIndex]?.blocks[0]?.level
+      : source.levels[targetIndex]
+  if (!readableLevel) return current
+  return {
+    shape: mapped.shape,
+    spacing: mapped.spacing,
+    origin: mapped.origin,
+    worldOrigin: mapped.worldOrigin,
+    level: readableLevel,
+    levelIndex: targetIndex,
+  }
+}
+
 function exportByteLength(source: LoadedSource): number {
-  return geometryByteLength(source, sourceExportGeometry(source))
+  return geometryByteLength(source, selectedExportGeometry(source))
 }
 
 function geometryByteLength(
   source: LoadedSource,
   geometry: ExportGeometry,
 ): number {
-  const { shape } = geometry
-  return shape[0] * shape[1] * shape[2] * Math.ceil(source.numBitsPerVoxel / 8)
+  return niftiImageBytes(geometry.shape, source.numBitsPerVoxel)
+}
+
+function syncNiftiLevelControl(source: LoadedSource | null): void {
+  const levels = pyramidLevels(source)
+  const signature = levels.map(({ level }) => level).join(',')
+  if (els.niftiLevel.dataset.levels !== signature) {
+    const selected = els.niftiLevel.value || 'current'
+    const options = [new Option('Current displayed level', 'current')]
+    for (const level of levels) {
+      const suffix =
+        level.level === 0
+          ? ' — finest'
+          : level.level === levels.length - 1
+            ? ' — overview'
+            : ''
+      options.push(
+        new Option(`L${level.level}${suffix}`, String(level.level)),
+      )
+    }
+    els.niftiLevel.replaceChildren(...options)
+    els.niftiLevel.value = [...els.niftiLevel.options].some(
+      ({ value }) => value === selected,
+    )
+      ? selected
+      : 'current'
+    els.niftiLevel.dataset.levels = signature
+  }
+  els.niftiLevel.disabled = !source || levels.length === 0 || downloadInProgress
+}
+
+function formatExportSpacing(spacing: Shape3): string {
+  const useMicrometres = spacing.every((value) => value < 1)
+  const scale = useMicrometres ? 1000 : 1
+  const values = spacing.map((value) =>
+    Number((value * scale).toPrecision(4)),
+  )
+  return `${values.join(' × ')} ${useMicrometres ? 'µm' : 'mm'}`
 }
 
 function syncDownloadControl(): void {
   const source = activeSource
+  syncNiftiLevelControl(source)
   if (!source) {
     els.downloadNifti.disabled = true
     els.downloadNifti.textContent = 'download .nii'
     els.downloadNifti.title = 'Load a volume before downloading it'
+    els.niftiEstimate.value = 'Load a volume to estimate the export.'
+    delete els.niftiEstimate.dataset.level
+    delete els.niftiEstimate.dataset.shape
+    delete els.niftiEstimate.dataset.bytes
     return
   }
   const bytes = exportByteLength(source)
-  const geometry = sourceExportGeometry(source)
-  const levelLabel = geometry.level ? ` L${geometry.level.level}` : ''
+  const geometry = selectedExportGeometry(source)
+  const fileBytes = niftiFileBytes(geometry.shape, source.numBitsPerVoxel)
+  const version = niftiVersionForShape(geometry.shape)
+  const levelLabel = geometry.levelIndex !== null ? ` L${geometry.levelIndex}` : ''
+  const layerName = activeStainLayer()?.name ?? source.name
+  els.niftiEstimate.value =
+    `${layerName} · ${geometry.shape.join(' × ')} voxels · ` +
+    `${formatExportSpacing(geometry.spacing)} · ${formatApproxBytes(fileBytes)} · ` +
+    `NIfTI-${version}`
+  els.niftiEstimate.dataset.level = String(geometry.levelIndex ?? '')
+  els.niftiEstimate.dataset.shape = geometry.shape.join(',')
+  els.niftiEstimate.dataset.bytes = String(fileBytes)
+  els.niftiEstimate.dataset.version = String(version)
   els.downloadNifti.textContent = downloadInProgress
     ? `preparing${levelLabel}...`
     : `download FOV${levelLabel}.nii`
@@ -2865,6 +3003,7 @@ function bytesFromZarrView(view: unknown): Uint8Array {
 async function readOmezarrGeometry(
   source: OmezarrSource,
   geometry: ExportGeometry,
+  signal: AbortSignal,
 ): Promise<Uint8Array> {
   const level = geometry.level
   if (!level) throw new Error('The OME-Zarr export level is unavailable')
@@ -2876,7 +3015,7 @@ async function readOmezarrGeometry(
   selection.push(zarr.slice(originY, originY + shapeY))
   selection.push(zarr.slice(originX, originX + shapeX))
   setDownloadStatus(`Fetching L${level.level} voxels...`)
-  const view = await zarr.get(level.array, selection)
+  const view = await zarr.get(level.array, selection, { signal })
   const bytes = bytesFromZarrView(view)
   const expectedBytes = geometryByteLength(source, geometry)
   if (bytes.byteLength !== expectedBytes) {
@@ -2890,6 +3029,7 @@ async function readOmezarrGeometry(
 async function readMosaicGeometry(
   source: OmezarrMosaicSource,
   geometry: ExportGeometry,
+  signal: AbortSignal,
 ): Promise<Uint8Array> {
   const levelIndex = geometry.level?.level ?? source.baseLevel
   const level = source.levels[levelIndex]
@@ -2904,6 +3044,7 @@ async function readMosaicGeometry(
     geometry.origin,
     geometry.shape,
     source.numBitsPerVoxel / 8,
+    signal,
   )
 }
 
@@ -2944,17 +3085,19 @@ async function readWholeRangeSource(source: RangeSource): Promise<Uint8Array> {
 }
 
 function niftiFilename(source: LoadedSource, geometry: ExportGeometry): string {
+  const layerName = activeStainLayer()?.name
   const sourceName =
-    source.kind === 'omezarr-mosaic'
+    layerName ?? (source.kind === 'omezarr-mosaic'
       ? `omezarr-mosaic-${source.levels[0]?.blocks.length ?? 0}-stores`
-      : source.id
+      : source.id)
   const cleanId = sourceName
     .replace(/\.ome\.zarr$/i, '')
     .replace(/[^a-z0-9._-]+/gi, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 96)
     .replace(/-+$/g, '')
-  const levelSuffix = geometry.level ? `-L${geometry.level.level}` : ''
+  const levelSuffix =
+    geometry.levelIndex !== null ? `-L${geometry.levelIndex}` : ''
   return `${cleanId || 'volume'}${levelSuffix}-fov.nii`
 }
 
@@ -2994,44 +3137,25 @@ interface NiftiPickerWindow extends Window {
   }) => Promise<NiftiFileHandle>
 }
 
-async function niftiHeader(
+function niftiHeader(
   source: LoadedSource,
   geometry: ExportGeometry,
-): Promise<Uint8Array> {
+): Uint8Array {
   const win = parseWindow(source.defaultWindow)
-  const mosaicLevel =
-    source.kind === 'omezarr-mosaic'
-      ? source.levels[geometry.level?.level ?? source.baseLevel]
-      : undefined
-  const volume = buildLogicalVolume({
-    id: source.name,
-    url: source.sourceUrl,
+  const affineOrigin = geometry.origin.map(
+    (value, axis) =>
+      geometry.worldOrigin[axis] + value * geometry.spacing[axis],
+  ) as Shape3
+  return createNiftiHeader({
     shape: geometry.shape,
     spacing: geometry.spacing,
-    origin:
-      source.kind === 'omezarr-mosaic'
-        ? geometry.origin.map(
-            (value, axis) =>
-              (mosaicLevel?.worldOrigin[axis] ?? source.worldOrigin[axis]) +
-              value * geometry.spacing[axis],
-          ) as Shape3
-        : undefined,
+    affineOrigin,
     datatypeCode: source.datatypeCode,
     numBitsPerVoxel: source.numBitsPerVoxel,
     calMin: win.min,
     calMax: win.max,
-    colormap: els.colormap.value,
-    img: null,
+    description: `ZARRo ${activeStainLayer()?.name ?? source.name}`,
   })
-  if (source.kind !== 'omezarr-mosaic') {
-    for (let axis = 0; axis < 3; axis++) {
-      const row = volume.hdr.affine[axis]
-      if (row) row[3] = geometry.origin[axis] * geometry.spacing[axis]
-    }
-  }
-  return new Uint8Array(
-    await writeVolume('header.nii', volume.hdr, new ArrayBuffer(0)),
-  )
 }
 
 async function saveInMemoryNifti(
@@ -3040,7 +3164,7 @@ async function saveInMemoryNifti(
   imageBytes: Uint8Array,
   filename: string,
 ): Promise<void> {
-  const header = await niftiHeader(source, geometry)
+  const header = niftiHeader(source, geometry)
   const nifti = new Uint8Array(header.byteLength + imageBytes.byteLength)
   nifti.set(header)
   nifti.set(imageBytes, header.byteLength)
@@ -3070,38 +3194,76 @@ async function streamUniformOmezarr(
   source: OmezarrSource | OmezarrMosaicSource,
   geometry: ExportGeometry,
   filename: string,
+  signal: AbortSignal,
 ): Promise<void> {
   const level = geometry.level
   if (!level) throw new Error('The OME-Zarr export level is unavailable')
   const writable = await pickWritableFile(filename)
   try {
-    const header = await niftiHeader(source, geometry)
+    const header = niftiHeader(source, geometry)
     const totalBytes = header.byteLength + geometryByteLength(source, geometry)
     await writable.truncate(totalBytes)
     await writable.write({ type: 'write', position: 0, data: header })
-    const planeBytes =
-      geometry.shape[0] * geometry.shape[1] * (source.numBitsPerVoxel / 8)
-    const slabDepth = Math.max(1, Math.floor((32 * 1024 * 1024) / planeBytes))
-    let position = header.byteLength
-    for (let z = 0; z < geometry.shape[2]; z += slabDepth) {
-      const depth = Math.min(slabDepth, geometry.shape[2] - z)
-      setDownloadStatus(`Writing slice ${z + 1} of ${geometry.shape[2]}...`)
-      const slabGeometry: ExportGeometry = {
-        shape: [geometry.shape[0], geometry.shape[1], depth],
-        spacing: geometry.spacing,
-        origin: [
-          geometry.origin[0],
-          geometry.origin[1],
-          geometry.origin[2] + z,
-        ],
-        level,
+    const bytesPerVoxel = source.numBitsPerVoxel / 8
+    const targetTileBytes = 16 * 1024 * 1024
+    const tileX = Math.min(
+      geometry.shape[0],
+      Math.max(1, Math.floor(targetTileBytes / bytesPerVoxel)),
+    )
+    const tileY = Math.min(
+      geometry.shape[1],
+      Math.max(1, Math.floor(targetTileBytes / (tileX * bytesPerVoxel))),
+    )
+    const tileZ = Math.min(
+      geometry.shape[2],
+      Math.max(
+        1,
+        Math.floor(targetTileBytes / (tileX * tileY * bytesPerVoxel)),
+      ),
+    )
+    for (let z = 0; z < geometry.shape[2]; z += tileZ) {
+      const depth = Math.min(tileZ, geometry.shape[2] - z)
+      for (let y = 0; y < geometry.shape[1]; y += tileY) {
+        const height = Math.min(tileY, geometry.shape[1] - y)
+        for (let x = 0; x < geometry.shape[0]; x += tileX) {
+          const width = Math.min(tileX, geometry.shape[0] - x)
+          setDownloadStatus(
+            `Writing L${geometry.levelIndex ?? level.level}: ` +
+              `slice ${z + 1} of ${geometry.shape[2]}...`,
+          )
+          const tileGeometry: ExportGeometry = {
+            shape: [width, height, depth],
+            spacing: geometry.spacing,
+            origin: [
+              geometry.origin[0] + x,
+              geometry.origin[1] + y,
+              geometry.origin[2] + z,
+            ],
+            level,
+            levelIndex: geometry.levelIndex,
+            worldOrigin: geometry.worldOrigin,
+          }
+          const bytes =
+            source.kind === 'omezarr-mosaic'
+              ? await readMosaicGeometry(source, tileGeometry, signal)
+              : await readOmezarrGeometry(source, tileGeometry, signal)
+          const rowBytes = width * bytesPerVoxel
+          for (let localZ = 0; localZ < depth; localZ++) {
+            for (let localY = 0; localY < height; localY++) {
+              const sourceOffset = (localZ * height + localY) * rowBytes
+              const voxelOffset =
+                ((z + localZ) * geometry.shape[1] + y + localY) *
+                  geometry.shape[0] +
+                x
+              await writable.write({
+                type: 'write',
+                position: header.byteLength + voxelOffset * bytesPerVoxel,
+                data: bytes.subarray(sourceOffset, sourceOffset + rowBytes),
+              })
+            }
+          }
+        }
       }
-      const bytes =
-        source.kind === 'omezarr-mosaic'
-          ? await readMosaicGeometry(source, slabGeometry)
-          : await readOmezarrGeometry(source, slabGeometry)
-      await writable.write({ type: 'write', position, data: bytes })
-      position += bytes.byteLength
     }
     await writable.close()
   } catch (error) {
@@ -3117,18 +3279,21 @@ async function downloadNifti(): Promise<void> {
   downloadInProgress = true
   syncDownloadControl()
   try {
-    const geometry = sourceExportGeometry(source)
+    // Source stores may retain the viewer load session as their default
+    // request signal. Export reads must outlive normal viewer LOD renewals.
+    const exportSignal = new AbortController().signal
+    const geometry = selectedExportGeometry(source)
     const filename = niftiFilename(source, geometry)
     const streamsToSelectedFile =
       source.kind !== 'synthetic' && bytes > MAX_IN_MEMORY_NIFTI_BYTES
     if (streamsToSelectedFile) {
-      await streamUniformOmezarr(source, geometry, filename)
+      await streamUniformOmezarr(source, geometry, filename, exportSignal)
     } else {
       const imageBytes =
         source.kind === 'omezarr-mosaic'
-          ? await readMosaicGeometry(source, geometry)
+          ? await readMosaicGeometry(source, geometry, exportSignal)
           : source.kind === 'omezarr'
-          ? await readOmezarrGeometry(source, geometry)
+          ? await readOmezarrGeometry(source, geometry, exportSignal)
           : await readWholeRangeSource(source)
       setDownloadStatus('Writing NIfTI header...')
       await saveInMemoryNifti(source, geometry, imageBytes, filename)
@@ -5037,6 +5202,10 @@ async function main(): Promise<void> {
   })
   els.downloadNifti.addEventListener('click', () => {
     void downloadNifti()
+  })
+  els.niftiLevel.addEventListener('change', () => {
+    setDownloadStatus('')
+    syncDownloadControl()
   })
   els.copyShareLink.addEventListener('click', () => {
     void copyShareLink()
