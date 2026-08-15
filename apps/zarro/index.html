@@ -329,6 +329,23 @@
           <button class="secondary-button" id="downloadNifti" type="button" disabled>
             Download NIfTI
           </button>
+          <div id="niftiProgress" class="nifti-progress" hidden>
+            <progress id="niftiProgressBar" max="1" value="0"></progress>
+            <div class="nifti-progress-detail">
+              <output
+                id="niftiProgressText"
+                for="niftiProgressBar"
+                role="status"
+                aria-live="polite"
+              >Preparing export…</output>
+              <button
+                id="cancelNifti"
+                class="nifti-cancel"
+                type="button"
+                disabled
+              >Cancel</button>
+            </div>
+          </div>
           <button class="secondary-button" id="copyShareLink" type="button">
             Copy share link
           </button>

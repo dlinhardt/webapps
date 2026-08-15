@@ -34,6 +34,9 @@ complete dataset.
   NIfTI version before export. The selected level is fetched directly from the
   OME-Zarr store; it does not have to pass through the viewer or GPU first.
 - Large exports use bounded tiles and the browser's streaming file writer.
+  Tile, slice, byte, percentage, and estimated-time feedback stays visible
+  while data is fetched and written, and the export can be cancelled. Full-row
+  strips are written contiguously to avoid excessive file-system write calls.
   Dimensions beyond NIfTI-1's signed 16-bit limit are written as NIfTI-2.
 - Share links reopen the selected store or translated store collection and
   restore layout, camera, crosshair, pan, zoom, Zarr level, scroll zoom speed,

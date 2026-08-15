@@ -53,6 +53,8 @@ async function downloadAndVerifyNifti(page, expectedFilename) {
   expect(header.version).toBe(estimate.version);
   expect(header.shape).toEqual(estimate.shape);
   expect(header.voxelOffset).toBe(estimate.version === 1 ? 352 : 544);
+  await expect(page.locator("#niftiProgress")).toBeHidden();
+  await expect(page.locator("#cancelNifti")).toBeDisabled();
   return { estimate, bytes, header };
 }
 
@@ -139,6 +141,8 @@ test("app boots", async ({ page }) => {
   await expect(page.locator("#niftiEstimate")).toHaveText(
     "Load a volume to estimate the export.",
   );
+  await expect(page.locator("#niftiProgress")).toBeHidden();
+  await expect(page.locator("#cancelNifti")).toBeDisabled();
 });
 
 test("page is cross-origin isolated (COOP/COEP active)", async ({ page }) => {
@@ -162,6 +166,129 @@ test("a web worker loads and responds", async ({ page }) => {
     });
   });
   expect(ok).toBe(true);
+});
+
+test("large NIfTI export reports progress and can be cancelled", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__niftiWriterAborted = false;
+    window.__niftiWriterWrites = 0;
+    window.showSaveFilePicker = async () => ({
+      createWritable: async () => ({
+        truncate: async () => {},
+        write: async () => {
+          window.__niftiWriterWrites++;
+        },
+        close: async () => {},
+        abort: async () => {
+          window.__niftiWriterAborted = true;
+        },
+      }),
+    });
+  });
+
+  const rootAttributes = {
+    multiscales: [{
+      axes: [
+        { name: "z", unit: "millimeter" },
+        { name: "y", unit: "millimeter" },
+        { name: "x", unit: "millimeter" },
+      ],
+      datasets: [
+        { path: "0", coordinateTransformations: [{ type: "scale", scale: [1, 1, 1] }] },
+        { path: "1", coordinateTransformations: [{ type: "scale", scale: [1, 1024, 1024] }] },
+      ],
+    }],
+  };
+  await page.route("**/large-export/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/.zmetadata")) {
+      await route.fulfill({ status: 404, body: "not consolidated" });
+    } else if (path.endsWith("/.zgroup")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ zarr_format: 2 }),
+      });
+    } else if (path.endsWith("/.zattrs") && !/\/\d+\/\.zattrs$/.test(path)) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(rootAttributes),
+      });
+    } else if (path.endsWith("/0/.zarray")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          zarr_format: 2,
+          shape: [1, 8192, 16385],
+          chunks: [1, 128, 128],
+          dtype: "<u2",
+          compressor: null,
+          fill_value: 0,
+          order: "C",
+          filters: null,
+        }),
+      });
+    } else if (path.endsWith("/1/.zarray")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          zarr_format: 2,
+          shape: [1, 8, 17],
+          chunks: [1, 8, 17],
+          dtype: "<u2",
+          compressor: null,
+          fill_value: 0,
+          order: "C",
+          filters: null,
+        }),
+      });
+    } else if (/\/\d+\/\.zattrs$/.test(path)) {
+      await route.fulfill({ contentType: "application/json", body: "{}" });
+    } else if (path.endsWith("/1/0.0.0")) {
+      await route.fulfill({
+        contentType: "application/octet-stream",
+        body: Buffer.alloc(1 * 8 * 17 * 2, 1),
+      });
+    } else if (/\/0\/0\.\d+\.\d+$/.test(path)) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      try {
+        await route.fulfill({
+          contentType: "application/octet-stream",
+          body: Buffer.alloc(1 * 128 * 128 * 2, 2),
+        });
+      } catch {
+        // The cancel button intentionally aborts this in-flight request.
+      }
+    } else {
+      await route.fulfill({ status: 404, body: "not found" });
+    }
+  });
+
+  await page.goto("/?source=custom&level=1&zarrLevel=1");
+  await page.getByLabel("OME-Zarr store URL 1").fill(
+    "http://localhost:4173/large-export/store",
+  );
+  await page.getByRole("button", { name: "Load volume" }).click();
+  await expect(page.locator("#activeLevel")).toHaveText("L1", {
+    timeout: 15_000,
+  });
+  await page.locator("#niftiLevel").selectOption("0");
+  expect(Number(await page.locator("#niftiEstimate").getAttribute("data-bytes")))
+    .toBeGreaterThan(256 * 1024 * 1024);
+
+  await page.locator("#downloadNifti").click();
+  await expect(page.locator("#niftiProgress")).toBeVisible();
+  await expect(page.locator("#niftiProgressText")).toContainText(
+    "Fetching tile 1 of",
+  );
+  await expect(page.locator("#cancelNifti")).toBeEnabled();
+  await page.locator("#cancelNifti").click();
+  await expect(page.locator("#downloadStatus")).toHaveText(
+    "Download cancelled",
+  );
+  await expect(page.locator("#niftiProgress")).toBeHidden();
+  await expect(page.locator("#cancelNifti")).toBeDisabled();
+  expect(await page.evaluate(() => window.__niftiWriterAborted)).toBe(true);
+  expect(await page.evaluate(() => window.__niftiWriterWrites)).toBe(1);
 });
 
 test("translated OME-Zarr URLs load as one composite volume", async ({ page }) => {

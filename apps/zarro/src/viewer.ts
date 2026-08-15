@@ -55,6 +55,10 @@ import {
   type ExportGridLevel,
   type NiftiExportGeometry,
 } from './nifti_export'
+import {
+  streamNiftiTiles,
+  type NiftiStreamProgress,
+} from './nifti_stream'
 import { LatestTaskQueue } from './latest_task_queue'
 import { measurementIndexAtCanvasPoint } from './measurement_hit_test'
 import {
@@ -412,6 +416,10 @@ const els = {
   downloadNifti: el<HTMLButtonElement>('downloadNifti'),
   niftiLevel: el<HTMLSelectElement>('niftiLevel'),
   niftiEstimate: el<HTMLOutputElement>('niftiEstimate'),
+  niftiProgress: el<HTMLDivElement>('niftiProgress'),
+  niftiProgressBar: el<HTMLProgressElement>('niftiProgressBar'),
+  niftiProgressText: el<HTMLOutputElement>('niftiProgressText'),
+  cancelNifti: el<HTMLButtonElement>('cancelNifti'),
   copyShareLink: el<HTMLButtonElement>('copyShareLink'),
   shareStatus: el<HTMLOutputElement>('shareStatus'),
   downloadStatus: el<HTMLOutputElement>('downloadStatus'),
@@ -453,6 +461,9 @@ let adaptiveLodRequested = false
 let multiStainDetailChangeRequested = false
 let streamedVolumeRevision = 0
 let downloadInProgress = false
+let activeNiftiExportController: AbortController | null = null
+let niftiProgressStartedAt = 0
+let niftiProgressLastRenderedAt = 0
 let renderCropGeometry: ExportGeometry | null = null
 let sliceViewBeforeRender: ViewState | null = null
 let windowUpdateHandle = 0
@@ -813,6 +824,78 @@ function formatExportSpacing(spacing: Shape3): string {
   return `${values.join(' × ')} ${useMicrometres ? 'µm' : 'mm'}`
 }
 
+function formatRemainingTime(seconds: number): string {
+  if (seconds < 60) return `${Math.max(1, Math.ceil(seconds))} sec`
+  if (seconds < 60 * 60) return `${Math.ceil(seconds / 60)} min`
+  const hours = Math.floor(seconds / (60 * 60))
+  const minutes = Math.ceil((seconds - hours * 60 * 60) / 60)
+  return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`
+}
+
+function showNiftiProgress(
+  message: string,
+  fraction: number | null,
+): void {
+  els.niftiProgress.hidden = false
+  els.niftiProgressText.value = message
+  if (fraction === null) {
+    els.niftiProgressBar.removeAttribute('value')
+  } else {
+    els.niftiProgressBar.max = 1
+    els.niftiProgressBar.value = Math.max(0, Math.min(1, fraction))
+  }
+  els.cancelNifti.disabled =
+    !activeNiftiExportController || activeNiftiExportController.signal.aborted
+}
+
+function hideNiftiProgress(): void {
+  els.niftiProgress.hidden = true
+  els.niftiProgressBar.value = 0
+  els.niftiProgressText.value = 'Preparing export…'
+  els.cancelNifti.disabled = true
+}
+
+function renderNiftiStreamProgress(progress: NiftiStreamProgress): void {
+  const now = performance.now()
+  const isComplete = progress.completedBytes >= progress.totalBytes
+  if (
+    progress.phase === 'writing' &&
+    !isComplete &&
+    now - niftiProgressLastRenderedAt < 200
+  ) {
+    return
+  }
+  niftiProgressLastRenderedAt = now
+  const fraction =
+    progress.totalBytes > 0
+      ? progress.completedBytes / progress.totalBytes
+      : 0
+  const elapsedSeconds = Math.max(
+    0,
+    (now - niftiProgressStartedAt) / 1000,
+  )
+  const bytesPerSecond =
+    elapsedSeconds > 0 ? progress.completedBytes / elapsedSeconds : 0
+  const remainingSeconds =
+    bytesPerSecond > 0
+      ? (progress.totalBytes - progress.completedBytes) / bytesPerSecond
+      : null
+  const phase = progress.phase === 'fetching' ? 'Fetching' : 'Writing'
+  const percent = (fraction * 100).toFixed(fraction < 0.1 ? 1 : 0)
+  const eta =
+    remainingSeconds !== null && elapsedSeconds >= 3 && !isComplete
+      ? ` · about ${formatRemainingTime(remainingSeconds)} remaining`
+      : ''
+  showNiftiProgress(
+    `${phase} tile ${progress.tileIndex} of ${progress.totalTiles}` +
+      ` · slice ${progress.sliceIndex} of ${progress.sliceCount}` +
+      ` · ${percent}%` +
+      ` · ${formatBytes(progress.completedBytes)} of ${formatBytes(progress.totalBytes)}` +
+      eta,
+    fraction,
+  )
+}
+
 function syncDownloadControl(): void {
   const source = activeSource
   syncNiftiLevelControl(source)
@@ -844,6 +927,8 @@ function syncDownloadControl(): void {
     ? `preparing${levelLabel}...`
     : `download FOV${levelLabel}.nii`
   els.downloadNifti.disabled = downloadInProgress
+  els.cancelNifti.disabled =
+    !activeNiftiExportController || activeNiftiExportController.signal.aborted
   els.downloadNifti.title =
     bytes > MAX_IN_MEMORY_NIFTI_BYTES
       ? `Stream the ${formatBytes(bytes)} FOV export to a selected file`
@@ -2240,10 +2325,12 @@ async function fetchByteRange(
   url: string,
   start: number,
   length: number,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const end = start + length - 1
   const res = await fetch(url, {
     headers: { Range: `bytes=${start}-${end}` },
+    signal,
   })
   if (!res.ok) {
     stats.failures++
@@ -3048,13 +3135,18 @@ async function readMosaicGeometry(
   )
 }
 
-async function readWholeRangeSource(source: RangeSource): Promise<Uint8Array> {
+async function readWholeRangeSource(
+  source: RangeSource,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
   const output = new Uint8Array(
     source.shape[0] * source.shape[1] * source.shape[2],
   )
   const plan = createChunkPlan(source)
   const sliceStride = source.shape[0] * source.shape[1]
+  let completedBytes = 0
   for (let chunkIndex = 0; chunkIndex < plan.chunks.length; chunkIndex++) {
+    if (signal.aborted) throw signal.reason
     const chunk = plan.chunks[chunkIndex]
     if (!chunk) continue
     setDownloadStatus(
@@ -3064,6 +3156,7 @@ async function readWholeRangeSource(source: RangeSource): Promise<Uint8Array> {
       source.dataUrl,
       chunkIndex * source.chunkBytes,
       source.chunkBytes,
+      signal,
     )
     const [originX, originY, originZ] = chunk.texOrigin
     const [sizeX, sizeY, sizeZ] = chunk.texDims
@@ -3080,6 +3173,12 @@ async function readWholeRangeSource(source: RangeSource): Promise<Uint8Array> {
         )
       }
     }
+    completedBytes += bytes.byteLength
+    showNiftiProgress(
+      `Fetching chunk ${chunkIndex + 1} of ${plan.chunks.length}` +
+        ` · ${formatBytes(completedBytes)} of ${formatBytes(output.byteLength)}`,
+      completedBytes / output.byteLength,
+    )
   }
   return output
 }
@@ -3202,72 +3301,50 @@ async function streamUniformOmezarr(
   try {
     const header = niftiHeader(source, geometry)
     const totalBytes = header.byteLength + geometryByteLength(source, geometry)
+    showNiftiProgress('Preparing destination file…', 0)
     await writable.truncate(totalBytes)
     await writable.write({ type: 'write', position: 0, data: header })
     const bytesPerVoxel = source.numBitsPerVoxel / 8
-    const targetTileBytes = 16 * 1024 * 1024
-    const tileX = Math.min(
-      geometry.shape[0],
-      Math.max(1, Math.floor(targetTileBytes / bytesPerVoxel)),
-    )
-    const tileY = Math.min(
-      geometry.shape[1],
-      Math.max(1, Math.floor(targetTileBytes / (tileX * bytesPerVoxel))),
-    )
-    const tileZ = Math.min(
-      geometry.shape[2],
-      Math.max(
-        1,
-        Math.floor(targetTileBytes / (tileX * tileY * bytesPerVoxel)),
-      ),
-    )
-    for (let z = 0; z < geometry.shape[2]; z += tileZ) {
-      const depth = Math.min(tileZ, geometry.shape[2] - z)
-      for (let y = 0; y < geometry.shape[1]; y += tileY) {
-        const height = Math.min(tileY, geometry.shape[1] - y)
-        for (let x = 0; x < geometry.shape[0]; x += tileX) {
-          const width = Math.min(tileX, geometry.shape[0] - x)
-          setDownloadStatus(
-            `Writing L${geometry.levelIndex ?? level.level}: ` +
-              `slice ${z + 1} of ${geometry.shape[2]}...`,
-          )
-          const tileGeometry: ExportGeometry = {
-            shape: [width, height, depth],
-            spacing: geometry.spacing,
-            origin: [
-              geometry.origin[0] + x,
-              geometry.origin[1] + y,
-              geometry.origin[2] + z,
-            ],
-            level,
-            levelIndex: geometry.levelIndex,
-            worldOrigin: geometry.worldOrigin,
-          }
-          const bytes =
-            source.kind === 'omezarr-mosaic'
-              ? await readMosaicGeometry(source, tileGeometry, signal)
-              : await readOmezarrGeometry(source, tileGeometry, signal)
-          const rowBytes = width * bytesPerVoxel
-          for (let localZ = 0; localZ < depth; localZ++) {
-            for (let localY = 0; localY < height; localY++) {
-              const sourceOffset = (localZ * height + localY) * rowBytes
-              const voxelOffset =
-                ((z + localZ) * geometry.shape[1] + y + localY) *
-                  geometry.shape[0] +
-                x
-              await writable.write({
-                type: 'write',
-                position: header.byteLength + voxelOffset * bytesPerVoxel,
-                data: bytes.subarray(sourceOffset, sourceOffset + rowBytes),
-              })
-            }
-          }
+    await streamNiftiTiles({
+      shape: geometry.shape,
+      bytesPerVoxel,
+      headerBytes: header.byteLength,
+      signal,
+      fetchTile: async (tile) => {
+        const tileGeometry: ExportGeometry = {
+          shape: tile.shape,
+          spacing: geometry.spacing,
+          origin: [
+            geometry.origin[0] + tile.origin[0],
+            geometry.origin[1] + tile.origin[1],
+            geometry.origin[2] + tile.origin[2],
+          ],
+          level,
+          levelIndex: geometry.levelIndex,
+          worldOrigin: geometry.worldOrigin,
         }
-      }
+        return source.kind === 'omezarr-mosaic'
+          ? readMosaicGeometry(source, tileGeometry, signal)
+          : readOmezarrGeometry(source, tileGeometry, signal)
+      },
+      write: (position, data) =>
+        writable.write({ type: 'write', position, data }),
+      onProgress: renderNiftiStreamProgress,
+    })
+    if (signal.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException('The export was cancelled', 'AbortError')
     }
+    showNiftiProgress('Finalizing NIfTI file…', 1)
+    setDownloadStatus(`Finalizing ${filename}...`)
     await writable.close()
   } catch (error) {
-    await writable.abort(error)
+    try {
+      await writable.abort(error)
+    } catch {
+      // Preserve the fetch/write failure that caused the export to abort.
+    }
     throw error
   }
 }
@@ -3276,25 +3353,37 @@ async function downloadNifti(): Promise<void> {
   const source = activeSource
   if (!source || downloadInProgress) return
   const bytes = exportByteLength(source)
+  const exportController = new AbortController()
+  activeNiftiExportController = exportController
+  niftiProgressStartedAt = performance.now()
+  niftiProgressLastRenderedAt = 0
   downloadInProgress = true
+  showNiftiProgress('Preparing export…', null)
   syncDownloadControl()
   try {
     // Source stores may retain the viewer load session as their default
     // request signal. Export reads must outlive normal viewer LOD renewals.
-    const exportSignal = new AbortController().signal
+    const exportSignal = exportController.signal
     const geometry = selectedExportGeometry(source)
     const filename = niftiFilename(source, geometry)
     const streamsToSelectedFile =
       source.kind !== 'synthetic' && bytes > MAX_IN_MEMORY_NIFTI_BYTES
     if (streamsToSelectedFile) {
+      showNiftiProgress('Choose where to save the NIfTI file…', null)
       await streamUniformOmezarr(source, geometry, filename, exportSignal)
     } else {
+      showNiftiProgress(
+        `Fetching ${geometry.levelIndex !== null ? `L${geometry.levelIndex} ` : ''}voxels…`,
+        null,
+      )
       const imageBytes =
         source.kind === 'omezarr-mosaic'
           ? await readMosaicGeometry(source, geometry, exportSignal)
           : source.kind === 'omezarr'
           ? await readOmezarrGeometry(source, geometry, exportSignal)
-          : await readWholeRangeSource(source)
+          : await readWholeRangeSource(source, exportSignal)
+      if (exportSignal.aborted) throw exportSignal.reason
+      showNiftiProgress('Creating NIfTI file…', null)
       setDownloadStatus('Writing NIfTI header...')
       await saveInMemoryNifti(source, geometry, imageBytes, filename)
     }
@@ -3313,6 +3402,8 @@ async function downloadNifti(): Promise<void> {
     )
   } finally {
     downloadInProgress = false
+    activeNiftiExportController = null
+    hideNiftiProgress()
     syncDownloadControl()
   }
 }
@@ -5202,6 +5293,14 @@ async function main(): Promise<void> {
   })
   els.downloadNifti.addEventListener('click', () => {
     void downloadNifti()
+  })
+  els.cancelNifti.addEventListener('click', () => {
+    const controller = activeNiftiExportController
+    if (!controller || controller.signal.aborted) return
+    controller.abort()
+    showNiftiProgress('Cancelling export…', null)
+    setDownloadStatus('Cancelling export...')
+    syncDownloadControl()
   })
   els.niftiLevel.addEventListener('change', () => {
     setDownloadStatus('')
