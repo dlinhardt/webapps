@@ -203,6 +203,10 @@
             <button type="button" id="overlayRangeReset" class="mini" disabled
                     title="Back to the 2nd-98th percentile of the data">Auto</button>
           </div>
+          <label class="check">
+            <input type="checkbox" id="showLegend" checked />
+            <span>Show the colour scale on the view</span>
+          </label>
         </section>
 
         <section class="panel workflow-panel tool-panel">
@@ -338,6 +342,18 @@
           <span>FreeSurfer, GIfTI and MZ3 files are supported.</span>
           <small>Processed locally in this browser — nothing is uploaded.</small>
         </div>
+        <!-- The scale for whichever overlay the controls are editing. A wheel for
+             the two retinotopy maps, a bar for the rest; the ticks are text so the
+             values can be read and selected. -->
+        <figure id="colorLegend" class="color-legend" hidden>
+          <button type="button" id="colorLegendClose" class="color-legend-close"
+                  aria-label="Hide the colour scale">&times;</button>
+          <div class="color-legend-plot">
+            <canvas id="colorLegendCanvas" aria-hidden="true"></canvas>
+            <div id="colorLegendTicks" class="color-legend-ticks"></div>
+          </div>
+          <figcaption id="colorLegendCaption"></figcaption>
+        </figure>
       </div>
 
       <div id="status">

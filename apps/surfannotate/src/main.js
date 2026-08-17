@@ -4,6 +4,9 @@ import './styles.css';
 import { mountImagingWorkspace } from '@neurodesk/webapp-components/core/mount-imaging-workspace';
 import { Niivue } from '@niivue/niivue';
 import { registerExtraColormaps, colormapWindow } from './niivue/colormaps.js';
+import {
+  legendKind, legendTicks, paintLegend, rangeDecimals
+} from './niivue/colorLegend.js';
 
 import { buildAdjacency, findBoundaryVertices, isIsolated } from './surface/adjacency.js';
 import { excludeVertices, unionMasks } from './surface/exclude.js';
@@ -84,6 +87,12 @@ const ui = {
   overlayMin: el('overlayMin'),
   overlayMax: el('overlayMax'),
   overlayRangeReset: el('overlayRangeReset'),
+  showLegend: el('showLegend'),
+  colorLegend: el('colorLegend'),
+  colorLegendCanvas: el('colorLegendCanvas'),
+  colorLegendTicks: el('colorLegendTicks'),
+  colorLegendCaption: el('colorLegendCaption'),
+  colorLegendClose: el('colorLegendClose'),
   modeRoi: el('modeRoi'),
   modePoints: el('modePoints'),
   roiControls: el('roiControls'),
@@ -181,6 +190,7 @@ const state = {
   hasOpenBoundary: false,
   overlayLayer: null,
   overlayAutoRange: null,
+  legendVisible: true,
 
   pressOrigin: null,
   hoverPending: false,
@@ -695,6 +705,19 @@ async function init() {
     applyOverlayDisplay();
     const snapped = applyColormapWindow();
     if (snapped) setStatus(snapped.note);
+    // applyColormapWindow only redraws the legend when it had a window to apply.
+    renderColorLegend();
+  });
+
+  ui.showLegend.addEventListener('change', () => {
+    state.legendVisible = ui.showLegend.checked;
+    renderColorLegend();
+  });
+  ui.colorLegendClose.addEventListener('click', () => {
+    // Through the checkbox rather than straight to the flag, so the way back is
+    // visible in the panel instead of being a state the user cannot undo.
+    ui.showLegend.checked = false;
+    ui.showLegend.dispatchEvent(new Event('change'));
   });
 
   const applyOverlayRange = () => {
@@ -709,6 +732,7 @@ async function init() {
     layer.cal_min = low;
     layer.cal_max = high;
     commitLayer(state.nv, state.mesh);
+    renderColorLegend();
     setStatus(`Colour range set to ${low} – ${high}.`);
   };
   ui.overlayMin.addEventListener('change', applyOverlayRange);
@@ -720,6 +744,7 @@ async function init() {
     layer.cal_max = state.overlayAutoRange.high;
     showOverlayRange(layer);
     commitLayer(state.nv, state.mesh);
+    renderColorLegend();
     setStatus('Colour range reset to the data\'s 2nd–98th percentile.');
   });
 
@@ -1119,6 +1144,7 @@ function setOverlayVisible(id, visible) {
     opacity: visible ? overlay.opacity : 0
   });
   renderLayerLists();
+  renderColorLegend();
   repaint();
 }
 
@@ -1166,6 +1192,7 @@ function syncOverlayControls() {
     ui.overlayMin.value = '';
     ui.overlayMax.value = '';
   }
+  renderColorLegend();
   renderLayerLists();
 }
 
@@ -1186,7 +1213,87 @@ function applyColormapWindow() {
   layer.cal_max = snapped.high;
   showOverlayRange(layer);
   commitLayer(state.nv, state.mesh);
+  renderColorLegend();
   return snapped;
+}
+
+/** How big the colour field is drawn, in CSS pixels. */
+const LEGEND_WHEEL_SIZE = 96;
+const LEGEND_BAR_WIDTH = 132;
+const LEGEND_BAR_HEIGHT = 10;
+
+/**
+ * Draw the active overlay's colour scale over the bottom-left of the view.
+ *
+ * The colours come from `nv.colormap(key)` — the LUT the shader itself samples —
+ * rather than from the control points in `colormaps.js`, so the legend cannot
+ * describe one scale while the surface renders another, and NiiVue's own maps
+ * get a legend for free.
+ */
+function renderColorLegend() {
+  const overlay = activeOverlay();
+  const layer = overlay?.layer;
+  const showing = Boolean(layer) && overlay.visible && state.legendVisible;
+  ui.colorLegend.hidden = !showing;
+  if (!showing) return;
+
+  const key = ui.overlayColormap.value;
+  const kind = legendKind(key);
+  ui.colorLegend.dataset.kind = kind;
+
+  const width = kind === 'bar' ? LEGEND_BAR_WIDTH : LEGEND_WHEEL_SIZE;
+  const height = kind === 'bar' ? LEGEND_BAR_HEIGHT : LEGEND_WHEEL_SIZE;
+  paintLegendCanvas(kind, state.nv.colormap(key), width, height);
+
+  ui.colorLegendTicks.replaceChildren(
+    ...legendRings(kind),
+    ...legendTicks(kind, layer.cal_min, layer.cal_max).map((tick) => placeTick(kind, tick))
+  );
+  ui.colorLegendCaption.textContent = overlay.name;
+}
+
+/** Paint at device resolution, so the wheel's rim is not a staircase. */
+function paintLegendCanvas(kind, lut, width, height) {
+  const canvas = ui.colorLegendCanvas;
+  const ratio = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
+  const pixels = paintLegend(kind, lut, canvas.width, canvas.height);
+  canvas.getContext('2d').putImageData(
+    new ImageData(pixels, canvas.width, canvas.height), 0, 0
+  );
+}
+
+/**
+ * Turn one tick's unit coordinates into a positioned label. A bar tick has only
+ * an x along the bar; a wheel tick is on a unit circle with y upward, which is
+ * the flip in the second branch.
+ */
+function placeTick(kind, tick) {
+  const label = document.createElement('span');
+  label.className = 'color-legend-tick';
+  label.textContent = tick.label;
+  if (kind === 'bar') {
+    label.style.left = `${tick.x * 100}%`;
+  } else {
+    label.style.left = `${50 + tick.x * 50}%`;
+    label.style.top = `${50 - tick.y * 50}%`;
+  }
+  return label;
+}
+
+/** The eccentricity rings the labels are read against; the other kinds have none. */
+function legendRings(kind) {
+  if (kind !== 'eccentricity') return [];
+  return [1 / 3, 2 / 3].map((fraction) => {
+    const ring = document.createElement('span');
+    ring.className = 'color-legend-ring';
+    ring.style.width = `${fraction * 100}%`;
+    return ring;
+  });
 }
 
 /** Keep the ROI layer above any overlay so the boundary stays visible. */
@@ -1329,7 +1436,7 @@ function renderLayerLists() {
 /** Show a sensible number of decimals for whatever the overlay's units are. */
 function showOverlayRange(layer) {
   const span = Math.abs(layer.cal_max - layer.cal_min);
-  const decimals = span >= 100 ? 1 : span >= 1 ? 3 : 5;
+  const decimals = rangeDecimals(span);
   ui.overlayMin.value = Number(layer.cal_min.toFixed(decimals));
   ui.overlayMax.value = Number(layer.cal_max.toFixed(decimals));
   ui.overlayMin.step = String(Number((span / 100).toFixed(decimals)) || 'any');

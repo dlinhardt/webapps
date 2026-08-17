@@ -90,6 +90,22 @@ const FULL_CYCLES = [
 const CYCLE_TOLERANCE = 1.01;
 
 /**
+ * The unit of a window that spans exactly one full turn, or null for a window
+ * that does not. Distinct from the test above, which asks whether a *maximum*
+ * fits inside a turn: a legend is handed a window that may have been typed by
+ * hand, and 0 – 5 is neither radians nor degrees of anything.
+ *
+ * @param {number} span
+ * @returns {'radians'|'degrees'|null}
+ */
+export function cycleUnit(span) {
+  const cycle = FULL_CYCLES.find(
+    (candidate) => Math.abs(span - candidate.span) <= candidate.span * (CYCLE_TOLERANCE - 1)
+  );
+  return cycle ? cycle.unit : null;
+}
+
+/**
  * The display window a colour map is only meaningful in (DL).
  *
  * Most maps have none. These two do: a cyclic map under the 2nd-98th percentile
@@ -101,7 +117,7 @@ const CYCLE_TOLERANCE = 1.01;
  * @param {string} key
  * @param {ArrayLike<number>|null} values one per vertex
  * @param {{low: number, high: number}|null} [autoRange] the robust range
- * @returns {{low: number, high: number, note: string}|null}
+ * @returns {{low: number, high: number, unit: string|null, note: string}|null}
  */
 export function colormapWindow(key, values, autoRange = null) {
   const { min, max } = extent(values);
@@ -112,6 +128,7 @@ export function colormapWindow(key, values, autoRange = null) {
     return {
       low: 0,
       high,
+      unit: null,
       note: `Eccentricity: window set to 0 – ${round(high)}, so the fovea sits at ` +
         "the bottom of the scale. Auto goes back to the data's percentile range."
     };
@@ -126,6 +143,7 @@ export function colormapWindow(key, values, autoRange = null) {
     return {
       low,
       high: low + cycle.span,
+      unit: cycle.unit,
       note: `Polar angle: window set to one full cycle, ${round(low)} – ` +
         `${round(low + cycle.span)} (${cycle.unit}), because the colour map wraps. ` +
         "Auto goes back to the data's percentile range."

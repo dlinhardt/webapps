@@ -18,6 +18,15 @@ the map — polar angle is cyclic and only truthful across exactly one turn, and
 eccentricity has to start at zero for the fovea to sit at the bottom of the
 scale. The turn is read off the data: a maximum at or below 2π is radians,
 anything larger is degrees, and negative values take the signed variant.
+
+The scale is drawn on the view itself, bottom left, so a colour can be read back
+as a number without leaving the picture. Eccentricity and polar angle get a
+colour wheel — rings at a third, two thirds and the full window for one, the four
+quarter turns labelled in the data's own unit for the other — and every other
+colour map gets a ticked bar. Polar angle is measured the standard way,
+counter-clockwise from the right horizontal meridian, so the upper visual field
+is at the top of the wheel. The panel's *Show the colour scale on the view*
+hides it.
 **Auto** puts the percentile window back.
 
 **Closed ROIs.** Click border points around a region — nothing is traced while you

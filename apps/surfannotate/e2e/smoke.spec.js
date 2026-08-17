@@ -27,7 +27,8 @@ async function loadSurface(page) {
 
 test('the shell mounts with the shared workspace and a link back to the catalog', async ({ page }) => {
   await expect(page.locator('#controls')).toBeVisible();
-  await expect(page.locator('#viewer canvas')).toBeVisible();
+  // #gl, not "#viewer canvas": the colour legend puts a second canvas in there.
+  await expect(page.locator('#gl')).toBeVisible();
   // Required of every app in the composite site. Scoped to the shell: the start
   // page carries its own copy of the link, so the page has two.
   const moreApps = page.locator('#app [title="More Neurodesk web apps"]');
@@ -498,6 +499,60 @@ test('the retinotopy colour maps set the window their scale needs', async ({ pag
   await page.click('#overlayRangeReset');
   expect(await page.inputValue('#overlayMin')).toBe(auto.min);
   expect(await page.inputValue('#overlayMax')).toBe(auto.max);
+});
+
+test('the colour scale on the view follows the map, the range and the overlay', async ({ page }) => {
+  const legend = page.locator('#colorLegend');
+  const ticks = page.locator('#colorLegend .color-legend-tick');
+
+  await loadSurface(page);
+  await expect(legend).toBeHidden();
+
+  await page.setInputFiles('#overlayInput', join(FIXTURES, 'lh.curv'));
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.curv loaded', {
+    timeout: 60_000
+  });
+
+  // An ordinary map gets a bar, ticked with the window the boxes report.
+  await expect(legend).toBeVisible();
+  await expect(legend).toHaveAttribute('data-kind', 'bar');
+  await expect(ticks).toHaveCount(3);
+  await expect(ticks.first()).toHaveText(await page.inputValue('#overlayMin'));
+  await expect(ticks.last()).toHaveText(await page.inputValue('#overlayMax'));
+  await expect(page.locator('#colorLegendCaption')).toHaveText('lh.curv');
+
+  // The retinotopy maps get their wheel. The four quarter turns are labelled in
+  // the unit the window is in, counter-clockwise from the right.
+  await page.selectOption('#overlayColormap', 'polar_angle');
+  await expect(legend).toHaveAttribute('data-kind', 'polar_angle');
+  await expect(ticks).toHaveText(['0', 'π/2', 'π', '3π/2']);
+
+  await page.selectOption('#overlayColormap', 'eccentricity');
+  await expect(legend).toHaveAttribute('data-kind', 'eccentricity');
+  await expect(ticks).toHaveCount(3);
+  await expect(page.locator('#colorLegend .color-legend-ring')).toHaveCount(2);
+
+  // A typed range re-ticks it; the wheel is not a picture of the data's own range.
+  await page.fill('#overlayMax', '9');
+  await page.press('#overlayMax', 'Enter');
+  await expect(ticks.last()).toHaveText('9');
+  await page.click('#overlayRangeReset');
+  await expect(ticks.last()).not.toHaveText('9');
+
+  // Nothing to describe once the overlay is hidden.
+  const shown = page.locator('#overlayList input[aria-label="Show lh.curv"]');
+  await shown.uncheck();
+  await expect(legend).toBeHidden();
+  await shown.check();
+  await expect(legend).toBeVisible();
+
+  // Dismissing leaves the way back visible in the panel rather than stranding
+  // the user with a control they cannot find again.
+  await page.click('#colorLegendClose');
+  await expect(legend).toBeHidden();
+  await expect(page.locator('#showLegend')).not.toBeChecked();
+  await page.check('#showLegend');
+  await expect(legend).toBeVisible();
 });
 
 test('a surface dropped on the viewer loads', async ({ page }) => {
@@ -1412,7 +1467,7 @@ test.describe('start page', () => {
     await page.locator('#enterAppButton').click();
     await expect(start).toBeHidden();
     await expect(page.locator('#controls')).toBeVisible();
-    await expect(page.locator('#viewer canvas')).toBeVisible();
+    await expect(page.locator('#gl')).toBeVisible();
 
     // The app was behind it all along, so the canvas is already sized.
     const canvas = await page.evaluate(() => {

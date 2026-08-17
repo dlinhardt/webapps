@@ -18,6 +18,7 @@ src/
   niivue/                   Every NiiVue call lives here
     meshAdapter.js          Loading, picking, layers, overlays
     colormaps.js            Colour maps NiiVue does not ship
+    colorLegend.js          The on-canvas scale — wheel or bar. Pure, unit-tested
   io/                       File writers/readers, pure and unit-tested
     freesurferLabel.js, gifti.js, points.js, naming.js, classify.js, geometryOffset.js
 ```
@@ -158,6 +159,25 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   **Auto** is the way back. Do not fold this into `applyOverlayDisplay`: the
   opacity slider shares that handler and fires per frame of a drag, which would
   re-snap a window the user had typed over.
+- **The polar-angle wheel runs counter-clockwise from the right horizontal
+  meridian, and `paintLegend`'s `atan2(-y, x)` is what makes it.** Canvas y points
+  down, so dropping the minus mirrors the wheel — which does not look broken, it
+  looks like a legend, while silently swapping the upper and lower visual field.
+  The convention is not a preference: dorsal V2 represents the lower field and
+  ventral V2 the upper, and in the data this was checked against V2d sits near
+  4.5 rad and V2v near 1.9 rad, which only lands in the right quadrants when the
+  angle is measured the standard way. Clockwise-from-east, clockwise-from-UVM and
+  CCW-from-UVM all put V2v at ~0.8 or ~5.5 instead. Pinned by a unit test that
+  reads the four compass pixels. Note that
+  `Vorlagen/colorbars/color_circle_pol_python_notext.svg`, the figure this was
+  built from, is mirrored relative to this — a `ColorbarBase`-on-polar-axes
+  quirk. Matching that file would be the bug.
+- **The legend's colours come from `nv.colormap(key)`, never from
+  `EXTRA_COLORMAPS`.** That LUT is the 256 entries the shader samples, so a
+  legend built from it cannot describe one scale while the surface renders
+  another — and NiiVue's own maps get a legend without being re-implemented.
+  `colorLegend.js` therefore takes the LUT as an argument and stays pure, which
+  is what lets the wheel geometry be unit-tested at all.
 - **`#controls` must stay `flex-wrap: nowrap`.** The shared `.nd-imaging-controls` class
   sits on the same element and sets `flex-wrap: wrap` for its own row layout. With the
   column direction `styles.css` applies, anything taller than the panel wraps into a

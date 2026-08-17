@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  EXTRA_COLORMAPS, ECCENTRICITY, POLAR_ANGLE, registerExtraColormaps, colormapWindow
+  EXTRA_COLORMAPS, ECCENTRICITY, POLAR_ANGLE, registerExtraColormaps, colormapWindow,
+  cycleUnit
 } from '../src/niivue/colormaps.js';
 
 const TWO_PI = 2 * Math.PI;
@@ -114,6 +115,25 @@ test('a maximum a hair past the turn is still that turn', () => {
   // 2*pi printed to four decimals, which is what a file written by hand holds.
   const window = colormapWindow('polar_angle', Float32Array.from([0, 6.2832]), null);
   assert.equal(window.high, TWO_PI);
+});
+
+test('the window names its own unit, so a legend need not re-derive it', () => {
+  assert.equal(colormapWindow('polar_angle', Float32Array.from([0, 6.1]), null).unit,
+    'radians');
+  assert.equal(colormapWindow('polar_angle', Float32Array.from([0, 355]), null).unit,
+    'degrees');
+  assert.equal(colormapWindow('eccentricity', Float32Array.from([0, 8]), null).unit, null);
+});
+
+test('a full turn is recognised by its span, a partial one is not', () => {
+  // What separates a window that came from colormapWindow from one the user
+  // typed: 0 – 5 is neither radians nor degrees of anything.
+  assert.equal(cycleUnit(2 * Math.PI), 'radians');
+  assert.equal(cycleUnit(6.28), 'radians');
+  assert.equal(cycleUnit(360), 'degrees');
+  assert.equal(cycleUnit(5), null);
+  assert.equal(cycleUnit(180), null);
+  assert.equal(cycleUnit(NaN), null);
 });
 
 test('polar angle over values that fit no convention leaves the window alone', () => {
