@@ -463,6 +463,43 @@ test('gist_rainbow is registered and the colour range is adjustable', async ({ p
   expect(await page.inputValue('#overlayMin')).toBe(auto);
 });
 
+test('the retinotopy colour maps set the window their scale needs', async ({ page }) => {
+  await loadSurface(page);
+  expect(await page.evaluate(() => {
+    const maps = window.__surfannotate.nv.colormaps();
+    return ['eccentricity', 'polar_angle'].every((key) => maps.includes(key));
+  })).toBe(true);
+
+  await page.setInputFiles('#overlayInput', join(FIXTURES, 'lh.curv'));
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.curv loaded', {
+    timeout: 60_000
+  });
+  const auto = {
+    min: await page.inputValue('#overlayMin'),
+    max: await page.inputValue('#overlayMax')
+  };
+
+  // NiiVue's .curv reader min-max normalises into 0..1, so this reads as radians.
+  await page.selectOption('#overlayColormap', 'polar_angle');
+  await expect(page.locator('#statusText')).toContainText('one full cycle');
+  expect(await page.evaluate(() => {
+    const layer = window.__surfannotate.overlayLayer;
+    return { colormap: layer.colormap, min: layer.cal_min, max: layer.cal_max };
+  })).toEqual({ colormap: 'polar_angle', min: 0, max: 2 * Math.PI });
+
+  // Anchored at zero, keeping the robust maximum. Read through the boxes, which
+  // round the stored value and the recorded one identically.
+  await page.selectOption('#overlayColormap', 'eccentricity');
+  expect(await page.inputValue('#overlayMin')).toBe('0');
+  expect(await page.inputValue('#overlayMax')).toBe(auto.max);
+  expect(await page.evaluate(() => window.__surfannotate.overlayLayer.cal_min)).toBe(0);
+
+  // Auto is the way back: the percentile range is never overwritten.
+  await page.click('#overlayRangeReset');
+  expect(await page.inputValue('#overlayMin')).toBe(auto.min);
+  expect(await page.inputValue('#overlayMax')).toBe(auto.max);
+});
+
 test('a surface dropped on the viewer loads', async ({ page }) => {
   const bytes = readFileSync(join(FIXTURES, 'lh.pial')).toString('base64');
 

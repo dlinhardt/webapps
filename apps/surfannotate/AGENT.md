@@ -144,6 +144,20 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   It does *not* follow that any edge-to-edge line separates the surface — one joining
   two distinct cuts turns an annulus into a disk without dividing it — so the component
   count is checked, never assumed.
+- **`eccentricity` and `polar_angle` (DL) carry a display window; the other colour
+  maps do not.** `polar_angle` is cyclic — it ends on the colour it starts on,
+  because 0 and 2π are the same direction — so under the default 2nd–98th
+  percentile window the wrap falls inside the data and two angles a quarter-turn
+  apart render identically: a plausible picture that is simply wrong, which is
+  worse than an ugly one. `eccentricity` must start at zero or two subjects are
+  not comparable. `colormapWindow` in `niivue/colormaps.js` owns the rule and is
+  pure, so it unit-tests with the rest. The unit is read off the data rather than
+  configured — an angle map in degrees never peaks below 7 and one in radians
+  never above 2π — and values fitting neither convention return null rather than
+  get a turn invented for them. `state.overlayAutoRange` is never overwritten, so
+  **Auto** is the way back. Do not fold this into `applyOverlayDisplay`: the
+  opacity slider shares that handler and fires per frame of a drag, which would
+  re-snap a window the user had typed over.
 - **`#controls` must stay `flex-wrap: nowrap`.** The shared `.nd-imaging-controls` class
   sits on the same element and sets `flex-wrap: wrap` for its own row layout. With the
   column direction `styles.css` applies, anything taller than the panel wraps into a

@@ -3,7 +3,7 @@ import './styles.css';
 
 import { mountImagingWorkspace } from '@neurodesk/webapp-components/core/mount-imaging-workspace';
 import { Niivue } from '@niivue/niivue';
-import { registerExtraColormaps } from './niivue/colormaps.js';
+import { registerExtraColormaps, colormapWindow } from './niivue/colormaps.js';
 
 import { buildAdjacency, findBoundaryVertices, isIsolated } from './surface/adjacency.js';
 import { excludeVertices, unionMasks } from './surface/exclude.js';
@@ -689,7 +689,13 @@ async function init() {
     });
   };
   ui.overlayOpacity.addEventListener('input', applyOverlayDisplay);
-  ui.overlayColormap.addEventListener('change', applyOverlayDisplay);
+  // Deliberately NOT inside applyOverlayDisplay: the opacity slider shares it
+  // and fires per frame of a drag, which would re-snap a window typed over.
+  ui.overlayColormap.addEventListener('change', () => {
+    applyOverlayDisplay();
+    const snapped = applyColormapWindow();
+    if (snapped) setStatus(snapped.note);
+  });
 
   const applyOverlayRange = () => {
     const layer = state.overlayLayer;
@@ -1059,9 +1065,13 @@ async function addOverlay(file) {
     state.overlayAutoRange = overlay.autoRange;
 
     syncOverlayControls();
-    setStatus(
-      `Overlay ${file.name} loaded — display window ` +
-      `${layer.cal_min.toFixed(3)} to ${layer.cal_max.toFixed(3)}.`
+    // Before the status line, so an overlay loaded while one of these maps is
+    // already selected gets the same window, and the message reports it.
+    const snapped = applyColormapWindow();
+    setStatus(snapped
+      ? `Overlay ${file.name} loaded. ${snapped.note}`
+      : `Overlay ${file.name} loaded — display window ` +
+        `${layer.cal_min.toFixed(3)} to ${layer.cal_max.toFixed(3)}.`
     );
     repaint();
   } catch (error) {
@@ -1157,6 +1167,26 @@ function syncOverlayControls() {
     ui.overlayMax.value = '';
   }
   renderLayerLists();
+}
+
+/**
+ * Give the selected colour map the display window it needs, if it needs one.
+ * `colormapWindow` owns the rule; `state.overlayAutoRange` is untouched, so Auto
+ * remains the way back.
+ *
+ * @returns {{low: number, high: number, note: string}|null} what was applied
+ */
+function applyColormapWindow() {
+  const layer = state.overlayLayer;
+  if (!layer?.values) return null;
+  const snapped = colormapWindow(ui.overlayColormap.value, layer.values, state.overlayAutoRange);
+  if (!snapped) return null;
+
+  layer.cal_min = snapped.low;
+  layer.cal_max = snapped.high;
+  showOverlayRange(layer);
+  commitLayer(state.nv, state.mesh);
+  return snapped;
 }
 
 /** Keep the ROI layer above any overlay so the boundary stays visible. */

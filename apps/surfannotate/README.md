@@ -11,6 +11,15 @@ overlay: curvature, thickness, `.annot`, `.label.gii`, `.shape.gii`, `.mgz`, or 
 `.dscalar.nii`. Colour map, opacity and display window are adjustable, including
 `gist_rainbow`, which NiiVue does not ship.
 
+Two are retinotopy conventions contributed by DL: **eccentricity** (matplotlib's
+`rainbow_r`) and **polar angle** (yellow, blue, green, red, yellow). Picking
+either also sets the display window, because for these two the window is part of
+the map — polar angle is cyclic and only truthful across exactly one turn, and
+eccentricity has to start at zero for the fovea to sit at the bottom of the
+scale. The turn is read off the data: a maximum at or below 2π is radians,
+anything larger is degrees, and negative values take the signed variant.
+**Auto** puts the percentile window back.
+
 **Closed ROIs.** Click border points around a region — nothing is traced while you
 click, so you can rotate freely. Press *Close ROI* to join the points with shortest
 paths along the surface and close the loop, then *Fill region*. Points are joined **in
