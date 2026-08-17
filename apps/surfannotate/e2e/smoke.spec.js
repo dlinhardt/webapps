@@ -790,6 +790,51 @@ test('a surface dropped on the viewer loads', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('a dropped file with "mask" in its name is loaded as the mask, not an overlay', async ({ page }) => {
+  await loadSurface(page);
+  const count = await page.evaluate(() => window.__surfannotate.geometry.vertexCount);
+
+  await page.setInputFiles('#overlayInput',
+    curvFile('lh.thickness', count, (v) => 1 + (v % 100) / 100));
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.thickness loaded', {
+    timeout: 60_000
+  });
+  const before = await page.evaluate(() =>
+    window.__surfannotateUi.activeSurface().overlays.length);
+
+  // The same curv-format mask the picker test uses, but dropped. Nothing in the
+  // bytes says "mask" — it is the same format as any overlay — so the name is
+  // the only thing that can route this.
+  const mask = curvFile('lh.firstThousand.mask', count, (v) => (v < 1000 ? 1 : 0));
+  await page.evaluate(async ({ name, base64 }) => {
+    const binary = atob(base64);
+    const buffer = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) buffer[i] = binary.charCodeAt(i);
+
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([buffer], name, { type: 'application/octet-stream' }));
+    const canvas = document.getElementById('gl');
+    const rect = canvas.getBoundingClientRect();
+    const clientX = Math.round(rect.left + rect.width / 2);
+    const clientY = Math.round(rect.top + rect.height / 2);
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      canvas.dispatchEvent(new DragEvent(type, {
+        dataTransfer: transfer, bubbles: true, cancelable: true, clientX, clientY
+      }));
+    }
+  }, { name: mask.name, base64: mask.buffer.toString('base64') });
+
+  await expect(page.locator('#statusText')).toContainText('limited to 1,000', {
+    timeout: 60_000
+  });
+  // The half that catches a mask arriving as an overlay: it would report a
+  // loaded overlay, leave the clear button disabled, and lengthen the list.
+  await expect(page.locator('#maskClear')).toBeEnabled();
+  expect(await page.evaluate(() =>
+    window.__surfannotateUi.activeSurface().overlays.length)).toBe(before);
+  expect(errors).toEqual([]);
+});
+
 test('the ROI name reaches the file name and the file contents', async ({ page }) => {
   await loadSurface(page);
   await page.fill('#roiName', 'V1 / left*hemi');

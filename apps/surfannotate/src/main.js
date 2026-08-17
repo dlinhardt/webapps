@@ -39,7 +39,7 @@ import { isCurvFormat, readCurvValues } from './io/freesurferCurv.js';
 import {
   exportStem as buildExportStem, hasAnatomicalCoordinates, surfaceKind, FLAT
 } from './io/naming.js';
-import { classifyFile, SNIFF_BYTES, SURFACE, OVERLAY, UNKNOWN } from './io/classify.js';
+import { classifyFile, SNIFF_BYTES, SURFACE, OVERLAY, MASK, UNKNOWN } from './io/classify.js';
 
 // Label keys painted into the ROI layer. The clicked border points and the
 // landmarks are NOT here: they are screen-space markers now, because a vertex
@@ -911,13 +911,19 @@ function bindStartPage() {
 }
 
 /**
- * Route each dropped file to the surface list or the overlay list.
+ * Route each dropped file to the surface list, the overlay list, or the mask.
  *
  * The old rule was positional — first drop is the surface, everything after is
  * an overlay — which cannot express "add a second surface". So each file is
  * classified from its own magic number and name instead. Files that cannot be
  * identified fall back to the positional rule, which is right often enough and
  * is what the user was already used to.
+ *
+ * The mask is the only destination that cannot be told from the bytes — it is
+ * the same per-vertex formats as any overlay — so it is recognised by name.
+ * That inference belongs to the drop path alone: `#overlayInput` still loads
+ * whatever it is handed as an overlay, which is both the explicit statement the
+ * button makes and the way to look at a mask as data.
  */
 async function handleDroppedFiles(files) {
   for (const file of files) {
@@ -931,8 +937,11 @@ async function handleDroppedFiles(files) {
     if (kind === UNKNOWN) kind = activeSurface() ? OVERLAY : SURFACE;
 
     if (kind === SURFACE) await loadSurface(file);
-    else if (activeSurface()) await addOverlay(file);
-    else setStatus(`${file.name} looks like an overlay — load a surface first.`);
+    else if (!activeSurface()) {
+      setStatus(`${file.name} looks like ${kind === MASK ? 'a mask' : 'an overlay'} — ` +
+        'load a surface first.');
+    } else if (kind === MASK) await loadMask(file);
+    else await addOverlay(file);
   }
 }
 
@@ -1269,7 +1278,8 @@ function syncMaskControls() {
     ? `${mask.name}: overlays limited to ` +
       `${maskedInCount(mask.mask).toLocaleString()} vertices. Curvature is always shown.`
     : 'Optional. Every overlay is drawn only where the mask is non-zero; ' +
-      'curvature is always shown.';
+      'curvature is always shown. A file with "mask" in its name can just be ' +
+      'dropped on the viewer.';
 }
 
 async function isFreeSurferLabel(file) {

@@ -186,6 +186,15 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   curvature overlay loaded *after* a retinotopy map would otherwise sit over the
   holes the mask opens, and the feature would look broken rather than absent.
   `entry.overlays` is reordered to match so the panel list reads in render order.
+- **A dropped mask is recognised by its name, and only on the drop path.** A mask is
+  the same per-vertex formats as any overlay — curv, `.label`, `.mgz`, GIfTI — so no
+  magic number separates "where is there data" from the data itself, and
+  `classifyFile` promotes to `MASK` on the name alone. Substring `/mask/i`, because
+  BIDS writes `desc-brainmask` as one word, minus `/masked/i`, because
+  `lh.thickness.masked.gii` is an overlay that has *had* a mask applied. The promotion
+  never overrides `SURFACE`: geometry named "mask" is still geometry. `#overlayInput`
+  deliberately does not infer — picking the overlay button is an explicit statement,
+  and it stays the way to look at a mask as data.
 - **A mask must never be read through `NVMeshLoaders.readLayer`.** `readCURV` does
   `f32[i] = 1 - (f32[i] - mn) * scale` — min-max normalise *and invert* — and
   `readLayer` reaches it by sniffing the magic bytes, not the filename, so
