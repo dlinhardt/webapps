@@ -246,6 +246,39 @@ export async function loadOverlay(nv, mesh, file, options = {}) {
 }
 
 /**
+ * Read a file's per-vertex values without attaching anything to the mesh.
+ *
+ * For a mask, which is read for its numbers rather than to be drawn. Note that
+ * FreeSurfer curv-format files must NOT come through here — `readLayer` sniffs
+ * the magic bytes and sends them to `readCURV`, which min-max normalises and
+ * inverts. See io/freesurferCurv.js.
+ *
+ * @param {object} mesh
+ * @param {File|Blob} file
+ * @returns {Promise<Float32Array>} one value per vertex
+ */
+export async function readLayerValues(mesh, file) {
+  const layer = await NVMeshLoaders.readLayer(
+    file.name, await file.arrayBuffer(), mesh, 1.0, 'gray', 'winter', false
+  );
+  if (!layer?.values) {
+    throw new Error(
+      'NiiVue could not read this as per-vertex data. Supported: .curv, .annot, ' +
+      '.shape.gii, .func.gii, .label.gii, .mgh/.mgz, .mz3, CIFTI .dscalar.nii, ' +
+      'and FreeSurfer .label.'
+    );
+  }
+  const vertexCount = mesh.pts.length / 3;
+  if (layer.values.length !== vertexCount) {
+    throw new Error(
+      `it has ${layer.values.length} values but the surface has ${vertexCount} ` +
+      'vertices — it belongs to a different mesh'
+    );
+  }
+  return layer.values;
+}
+
+/**
  * 2nd–98th percentile, so a handful of outliers cannot flatten the display.
  * Sampled rather than fully sorted: 20k samples is plenty to place a percentile
  * and keeps this well under a millisecond on a 160k-vertex overlay.

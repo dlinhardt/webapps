@@ -7,6 +7,9 @@ import { registerExtraColormaps, colormapWindow } from './niivue/colormaps.js';
 import {
   legendKind, legendTicks, paintLegend, rangeDecimals
 } from './niivue/colorLegend.js';
+import {
+  toBinaryMask, maskedInCount, maskedValues, isCurvatureName
+} from './niivue/overlayMask.js';
 
 import { buildAdjacency, findBoundaryVertices, isIsolated } from './surface/adjacency.js';
 import { excludeVertices, unionMasks } from './surface/exclude.js';
@@ -22,12 +25,14 @@ import { FILL_ERRORS, maskToIndices } from './surface/fill.js';
 import { hatchMask, FILL_STYLES } from './surface/hatch.js';
 import {
   loadMeshFromFile, loadOverlay, getGeometry, pickWorldMm, resolveVertex,
-  attachLabelLayer, commitLayer, setOverlayDisplay, makeLabelLut, attachValueLayer
+  attachLabelLayer, commitLayer, setOverlayDisplay, makeLabelLut, attachValueLayer,
+  readLayerValues
 } from './niivue/meshAdapter.js';
 
 import { writeFreeSurferLabel, labelToValues } from './io/freesurferLabel.js';
 import { writeGiftiLabel, maskToLabelArray } from './io/gifti.js';
 import { writePointsJson, hashTriangles } from './io/points.js';
+import { isCurvFormat, readCurvValues } from './io/freesurferCurv.js';
 import {
   exportStem as buildExportStem, hasAnatomicalCoordinates, surfaceKind, FLAT
 } from './io/naming.js';
@@ -87,6 +92,10 @@ const ui = {
   overlayMin: el('overlayMin'),
   overlayMax: el('overlayMax'),
   overlayRangeReset: el('overlayRangeReset'),
+  overlayIgnoreMask: el('overlayIgnoreMask'),
+  maskInput: el('maskInput'),
+  maskClear: el('maskClear'),
+  maskHint: el('maskHint'),
   showLegend: el('showLegend'),
   colorLegend: el('colorLegend'),
   colorLegendCanvas: el('colorLegendCanvas'),
@@ -154,6 +163,11 @@ const state = {
   // session, so a border drawn on the inflated surface is still there after
   // switching to the folded one. See RoiSession.rebind.
   sessions: new Map(),
+
+  // And so is the overlay mask, for the same reason: it is one value per vertex,
+  // so it describes the subject rather than any one surface file. Keyed by
+  // topologyKey, holding { name, mask } where mask is a Uint8Array.
+  masks: new Map(),
 
   // Completed ROIs, each tied to a topology like the sessions. Ticking one as an
   // edge cuts it out of the working graph — see bindSession.
@@ -575,6 +589,13 @@ async function init() {
     });
   });
 
+  ui.maskInput.addEventListener('change', (event) => {
+    const [file] = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (file) enqueueLoad(() => loadMask(file));
+  });
+  ui.maskClear.addEventListener('click', clearMask);
+
   // These MUST be capture-phase. NiiVue's own drop listener lives on the canvas
   // and calls stopPropagation()/preventDefault() before it consults
   // opts.dragAndDropEnabled, so with a bubble-phase listener on the viewer the
@@ -709,6 +730,22 @@ async function init() {
     renderColorLegend();
   });
 
+  ui.overlayIgnoreMask.addEventListener('change', () => {
+    const entry = activeSurface();
+    const overlay = activeOverlay();
+    if (!entry || !overlay) return;
+    overlay.ignoreMask = ui.overlayIgnoreMask.checked;
+    applyOverlayMask(entry, overlay);
+    // Exempt overlays belong under the masked ones, so this changes the stack.
+    restackLayers(entry);
+    commitLayer(state.nv, entry.mesh);
+    renderLayerLists();
+    repaint();
+    setStatus(overlay.ignoreMask
+      ? `${overlay.name} is now always shown, mask or not.`
+      : `${overlay.name} now follows the mask.`);
+  });
+
   ui.showLegend.addEventListener('change', () => {
     state.legendVisible = ui.showLegend.checked;
     renderColorLegend();
@@ -731,7 +768,7 @@ async function init() {
     }
     layer.cal_min = low;
     layer.cal_max = high;
-    commitLayer(state.nv, state.mesh);
+    commitOverlay();
     renderColorLegend();
     setStatus(`Colour range set to ${low} – ${high}.`);
   };
@@ -743,7 +780,7 @@ async function init() {
     layer.cal_min = state.overlayAutoRange.low;
     layer.cal_max = state.overlayAutoRange.high;
     showOverlayRange(layer);
-    commitLayer(state.nv, state.mesh);
+    commitOverlay();
     renderColorLegend();
     setStatus('Colour range reset to the data\'s 2nd–98th percentile.');
   });
@@ -1023,7 +1060,10 @@ function removeSurface(id) {
   // Drop the shared session only once the last surface using that topology has
   // gone, or switching away and back would silently lose the border points.
   const stillUsed = state.surfaces.some((s) => s.topologyKey === entry.topologyKey);
-  if (!stillUsed) state.sessions.delete(entry.topologyKey);
+  if (!stillUsed) {
+    state.sessions.delete(entry.topologyKey);
+    state.masks.delete(entry.topologyKey);
+  }
 
   if (state.activeId !== id) {
     renderLayerLists();
@@ -1073,8 +1113,6 @@ async function addOverlay(file) {
         labelToValues(await file.text(), entry.geometry.vertexCount).values,
         { ...display, name: file.name })
       : await loadOverlay(state.nv, entry.mesh, file, display);
-    // readLayer appends, so the ROI layer is no longer last. Re-attach it on top.
-    reattachRoiLayer();
 
     const overlay = {
       id: state.nextId++,
@@ -1082,12 +1120,26 @@ async function addOverlay(file) {
       layer,
       visible: true,
       opacity: Number(ui.overlayOpacity.value),
-      autoRange: { low: layer.cal_min, high: layer.cal_max }
+      autoRange: { low: layer.cal_min, high: layer.cal_max },
+      // The mask is written into layer.values, so the originals have to survive
+      // somewhere — this is the only copy of what the file actually said.
+      baseValues: layer.values,
+      baseTransparentBelowCalMin: layer.isTransparentBelowCalMin,
+      maskedBuffer: null,
+      // Curvature is the anatomy the mask is meant to reveal, not data to be
+      // masked. A default, not a rule: a curvature file under another name is
+      // one checkbox away.
+      ignoreMask: isCurvatureName(file.name)
     };
     entry.overlays.push(overlay);
     entry.activeOverlayId = overlay.id;
     state.overlayLayer = layer;
     state.overlayAutoRange = overlay.autoRange;
+
+    // readLayer appends, so the ROI layer is no longer last, and an exempt
+    // overlay has to sink below the ones the mask cuts holes in.
+    applyOverlayMask(entry, overlay);
+    restackLayers(entry);
 
     syncOverlayControls();
     // Before the status line, so an overlay loaded while one of these maps is
@@ -1106,6 +1158,74 @@ async function addOverlay(file) {
 }
 
 /** True for a FreeSurfer .label, by extension or by its fixed first line. */
+/**
+ * Load the binary mask that decides where overlays are drawn at all.
+ *
+ * The FreeSurfer curv branch is not an optimisation. `NVMeshLoaders.readLayer`
+ * picks its reader by sniffing the magic bytes, not the filename, so `lh.V1.mask`
+ * lands in `readCURV` — which min-max normalises AND inverts. A binary mask
+ * through that path comes back with every 1 as a 0, masking exactly the cortex
+ * it was meant to keep, and looking entirely reasonable while it does.
+ */
+async function loadMask(file) {
+  const entry = activeSurface();
+  if (!entry) return;
+  setStatus(`Loading mask ${file.name}…`);
+  try {
+    const vertexCount = entry.geometry.vertexCount;
+    let values;
+    if (await isFreeSurferLabel(file)) {
+      values = labelToValues(await file.text(), vertexCount).values;
+    } else {
+      const buffer = await file.arrayBuffer();
+      values = isCurvFormat(buffer)
+        ? readCurvValues(buffer, vertexCount)
+        : await readLayerValues(entry.mesh, file);
+    }
+
+    const mask = toBinaryMask(values);
+    const kept = maskedInCount(mask);
+    if (!kept) {
+      setStatus(`${file.name} marks no vertices at all — every overlay would vanish.`);
+      return;
+    }
+
+    state.masks.set(entry.topologyKey, { name: file.name, mask });
+    applyMaskToTopology(entry.topologyKey);
+    syncMaskControls();
+    commitLayer(state.nv, entry.mesh);
+    repaint();
+    setStatus(`Mask ${file.name}: overlays limited to ` +
+      `${kept.toLocaleString()} of ${vertexCount.toLocaleString()} vertices.`);
+  } catch (error) {
+    console.error('surfannotate: failed to load mask', error);
+    setStatus(`Could not load mask ${file.name}: ${error.message}`);
+  }
+}
+
+function clearMask() {
+  const entry = activeSurface();
+  if (!entry || !state.masks.delete(entry.topologyKey)) return;
+  applyMaskToTopology(entry.topologyKey);
+  syncMaskControls();
+  commitLayer(state.nv, entry.mesh);
+  repaint();
+  setStatus('Mask cleared. Every overlay is drawn everywhere again.');
+}
+
+/** Enable, disable and fill the mask controls for whatever surface is shown. */
+function syncMaskControls() {
+  const entry = activeSurface();
+  const mask = activeMask(entry);
+  ui.maskInput.disabled = !entry;
+  ui.maskClear.disabled = !mask;
+  ui.maskHint.textContent = mask
+    ? `${mask.name}: overlays limited to ` +
+      `${maskedInCount(mask.mask).toLocaleString()} vertices. Curvature is always shown.`
+    : 'Optional. Every overlay is drawn only where the mask is non-zero; ' +
+      'curvature is always shown.';
+}
+
 async function isFreeSurferLabel(file) {
   if (/\.label$/i.test(file.name)) return true;
   try {
@@ -1176,7 +1296,8 @@ function removeOverlay(id) {
 /** Enable, disable and fill the overlay controls for whatever is selected. */
 function syncOverlayControls() {
   const overlay = activeOverlay();
-  const controls = [ui.overlayColormap, ui.overlayMin, ui.overlayMax, ui.overlayRangeReset];
+  const controls = [ui.overlayColormap, ui.overlayMin, ui.overlayMax, ui.overlayRangeReset,
+    ui.overlayIgnoreMask];
   for (const control of controls) control.disabled = !overlay;
   ui.overlayOpacity.disabled = !overlay;
 
@@ -1185,13 +1306,16 @@ function syncOverlayControls() {
     ui.overlaySelectedHint.textContent = `Editing ${overlay.name}.`;
     ui.overlayColormap.value = overlay.layer.colormap || 'gray';
     ui.overlayOpacity.value = String(overlay.opacity);
+    ui.overlayIgnoreMask.checked = overlay.ignoreMask;
     showOverlayRange(overlay.layer);
   } else {
     // Blank rather than leave another surface's numbers sitting in the boxes,
     // where they read as this surface's settings.
     ui.overlayMin.value = '';
     ui.overlayMax.value = '';
+    ui.overlayIgnoreMask.checked = false;
   }
+  syncMaskControls();
   renderColorLegend();
   renderLayerLists();
 }
@@ -1204,15 +1328,20 @@ function syncOverlayControls() {
  * @returns {{low: number, high: number, note: string}|null} what was applied
  */
 function applyColormapWindow() {
+  const overlay = activeOverlay();
   const layer = state.overlayLayer;
   if (!layer?.values) return null;
-  const snapped = colormapWindow(ui.overlayColormap.value, layer.values, state.overlayAutoRange);
+  // The overlay's own values, not the layer's: under a mask those are mostly
+  // -Infinity, and the window should describe the data, not the visible remnant
+  // of it. It is also what makes the window survive loading a mask.
+  const values = overlay?.baseValues || layer.values;
+  const snapped = colormapWindow(ui.overlayColormap.value, values, state.overlayAutoRange);
   if (!snapped) return null;
 
   layer.cal_min = snapped.low;
   layer.cal_max = snapped.high;
   showOverlayRange(layer);
-  commitLayer(state.nv, state.mesh);
+  commitOverlay();
   renderColorLegend();
   return snapped;
 }
@@ -1300,9 +1429,75 @@ function legendRings(kind) {
 function reattachRoiLayer() {
   const entry = activeSurface();
   if (!entry) return;
-  const existing = entry.mesh.layers.findIndex((layer) => layer.name === 'surfannotate-roi');
-  if (existing >= 0) entry.mesh.layers.splice(existing, 1);
+  restackLayers(entry);
+}
+
+/**
+ * Rebuild the layer stack bottom-up: overlays exempt from the mask, then the
+ * overlays it applies to, then the ROI layer on top.
+ *
+ * The exempt ones have to be underneath or the mask reveals nothing — curvature
+ * loaded *after* a retinotopy map would sit over the holes the mask punches and
+ * the whole feature would look broken. `entry.overlays` is reordered to match so
+ * the list in the panel reads bottom-to-top like the render does.
+ */
+function restackLayers(entry) {
+  entry.overlays.sort((a, b) => Number(b.ignoreMask) - Number(a.ignoreMask));
+  entry.mesh.layers = entry.overlays.map((overlay) => overlay.layer);
   attachLabelLayer(entry.mesh, entry.labelValues, currentLabelTable());
+}
+
+/** The mask covering a surface's topology, or null when none is loaded. */
+function activeMask(entry) {
+  return entry ? state.masks.get(entry.topologyKey) || null : null;
+}
+
+/**
+ * Point one overlay's layer at the values it should render.
+ *
+ * NiiVue mesh layers have no per-vertex alpha — `blendColormap` drops a vertex
+ * only when its value is below `cal_min` — so the mask lives in the values
+ * themselves, and the untouched originals have to be kept on the side. See
+ * niivue/overlayMask.js for why the sentinel is -Infinity and why the kept
+ * values are clamped.
+ */
+function applyOverlayMask(entry, overlay) {
+  const mask = overlay.ignoreMask ? null : activeMask(entry);
+  const layer = overlay.layer;
+
+  if (!mask) {
+    layer.values = overlay.baseValues;
+    layer.isTransparentBelowCalMin = overlay.baseTransparentBelowCalMin;
+    return;
+  }
+  overlay.maskedBuffer ||= new Float32Array(overlay.baseValues.length);
+  layer.values = maskedValues(
+    overlay.baseValues, mask.mask, layer.cal_min, overlay.maskedBuffer
+  );
+  layer.isTransparentBelowCalMin = true;
+}
+
+/** Re-derive every overlay of every surface the mask covers. */
+function applyMaskToTopology(topologyKey) {
+  for (const entry of state.surfaces) {
+    if (entry.topologyKey !== topologyKey) continue;
+    for (const overlay of entry.overlays) applyOverlayMask(entry, overlay);
+    restackLayers(entry);
+  }
+}
+
+/**
+ * Push the active overlay to the GPU, re-deriving its values first.
+ *
+ * Every path that moves the display window has to go through here rather than
+ * calling commitLayer directly: the mask clamps kept values up to `cal_min`, so
+ * a window that moved without a re-derive would render the old clamp.
+ */
+function commitOverlay() {
+  const entry = activeSurface();
+  const overlay = activeOverlay();
+  if (entry && overlay) applyOverlayMask(entry, overlay);
+  commitLayer(state.nv, state.mesh);
 }
 
 // -- the layer lists ------------------------------------------------------

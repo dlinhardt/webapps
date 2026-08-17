@@ -19,6 +19,20 @@ eccentricity has to start at zero for the fovea to sit at the bottom of the
 scale. The turn is read off the data: a maximum at or below 2π is radians,
 anything larger is degrees, and negative values take the signed variant.
 
+**Masking.** Load a binary mask — a FreeSurfer `.label`, a curv-format file, a
+`.mgz`, a GIfTI, anything with one value per vertex — and every overlay is drawn
+only where it is non-zero. Everywhere else the overlay is fully transparent, so
+the curvature underneath shows through as if nothing were loaded. This is what
+makes a retinotopy map readable: polar angle means nothing outside the region it
+was fitted in. Curvature is exempt by default (`lh.curv`, `rh.curv`), since it is
+the anatomy the mask exists to reveal, and any overlay can be exempted by hand
+with *Always show this overlay*. The mask follows the vertex indexing, so it
+carries across a subject's `white`, `pial` and `inflated`.
+
+Masks are parsed rather than handed to NiiVue: its FreeSurfer curv reader
+min-max normalises and inverts, which would silently keep exactly the vertices
+the file excludes.
+
 The scale is drawn on the view itself, bottom left, so a colour can be read back
 as a number without leaving the picture. Eccentricity and polar angle get a
 colour wheel — rings at a third, two thirds and the full window for one, the four

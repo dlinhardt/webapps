@@ -19,8 +19,10 @@ src/
     meshAdapter.js          Loading, picking, layers, overlays
     colormaps.js            Colour maps NiiVue does not ship
     colorLegend.js          The on-canvas scale — wheel or bar. Pure, unit-tested
+    overlayMask.js          Restricting overlays to a binary mask. Pure, unit-tested
   io/                       File writers/readers, pure and unit-tested
     freesurferLabel.js, gifti.js, points.js, naming.js, classify.js, geometryOffset.js
+    freesurferCurv.js       Curv format read honestly — NiiVue's reader inverts
 ```
 
 The split matters: `surface/` and `io/` run under plain `node --test` with no browser,
@@ -159,6 +161,30 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   **Auto** is the way back. Do not fold this into `applyOverlayDisplay`: the
   opacity slider shares that handler and fires per frame of a drag, which would
   re-snap a window the user had typed over.
+- **The overlay mask lives in the layer's *values*, because NiiVue mesh layers
+  have no per-vertex alpha.** `blendColormap` drops a vertex on one test —
+  `if (v < mnCal) continue`, where `mnCal` is `cal_min` or `-Infinity` — so the
+  value is the alpha channel. Hence `MASKED_OUT = -Infinity` (NaN fails the test,
+  survives as NaN through every step, and reads off the end of the LUT as black),
+  hence `overlay.baseValues` holding the only untouched copy of the file, and
+  hence the clamp in `maskedValues`: masking needs `isTransparentBelowCalMin` on,
+  which would otherwise *also* drop everything under the 2nd percentile and
+  punch scattered holes through the overlay. Anything that moves the display
+  window must go through `commitOverlay`, not `commitLayer`, or the old clamp is
+  what renders.
+- **Exempt overlays are restacked to the bottom, and that is what makes the mask
+  useful.** `restackLayers` rebuilds `mesh.layers` as exempt → masked → ROI. A
+  curvature overlay loaded *after* a retinotopy map would otherwise sit over the
+  holes the mask opens, and the feature would look broken rather than absent.
+  `entry.overlays` is reordered to match so the panel list reads in render order.
+- **A mask must never be read through `NVMeshLoaders.readLayer`.** `readCURV` does
+  `f32[i] = 1 - (f32[i] - mn) * scale` — min-max normalise *and invert* — and
+  `readLayer` reaches it by sniffing the magic bytes, not the filename, so
+  `lh.V1.mask` gets it as surely as `lh.curv` does. A binary mask through that
+  path keeps precisely the vertices it was meant to exclude, and looks entirely
+  plausible doing it. `io/freesurferCurv.js` parses those files honestly; the
+  e2e test asserts the vertex count, which is what catches a regression here.
+  The inversion is harmless for curvature itself, which is only ever shading.
 - **The polar-angle wheel runs counter-clockwise from the right horizontal
   meridian, and `paintLegend`'s `atan2(-y, x)` is what makes it.** Canvas y points
   down, so dropping the minus mirrors the wheel — which does not look broken, it

@@ -173,6 +173,21 @@
           <ul class="layer-list" id="overlayList" aria-label="Overlays on the shown surface"></ul>
           <p class="hint">Curvature, thickness, .annot, .label.gii, .shape.gii, CIFTI .dscalar.nii.</p>
 
+          <!-- One mask for the whole surface, not per overlay: it answers "where
+               is there data at all", which is a property of the subject. -->
+          <div class="row mask-row">
+            <label class="file-field mask-field">
+              <input type="file" id="maskInput" disabled />
+              <span class="mask-browse">Choose a mask</span>
+            </label>
+            <button type="button" id="maskClear" class="mini" disabled
+                    title="Show every overlay everywhere again">Clear</button>
+          </div>
+          <p class="hint" id="maskHint">
+            Optional. Every overlay is drawn only where the mask is non-zero;
+            curvature is always shown.
+          </p>
+
           <p class="hint" id="overlaySelectedHint" hidden></p>
           <div class="row">
             <label for="overlayColormap">Colour map</label>
@@ -203,6 +218,10 @@
             <button type="button" id="overlayRangeReset" class="mini" disabled
                     title="Back to the 2nd-98th percentile of the data">Auto</button>
           </div>
+          <label class="check">
+            <input type="checkbox" id="overlayIgnoreMask" disabled />
+            <span>Always show this overlay (ignore the mask)</span>
+          </label>
           <label class="check">
             <input type="checkbox" id="showLegend" checked />
             <span>Show the colour scale on the view</span>

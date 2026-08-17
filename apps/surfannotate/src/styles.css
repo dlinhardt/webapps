@@ -214,7 +214,8 @@ summary:focus-visible {
 
 .upload-field { position: relative; }
 
-#controls .upload-field > input[type="file"] {
+#controls .upload-field > input[type="file"],
+#controls .mask-field > input[type="file"] {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -339,6 +340,34 @@ summary:focus-visible {
 .range-row { grid-template-columns: 48px minmax(0, 1fr) auto minmax(0, 1fr) auto; gap: 6px; }
 .range-row input[type="number"] { min-width: 0; font-size: 0.75rem; }
 .range-sep { color: var(--nd-ink-muted); font-size: 0.72rem; }
+
+.mask-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+
+/* The same hidden-input pattern .upload-field uses, at the size of one row
+   rather than a drop target: a mask is picked once and then forgotten. */
+.mask-field { position: relative; }
+
+.mask-browse {
+  display: grid;
+  min-height: 36px;
+  padding: 7px 11px;
+  color: var(--nd-brand-selection);
+  background: var(--nd-brand-pale);
+  border: 1px solid var(--nd-brand-light);
+  border-radius: 7px;
+  font-size: 0.78rem;
+  place-items: center;
+  cursor: pointer;
+}
+
+.mask-field:hover .mask-browse { border-color: var(--nd-brand-primary); }
+
+.mask-field:has(input:disabled) .mask-browse {
+  color: #64705f;
+  background: #f1f4ef;
+  border-color: #d8ded4;
+  cursor: not-allowed;
+}
 
 #controls button {
   min-height: 36px;

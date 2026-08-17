@@ -555,6 +555,87 @@ test('the colour scale on the view follows the map, the range and the overlay', 
   await expect(legend).toBeVisible();
 });
 
+/** A FreeSurfer "new format" curv file over `count` vertices. */
+function curvFile(name, count, valueAt) {
+  const buffer = Buffer.alloc(15 + count * 4);
+  buffer[0] = 255; buffer[1] = 255; buffer[2] = 255;
+  buffer.writeUInt32BE(count, 3);
+  buffer.writeUInt32BE(count * 2, 7);
+  buffer.writeUInt32BE(1, 11);
+  for (let v = 0; v < count; v++) buffer.writeFloatBE(valueAt(v), 15 + v * 4);
+  return { name, mimeType: 'application/octet-stream', buffer };
+}
+
+test('a binary mask limits every overlay but the curvature', async ({ page }) => {
+  await loadSurface(page);
+  const count = await page.evaluate(() => window.__surfannotate.geometry.vertexCount);
+
+  // Curvature first, then data — the order that already works. The reverse is
+  // covered by the restacking assertion further down.
+  await page.setInputFiles('#overlayInput', join(FIXTURES, 'lh.curv'));
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.curv loaded', {
+    timeout: 60_000
+  });
+  await page.setInputFiles('#overlayInput',
+    curvFile('lh.thickness', count, (v) => 1 + (v % 100) / 100));
+  await expect(page.locator('#statusText')).toContainText('Overlay lh.thickness loaded', {
+    timeout: 60_000
+  });
+
+  // A mask keeping only the first 1000 vertices, written in the format NiiVue
+  // would invert. That is the point of the assertion below: read through
+  // readCURV this file would keep the other 162,842 vertices instead.
+  await page.setInputFiles('#maskInput',
+    curvFile('lh.firstThousand.mask', count, (v) => (v < 1000 ? 1 : 0)));
+  await expect(page.locator('#statusText')).toContainText('limited to 1,000', {
+    timeout: 60_000
+  });
+
+  const values = () => page.evaluate(() => {
+    const overlays = window.__surfannotateUi.activeSurface().overlays;
+    const read = (name) => {
+      const layer = overlays.find((o) => o.name === name).layer;
+      return {
+        inside: layer.values[0],
+        outside: layer.values[layer.values.length - 1]
+      };
+    };
+    return {
+      curv: read('lh.curv'),
+      data: read('lh.thickness'),
+      // Bottom-to-top: the exempt overlay has to sit under the masked one, or
+      // it would cover the holes the mask opens. Matched by identity — NiiVue's
+      // readLayer does not name the layers it returns.
+      order: window.__surfannotate.mesh.layers.map(
+        (layer) => overlays.find((o) => o.layer === layer)?.name || layer.name
+      )
+    };
+  });
+
+  const masked = await values();
+  expect(Number.isFinite(masked.data.inside)).toBe(true);
+  expect(masked.data.outside).toBe(-Infinity);
+  // Curvature is what the mask is meant to reveal, so it is never cut.
+  expect(Number.isFinite(masked.curv.inside)).toBe(true);
+  expect(Number.isFinite(masked.curv.outside)).toBe(true);
+  expect(masked.order).toEqual(['lh.curv', 'lh.thickness', 'surfannotate-roi']);
+
+  // The exemption is a default, not a rule.
+  await page.locator('#overlayList .layer-name', { hasText: 'lh.curv' }).click();
+  await expect(page.locator('#overlayIgnoreMask')).toBeChecked();
+  await page.uncheck('#overlayIgnoreMask');
+  expect((await values()).curv.outside).toBe(-Infinity);
+  await page.check('#overlayIgnoreMask');
+  expect(Number.isFinite((await values()).curv.outside)).toBe(true);
+
+  // Clearing puts every overlay back exactly as it was.
+  await page.click('#maskClear');
+  await expect(page.locator('#statusText')).toContainText('Mask cleared');
+  const cleared = await values();
+  expect(Number.isFinite(cleared.data.outside)).toBe(true);
+  expect(cleared.data.inside).toBe(masked.data.inside);
+});
+
 test('a surface dropped on the viewer loads', async ({ page }) => {
   const bytes = readFileSync(join(FIXTURES, 'lh.pial')).toString('base64');
 
