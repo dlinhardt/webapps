@@ -22,12 +22,15 @@ import {
   RoiSession, MODE_ROI, MODE_POINTS, SESSION_ERRORS, CLOSURE_EDGE
 } from './surface/roiSession.js';
 import { FILL_ERRORS, maskToIndices } from './surface/fill.js';
-import { hatchMask, FILL_STYLES } from './surface/hatch.js';
 import {
   loadMeshFromFile, loadOverlay, getGeometry, pickWorldMm, resolveVertex,
   attachLabelLayer, commitLayer, setOverlayDisplay, makeLabelLut, attachValueLayer,
-  readLayerValues
+  readLayerValues, renderMatrices, vertexNormals
 } from './niivue/meshAdapter.js';
+import {
+  projectMarkers, markerSprite, surfaceOrientation, MARKER_COLORS,
+  MARKER_CIRCLE, MARKER_CROSS
+} from './niivue/markers.js';
 
 import { writeFreeSurferLabel, labelToValues } from './io/freesurferLabel.js';
 import { writeGiftiLabel, maskToLabelArray } from './io/gifti.js';
@@ -38,20 +41,27 @@ import {
 } from './io/naming.js';
 import { classifyFile, SNIFF_BYTES, SURFACE, OVERLAY, UNKNOWN } from './io/classify.js';
 
-// Label keys painted into the ROI layer.
+// Label keys painted into the ROI layer. The clicked border points and the
+// landmarks are NOT here: they are screen-space markers now, because a vertex
+// label cannot have a crisp edge and its 1-ring overstated the ROI. See
+// niivue/markers.js. The traced chain stays a label — it genuinely is a path
+// over the surface, and it should follow the folds.
 const LABEL_NONE = 0;
 const LABEL_BOUNDARY = 1;
 const LABEL_REGION = 2;
-const LABEL_POINT = 3;
-const LABEL_CLICK = 4;
 
 const LABEL_TABLE = [
   { key: LABEL_NONE, name: 'unlabelled', rgba: [0, 0, 0, 0] },
   { key: LABEL_BOUNDARY, name: 'boundary', rgba: [1, 0.85, 0.1, 1] },
-  { key: LABEL_REGION, name: 'roi', rgba: [0.9, 0.2, 0.2, 0.55] },
-  { key: LABEL_POINT, name: 'landmark', rgba: [0.2, 0.85, 0.9, 1] },
-  { key: LABEL_CLICK, name: 'border point', rgba: [1, 0.55, 0.1, 1] }
+  { key: LABEL_REGION, name: 'roi', rgba: [0.9, 0.2, 0.2, 0.55] }
 ];
+
+/** Marker geometry, in CSS pixels before the device-pixel ratio is applied. */
+const MARKER_RADIUS = 4.5;
+const MARKER_STROKE = 1.8;
+const MARKER_HALO = 1.6;
+/** How far off-canvas a marker may sit and still be drawn. */
+const MARKER_MARGIN = 24;
 
 // Completed ROIs are painted from a palette, starting well clear of the keys
 // above so the two sets never collide.
@@ -115,7 +125,9 @@ const ui = {
   flipRegion: el('flipRegion'),
   clearRoi: el('clearRoi'),
   includeBoundary: el('includeBoundary'),
-  fillStyle: el('fillStyle'),
+  markerShape: el('markerShape'),
+  markerColor: el('markerColor'),
+  markerOverlay: el('markerOverlay'),
   roiOpacity: el('roiOpacity'),
   roiOpacityValue: el('roiOpacityValue'),
   undoPointSelection: el('undoPointSelection'),
@@ -189,6 +201,11 @@ const state = {
   parcellationVersion: 0,
   excluded: null,
   boundKey: '',
+  // What the session's open edge is currently made of. The two sources close a
+  // region identically, but they are worth telling apart in the UI: "surface
+  // edge" read as flat-patches-only and hid the fact that a finished ROI's rim
+  // closes just as well, which is the whole of the abutment workflow.
+  edgeSources: { mesh: false, roi: false },
 
   // Mirrors of the active surface. The rest of the app reads these rather than
   // reaching into the list, which keeps this change off every call site.
@@ -210,7 +227,13 @@ const state = {
   hoverPending: false,
   pickMemo: { x: -1, y: -1, mm: null },
   awaitingSeed: false,
-  roiOpacity: 0.55
+  roiOpacity: 0.55,
+
+  // The marker overlay. `spriteCache` is keyed by shape|colour|ratio and holds
+  // a small canvas each, because drawImage blends where putImageData would
+  // punch the sprite's transparent corners through whatever it overlaps.
+  markersPending: false,
+  spriteCache: new Map()
 };
 
 /** Completed ROIs of the shown surface's topology, in the order they were saved. */
@@ -255,6 +278,7 @@ function bindSession(entry, session) {
 
   const excluded = exclusionMask();
   const base = entry.openEdge;
+  state.edgeSources = { mesh: Boolean(base), roi: Boolean(excluded) };
   if (!excluded) {
     session.rebind(entry.graph, entry.finder, entry.geometry.positions, { openEdge: base });
     state.graph = entry.graph;
@@ -571,6 +595,15 @@ async function init() {
   registerExtraColormaps(state.nv);
   state.nv.setSliceType(state.nv.sliceTypeRender);
 
+  // The markers live on their own canvas, so nothing redraws them when the
+  // camera moves unless we ask. These two callbacks are every way the render
+  // view can change without the app already calling repaint.
+  state.nv.onAzimuthElevationChange = () => scheduleMarkers();
+  state.nv.onZoom3DChange = () => scheduleMarkers();
+  // The overlay is sized from its own clientWidth, so a resize has to re-measure
+  // as well as redraw.
+  window.addEventListener('resize', scheduleMarkers);
+
   ui.surfaceInput.addEventListener('change', (event) => {
     const files = Array.from(event.target.files || []);
     // Clear it now, not after loading: picking the same file twice in a row
@@ -785,7 +818,9 @@ async function init() {
     setStatus('Colour range reset to the data\'s 2nd–98th percentile.');
   });
 
-  ui.fillStyle.addEventListener('change', () => repaint());
+  // Only the overlay changes, so there is no need to recomposite the mesh.
+  ui.markerShape.addEventListener('change', scheduleMarkers);
+  ui.markerColor.addEventListener('change', scheduleMarkers);
   ui.roiOpacity.addEventListener('input', () => {
     state.roiOpacity = Number(ui.roiOpacity.value);
     ui.roiOpacityValue.textContent = state.roiOpacity.toFixed(2);
@@ -920,6 +955,13 @@ async function loadSurface(file) {
     for (let v = 0; v < openBoundary.length; v++) if (openBoundary[v]) openCount++;
 
     const triangleHash = await hashTriangles(geometry.triangles);
+    // Both only for the marker overlay's back-face test, and both computed once
+    // here rather than per repaint. The orientation is measured from the normals
+    // that will actually be used, never inferred from the winding — see
+    // surfaceOrientation. It is only meaningful on a closed mesh, which is also
+    // the only case the test runs in: a cut surface has no far side to hide a
+    // marker on.
+    const normals = vertexNormals(mesh);
     const entry = {
       id: state.nextId++,
       name: file.name,
@@ -929,6 +971,10 @@ async function loadSurface(file) {
       finder,
       index,
       openEdge: openCount > 0 ? openBoundary : null,
+      normals,
+      orientation: openCount > 0
+        ? 1
+        : surfaceOrientation(geometry.positions, normals),
       // What the loader added to every vertex, so exports can take it back off.
       translation: mesh.surfannotateTranslation || [0, 0, 0],
       // A label records coordinates as well as vertex indices, and they only
@@ -1746,16 +1792,121 @@ function vertexAt(event) {
   return resolveVertex(state.index, mm);
 }
 
+/** The same cap the legend uses, so both overlays rasterise at one ratio. */
+function pixelRatio() {
+  return Math.min(window.devicePixelRatio || 1, 3);
+}
+
 /**
- * Paint a vertex and its 1-ring. A single vertex is roughly one pixel on a
- * 160k-vertex hemisphere, which is too small to aim at or to see.
+ * One marker, rasterised once and kept. Cached on shape, colour and ratio
+ * together: all three change what the pixels are, and nothing else does.
  */
-function markVertexAndRing(vertex, label) {
-  state.labelValues[vertex] = label;
-  const { adjOffset, adjNeighbor } = state.graph;
-  for (let e = adjOffset[vertex]; e < adjOffset[vertex + 1]; e++) {
-    state.labelValues[adjNeighbor[e]] = label;
+function markerCanvas(shape, colorKey, ratio) {
+  const key = `${shape}|${colorKey}|${ratio}`;
+  const cached = state.spriteCache.get(key);
+  if (cached) return cached;
+
+  const { core, rim } = MARKER_COLORS[colorKey] || MARKER_COLORS.white;
+  const sprite = markerSprite({
+    shape,
+    radius: MARKER_RADIUS * ratio,
+    core,
+    rim,
+    stroke: MARKER_STROKE * ratio,
+    halo: MARKER_HALO * ratio
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = sprite.size;
+  canvas.height = sprite.size;
+  canvas.getContext('2d').putImageData(
+    new ImageData(sprite.pixels, sprite.size, sprite.size), 0, 0
+  );
+
+  const entry = { canvas, centre: sprite.centre };
+  state.spriteCache.set(key, entry);
+  return entry;
+}
+
+/**
+ * Project the clicks and the landmarks onto the overlay canvas.
+ *
+ * Reads the matrices back from NiiVue rather than tracking the camera itself,
+ * so there is no second copy of the view state to keep in step. Back-facing
+ * markers are dropped on a closed surface; on a cut one there is no far side to
+ * hide, and `meshOrientation` would have nothing to measure either.
+ */
+function renderMarkers() {
+  const canvas = ui.markerOverlay;
+  const session = state.session;
+  const ratio = pixelRatio();
+  const width = Math.round(canvas.clientWidth * ratio);
+  const height = Math.round(canvas.clientHeight * ratio);
+  if (width <= 0 || height <= 0) return;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
   }
+
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, width, height);
+  const entry = activeSurface();
+  if (!session || !entry || !state.mesh) return;
+
+  const { mvp, normal } = renderMatrices(state.nv);
+  const cull = entry.openEdge ? null : entry.normals;
+  const shape = ui.markerShape.value;
+  const colorKey = ui.markerColor.value;
+
+  // Border points and landmarks differ by shape, not by colour: colour is
+  // carrying contrast against the surface now, so it is not free to carry
+  // identity as well.
+  const groups = [
+    { vertices: session.clicks, shape },
+    {
+      vertices: session.points.map((point) => point.vertex),
+      shape: shape === MARKER_CROSS ? MARKER_CIRCLE : MARKER_CROSS
+    }
+  ];
+
+  for (const group of groups) {
+    if (!group.vertices.length) continue;
+    const sprite = markerCanvas(group.shape, colorKey, ratio);
+    const placed = projectMarkers({
+      mvp,
+      positions: entry.geometry.positions,
+      vertices: group.vertices,
+      width,
+      height,
+      normals: cull,
+      normalMatrix: normal,
+      orientation: entry.orientation,
+      margin: MARKER_MARGIN * ratio
+    });
+    for (const marker of placed) {
+      ctx.drawImage(
+        sprite.canvas,
+        Math.round(marker.x) - sprite.centre,
+        Math.round(marker.y) - sprite.centre
+      );
+    }
+  }
+}
+
+/**
+ * Coalesce marker redraws onto one animation frame.
+ *
+ * The camera callbacks fire far more often than once a frame during a rotate
+ * drag — the same reason the hover picker is throttled — and every one of them
+ * would otherwise re-project and re-blit the whole set.
+ */
+function scheduleMarkers() {
+  if (state.markersPending) return;
+  state.markersPending = true;
+  requestAnimationFrame(() => {
+    state.markersPending = false;
+    renderMarkers();
+  });
 }
 
 /** A press that moves more than this many CSS pixels is a rotate, not a click. */
@@ -1780,16 +1931,34 @@ function onCanvasClick(event) {
   if (!state.session) return;
   const vertex = vertexAt(event);
   if (vertex < 0) return; // the ray missed the surface
+  handleVertexClick(vertex);
+}
 
+/**
+ * Everything a click means once the picker has resolved it to a vertex.
+ *
+ * Split from onCanvasClick so it can be driven by index: aiming a synthetic
+ * mouse event at one particular vertex of a 163k-vertex mesh in a 3D view is
+ * not something a test can do reliably.
+ */
+function handleVertexClick(vertex) {
   // A vertex owned by an ROI above this one in the list is cut out of the
   // graph, so no path can reach it. Say whose it is, rather than accept the
   // click and fail at "Close ROI" with an unexplained gap.
+  //
+  // Lead with the edge closure. Reaching into a finished ROI is almost always
+  // an attempt to share its border, and closing against it does that exactly —
+  // no shared points to click at all. Reordering and reopening stay as the
+  // answer for the rarer case where the point really does have to be inside.
   if (state.excluded && isIsolated(state.graph, vertex)) {
     const owner = savedRois().find((roi) => roi.mask && roi.mask[vertex]);
-    setStatus(owner
-      ? `That point belongs to ${owner.name}. Move it below ${owner.name} in the ` +
-        'list, or reopen that ROI, to draw here.'
-      : 'That point belongs to an ROI above this one in the list.');
+    const whose = owner ? owner.name : 'an ROI above this one in the list';
+    setStatus(
+      `That point belongs to ${whose}. To share its border, place your points on ` +
+      `open cortex and use "${EDGE_LABELS.roi.label}" — its rim closes the region ` +
+      `for you. To draw inside it, move this ROI below ${whose} in the list, or ` +
+      'reopen it.'
+    );
     return;
   }
 
@@ -1893,28 +2062,18 @@ function paintLabels() {
     }
   });
 
-  // Fill style is purely visual — the region itself is unchanged, so exports
-  // are identical whichever style is showing.
-  const style = ui.fillStyle.value;
-  if (session.filled && style !== FILL_STYLES.OUTLINE) {
-    const ink = style === FILL_STYLES.HATCHED
-      ? hatchMask(state.geometry.positions, session.filled)
-      : session.filled;
+  if (session.filled) {
     for (let v = 0; v < state.labelValues.length; v++) {
-      if (ink[v]) state.labelValues[v] = LABEL_REGION;
+      if (session.filled[v]) state.labelValues[v] = LABEL_REGION;
     }
   }
 
-  // The traced boundary and the landmarks sit on top of everything else.
+  // The traced boundary sits on top of everything else. The clicks and the
+  // landmarks are no longer painted here at all — they go on the overlay, which
+  // is also why they no longer have to be hidden once a region is filled: a
+  // screen-space marker is a fixed few pixels wide and cannot be mistaken for
+  // part of the region the way a 1-ring could.
   for (const v of session.chain) state.labelValues[v] = LABEL_BOUNDARY;
-  // Border markers are drawn with their 1-ring so they are big enough to see,
-  // which makes them wider than the vertices actually in the ROI. Once the
-  // region is filled that would misrepresent its extent, so hide them. Undoing
-  // a point clears the fill, and they come back.
-  if (!session.filled) {
-    for (const v of session.clicks) markVertexAndRing(v, LABEL_CLICK);
-  }
-  for (const point of session.points) markVertexAndRing(point.vertex, LABEL_POINT);
 
   const roiLayer = state.mesh.layers.find((layer) => layer.name === 'surfannotate-roi');
   if (roiLayer) roiLayer.colormapLabel = makeLabelLut(currentLabelTable());
@@ -1939,6 +2098,9 @@ function currentLabelTable() {
 }
 
 function repaint() {
+  // Before the guard: with no session there is nothing on the surface to paint,
+  // but there may still be markers left on the overlay to clear.
+  scheduleMarkers();
   if (!state.session) return;
   paintLabels();
   syncControls();
@@ -1954,8 +2116,43 @@ function resetControls() {
   ui.flipRegion.hidden = true;
   ui.edgeRow.hidden = true;
   ui.edgeHint.hidden = true;
+  state.edgeSources = { mesh: false, roi: false };
   ui.pointList.innerHTML = '';
   ui.roiList.innerHTML = '';
+  scheduleMarkers();
+}
+
+/**
+ * What to call the edge-closure button, given what the edge is currently made
+ * of. A finished ROI's rim closes a region exactly as the mesh's own cut does —
+ * `excludeVertices` makes them the same thing — but naming both "surface edge"
+ * hid the ROI case entirely: on a whole hemisphere there is no visible edge, so
+ * the button read as inapplicable at the very moment it was the right tool.
+ */
+const EDGE_LABELS = {
+  mesh: {
+    label: 'Close on surface edge',
+    hint: 'Draw only the part of the border crossing the flat surface: both ends are ' +
+      'extended to the nearest edge, which closes the region. Two points are enough.'
+  },
+  roi: {
+    label: 'Close on ROI edge',
+    hint: 'A finished ROI acts as an edge. Draw only the part of the border you do ' +
+      'not share with it — both ends are extended to its rim, and the two regions ' +
+      'end up exactly adjacent with nothing left between them.'
+  },
+  both: {
+    label: 'Close on edge',
+    hint: 'Both the surface edge and any finished ROI close a region. Draw only the ' +
+      'part of the border that crosses open cortex; both ends are extended to the ' +
+      'nearest edge, whichever kind it is.'
+  }
+};
+
+/** Which of the three EDGE_LABELS entries applies right now. */
+function edgeLabelKind(sources) {
+  if (sources.mesh && sources.roi) return 'both';
+  return sources.roi ? 'roi' : 'mesh';
 }
 
 function syncControls() {
@@ -1966,10 +2163,16 @@ function syncControls() {
 
   ui.undoPoint.disabled = !hasClicks;
   ui.closePath.disabled = session.clicks.length < 3;
-  // A cut surface only: the edge is what closes the region, so a closed surface
-  // has nothing to offer here. Two points are enough, unlike a loop.
+  // Needs an edge to close against — the mesh's own cut, or the rim of a
+  // finished ROI, which excludeVertices has made into one. Two points are
+  // enough, unlike a loop.
   ui.edgeRow.hidden = !session.hasOpenEdge;
   ui.edgeHint.hidden = !session.hasOpenEdge;
+  if (session.hasOpenEdge) {
+    const edge = EDGE_LABELS[edgeLabelKind(state.edgeSources)];
+    ui.closeOnEdge.textContent = edge.label;
+    ui.edgeHint.textContent = edge.hint;
+  }
   ui.closeOnEdge.disabled = session.clicks.length < 2;
   ui.fillRegion.disabled = !session.closed;
   ui.flipRegion.hidden = !(hasRegion && session.regionOrder.length > 1);
@@ -2092,5 +2295,11 @@ window.__surfannotateIo = {
 // Only what the e2e suite drives. Everything here is module-private in the
 // bundle otherwise, and a shipping app should not export its internals wholesale.
 window.__surfannotateUi = {
-  repaint, runFill, setMode, activateSurface, activeSurface, activeOverlay, savedRois
+  repaint, runFill, setMode, activateSurface, activeSurface, activeOverlay, savedRois,
+  // Synchronous, unlike the scheduled path: a test that had to race the
+  // animation frame would be flaky in exactly the way the drag-and-drop tests
+  // already warn about.
+  renderMarkers,
+  // By index, because the picker cannot be aimed at a chosen vertex from a test.
+  handleVertexClick
 };

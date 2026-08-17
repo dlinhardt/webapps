@@ -259,6 +259,9 @@
             <div class="button-row" id="edgeRow" hidden>
               <button type="button" id="closeOnEdge" disabled>Close on surface edge</button>
             </div>
+            <!-- Both texts are replaced by syncControls to name whichever edge
+                 exists right now: the mesh's own cut, a finished ROI's rim, or
+                 both. See EDGE_LABELS in main.js. -->
             <p class="hint" id="edgeHint" hidden>
               Draw only the part of the border crossing the flat surface: both ends are extended
               to the nearest edge, which closes the region. Two points are enough.
@@ -273,13 +276,24 @@
               <span>Include boundary vertices</span>
             </label>
             <div class="row">
-              <label for="fillStyle">Fill style</label>
-              <select id="fillStyle">
-                <option value="solid">Solid</option>
-                <option value="hatched">Hatched</option>
-                <option value="outline">Outline only</option>
+              <label for="markerShape">Point marker</label>
+              <select id="markerShape">
+                <option value="circle" selected>Circle</option>
+                <option value="dot">Dot</option>
+                <option value="cross">Cross</option>
+              </select>
+              <select id="markerColor" aria-label="Point marker colour">
+                <option value="white" selected>White</option>
+                <option value="black">Black</option>
+                <option value="magenta">Magenta</option>
+                <option value="yellow">Yellow</option>
               </select>
             </div>
+            <p class="hint">
+              Markers are drawn on top of the view at a fixed size, each with a
+              contrasting outline so it stays visible over any surface or overlay.
+              Landmarks use the same colour and the other shape.
+            </p>
             <div class="row">
               <label for="roiOpacity">ROI opacity</label>
               <input type="range" id="roiOpacity" min="0.05" max="1" step="0.05" value="0.55" />
@@ -288,6 +302,11 @@
             <p class="hint">
               The interior is detected automatically; if it is ambiguous you are asked to
               click inside the region you want. Closing on the edge takes the smaller side.
+            </p>
+            <p class="hint">
+              With <strong>Include boundary vertices</strong> off, a saved ROI does not
+              own the row it was drawn along, so the next ROI drawn against it claims
+              that row. Tick it before saving to keep the border where you clicked it.
             </p>
           </div>
 
@@ -351,6 +370,10 @@
 
       <div id="viewer">
         <canvas id="gl"></canvas>
+        <!-- Border points and landmarks, projected onto the render rather than
+             painted into the mesh. See src/niivue/markers.js. Never takes a
+             pointer event: every click on the viewer belongs to the picker. -->
+        <canvas id="markerOverlay" aria-hidden="true"></canvas>
         <div id="dropHint" class="drop-hint">
           <span class="drop-icon" aria-hidden="true">
             <svg viewBox="0 0 48 48">

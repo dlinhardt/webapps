@@ -11,7 +11,7 @@
  * two ends of the scale stay distinguishable — which is why it is a common
  * choice for cortical parcellation and retinotopy overlays.
  */
-export const GIST_RAINBOW = {
+const GIST_RAINBOW = {
   I: [0, 8, 55, 102, 149, 196, 243, 255],
   R: [255, 255, 255, 0, 0, 0, 255, 255],
   G: [0, 0, 255, 255, 255, 0, 0, 0],

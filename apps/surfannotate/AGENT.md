@@ -14,12 +14,12 @@ src/
     fill.js                 Flood fill inside a closed boundary, seeded or automatic
     roiSession.js           Drawing state: clicks, trace, fill, landmarks
     vertexLookup.js         Uniform-grid nearest-vertex search
-    hatch.js                Stripe and halo masks for fill rendering
   niivue/                   Every NiiVue call lives here
     meshAdapter.js          Loading, picking, layers, overlays
     colormaps.js            Colour maps NiiVue does not ship
     colorLegend.js          The on-canvas scale — wheel or bar. Pure, unit-tested
     overlayMask.js          Restricting overlays to a binary mask. Pure, unit-tested
+    markers.js              Border points and landmarks in screen space. Pure, unit-tested
   io/                       File writers/readers, pure and unit-tested
     freesurferLabel.js, gifti.js, points.js, naming.js, classify.js, geometryOffset.js
     freesurferCurv.js       Curv format read honestly — NiiVue's reader inverts
@@ -80,6 +80,15 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `RoiSession.rebind` moves it and deliberately discards the traced chain and fill,
   which are geometry-dependent. Deleting a surface only drops the session once the last
   surface with that topology is gone.
+- **The edge-closure button is named after the edge that actually exists.**
+  `EDGE_LABELS` in `main.js` picks between "Close on surface edge", "Close on ROI
+  edge" and "Close on edge" from `state.edgeSources`, which `bindSession` sets from
+  the two halves it already has (`entry.openEdge` and the exclusion mask). This is
+  not cosmetic: a hemisphere has no visible edge, so a fixed "surface edge" label
+  read as inapplicable at exactly the moment closing against a finished ROI was the
+  right tool, and the whole abutment workflow went unfound. The refusal in
+  `onCanvasClick` leads with the same phrase for the same reason — reaching into a
+  finished ROI is nearly always an attempt to share its border.
 - **"Use a completed ROI as an edge" is one graph operation, not a special case.**
   `exclude.js` isolates the ROI's vertices, which makes its rim an open edge; every
   other layer — pathfinder, fill, `closeOnEdge` — then behaves as it already did for a
@@ -204,6 +213,53 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   another — and NiiVue's own maps get a legend without being re-implemented.
   `colorLegend.js` therefore takes the LUT as an argument and stays pure, which
   is what lets the wheel geometry be unit-tested at all.
+- **Border points and landmarks are screen-space markers, not vertex labels.**
+  They were `markVertexAndRing` — the clicked vertex plus its whole 1-ring, painted
+  into the ROI layer — and all three problems with that are properties of vertex
+  colour rather than bugs. A layer value is interpolated across the triangle, so the
+  marker could only ever be a soft blob; its size came from the mesh, not the screen;
+  and a 1-ring is genuinely wider than the vertex it marks, which is the *only*
+  reason markers used to be hidden once a region was filled — they overstated its
+  extent. `niivue/markers.js` projects them onto `#markerOverlay` instead, so that
+  hack is gone and the clicks stay visible over a filled region. The traced chain
+  stays a mesh label deliberately: it is a path over the surface and should follow
+  the folds. Note `markers.js` rasterises to a pixel buffer rather than stroking a
+  path, for the same reason `colorLegend.js` does — that is what makes it testable
+  under plain `node --test`.
+- **Contrast comes from the halo, never from sampling what is underneath.** Every
+  marker is a core inside a rim of the opposite colour, so it reads against dark
+  curvature, a bright overlay and a saved ROI's fill without being told which it is
+  on. Reading the rendered pixel would have to happen again on every rotation —
+  changing the marker colour under the user mid-drag, and costing a full-canvas
+  read per frame to do it. The colour select therefore picks taste, not legibility,
+  and border points and landmarks are told apart by *shape*: colour is already
+  carrying contrast and cannot also carry identity.
+- **Markers are culled by normal, and only on a closed surface.** `surfaceOrientation`
+  measures which way the normals point by sampling the six axis-extreme vertices,
+  where the outward direction is known whatever the mesh. It does *not* infer the
+  sign from the winding, and the reason is the whole story of this feature's one
+  shipped bug: the first version used signed volume — a correct fact about the
+  winding — against normals built under the opposite cross-product convention, and
+  the two sign errors it then had (that one, and the eye-space z above) were each
+  invisible on their own. Culling is skipped entirely on a cut surface: no far side
+  to hide a marker on, and the extreme-vertex argument needs a closed blob anyway.
+- **Test marker visibility through a real click, never by hunting for a view that
+  shows something.** The e2e test that shipped the inverted cull searched azimuths
+  for one that painted any pixel, which an inverted facing test satisfies just as
+  well by picking the opposite side — it passed against a build where clicking drew
+  nothing at all. A press on the canvas goes through the depth picker, which returns
+  the front-most vertex *by construction*, so the marker must appear and must land
+  within a few pixels of the pointer. Both halves are needed: "something is painted"
+  alone was what the broken version satisfied.
+- **A normal test is not a depth test, and that is the deliberate trade.** A marker
+  in a sulcus whose normal faces the camera is drawn even when a gyrus is in front
+  of it, where the old vertex labels were properly occluded by the geometry. Read
+  the other way round, that is the point: a click down a fold used to be invisible,
+  and an invisible marker is worse than one showing through a crown you can rotate
+  away. Note this is also why the traced chain and the fill can be nowhere to be
+  seen on a folded surface while every marker shows — they are labels on the
+  surface and the folds hide them. Nothing is wrong when that happens; check on
+  `lh.inflated`. A true depth test would mean reading the depth buffer every frame.
 - **`#controls` must stay `flex-wrap: nowrap`.** The shared `.nd-imaging-controls` class
   sits on the same element and sets `flex-wrap: wrap` for its own row layout. With the
   column direction `styles.css` applies, anything taller than the panel wraps into a
@@ -245,14 +301,24 @@ which is why the algorithm suite is fast and deterministic. Only `main.js` and
   `io/freesurferLabel.labelToValues` expands it and `attachValueLayer` builds the layer.
 - `mesh.updateMesh(gl)` costs ~24 ms on a 163k-vertex mesh because it regenerates
   normals for unchanged geometry. Fine per interaction, too slow per frame.
+- **`NVMeshUtilities.generateNormals` returns `(p3-p1) × (p2-p1)`** — the negation of
+  the usual convention. Never pair it with a sign inferred from triangle winding;
+  measure the array you are actually going to use. `surfaceOrientation` does.
+- **In `calculateMvpMatrix`'s eye space the viewer is on the -z side**, so an outward
+  normal facing you has a *negative* z. NiiVue builds the projection with
+  `mat4.ortho(..., near = scale * 8, far = scale * 0.01)` — near greater than far —
+  and gl-matrix's `out[10] = 2 / (near - far)` therefore comes out positive where a
+  conventional ortho makes it negative, inverting the depth mapping. Measured, not
+  derived: the depth picker returns the front-most vertex, whose outward normal
+  transforms to z = -0.52.
 
 ## Test surface
 
 | Command | Covers |
 | --- | --- |
-| `pnpm --filter surfannotate test` | `surface/` and `io/` — adjacency, A*, chain validation, fill (including escape and figure-eight cases), hatching, vertex lookup vs brute force, ROI session contract, every file writer |
+| `pnpm --filter surfannotate test` | `surface/` and `io/` — adjacency, A*, chain validation, fill (including escape and figure-eight cases), vertex lookup vs brute force, ROI session contract, every file writer; plus the pure `niivue/` modules — colour legend, overlay mask, marker projection and rasterisation |
 | `pnpm --filter surfannotate lint` | `node --check` over every JS file |
-| `pnpm --filter surfannotate test:e2e` | Real Chromium with SwiftShader: shell mount, WebGL2, surface load and index, picking, draw→close→fill→export, drag-and-drop, click-vs-drag, overlay window, marker lifecycle, colour map and range, ROI naming, edge closure on a flat patch |
+| `pnpm --filter surfannotate test:e2e` | Real Chromium with SwiftShader: shell mount, WebGL2, surface load and index, picking, draw→close→fill→export, drag-and-drop, click-vs-drag, overlay window, marker overlay and back-face culling, colour map and range, ROI naming, edge closure on a flat patch and against a finished ROI |
 
 `test/fixtures/lh.flat.surf.gii` is a synthetic flat patch — a disk with one open edge,
 like `mris_flatten` output but a few kB. Regenerate with

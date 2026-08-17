@@ -596,6 +596,16 @@ summary:focus-visible {
   touch-action: none;
 }
 
+/* Over the render, under the badge (2) and the colour scale (3). Transparent
+   except where a marker is, and never interactive — a pointer event here would
+   be one the vertex picker never sees. */
+#markerOverlay {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+}
+
 #viewer.dragging::after {
   content: "";
   position: absolute;
