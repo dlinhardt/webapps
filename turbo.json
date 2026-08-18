@@ -1,5 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    "packages/runtime-support/src/**",
+    "scripts/lib/runtime-support.mjs",
+    "scripts/vendor-runtime-support.mjs"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

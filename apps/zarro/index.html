@@ -314,9 +314,38 @@
             <button id="clearMeasurements" type="button" disabled>Clear</button>
           </div>
 
+          <label class="field" for="niftiLevel">
+            <span>NIfTI resolution</span>
+            <select id="niftiLevel" disabled>
+              <option value="current" selected>Current displayed level</option>
+            </select>
+          </label>
+          <output
+            id="niftiEstimate"
+            class="nifti-estimate"
+            for="niftiLevel"
+            aria-live="polite"
+          >Load a volume to estimate the export.</output>
           <button class="secondary-button" id="downloadNifti" type="button" disabled>
             Download NIfTI
           </button>
+          <div id="niftiProgress" class="nifti-progress" hidden>
+            <progress id="niftiProgressBar" max="1" value="0"></progress>
+            <div class="nifti-progress-detail">
+              <output
+                id="niftiProgressText"
+                for="niftiProgressBar"
+                role="status"
+                aria-live="polite"
+              >Preparing export…</output>
+              <button
+                id="cancelNifti"
+                class="nifti-cancel"
+                type="button"
+                disabled
+              >Cancel</button>
+            </div>
+          </div>
           <button class="secondary-button" id="copyShareLink" type="button">
             Copy share link
           </button>
